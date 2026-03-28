@@ -5,9 +5,9 @@ import { getClient } from "../client.js";
 export function registerManageTags(server: McpServer): void {
   server.tool(
     "manage_tags",
-    "Create tags, add tags to friends, or remove tags from friends. Supports batch operations on multiple friends.",
+    "List, create, or delete tags, and add/remove tags to/from friends. Supports batch operations on multiple friends.",
     {
-      action: z.enum(["create", "add", "remove"]).describe("Action to perform"),
+      action: z.enum(["list", "create", "delete", "add", "remove"]).describe("Action to perform"),
       tagName: z
         .string()
         .optional()
@@ -30,6 +30,21 @@ export function registerManageTags(server: McpServer): void {
     async ({ action, tagName, tagColor, tagId, friendIds }) => {
       try {
         const client = getClient();
+
+        if (action === "list") {
+          const tags = await client.tags.list();
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ success: true, tags }, null, 2) }],
+          };
+        }
+
+        if (action === "delete") {
+          if (!tagId) throw new Error("tagId is required for delete action");
+          await client.tags.delete(tagId);
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ success: true, deleted: tagId }, null, 2) }],
+          };
+        }
 
         if (action === "create") {
           if (!tagName) throw new Error("tagName is required for create action");

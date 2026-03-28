@@ -17,6 +17,12 @@ import { registerManageAdPlatforms } from "./manage-ad-platforms.js";
 import { registerGetConversionLogs } from "./get-conversion-logs.js";
 import { registerManageStaff } from "./manage-staff.js";
 import { registerUploadImage } from "./upload-image.js";
+import { registerManageFriends } from "./manage-friends.js";
+import { registerManageScenarios } from "./manage-scenarios.js";
+import { registerManageBroadcasts } from "./manage-broadcasts.js";
+import { registerManageRichMenus } from "./manage-rich-menus.js";
+import { registerManageForms } from "./manage-forms.js";
+import { registerManageTrackedLinks } from "./manage-tracked-links.js";
 
 export function registerAllTools(server: McpServer): void {
   registerSendMessage(server);
@@ -37,4 +43,10 @@ export function registerAllTools(server: McpServer): void {
   registerGetConversionLogs(server);
   registerManageStaff(server);
   registerUploadImage(server);
+  registerManageFriends(server);
+  registerManageScenarios(server);
+  registerManageBroadcasts(server);
+  registerManageRichMenus(server);
+  registerManageForms(server);
+  registerManageTrackedLinks(server);
 }
