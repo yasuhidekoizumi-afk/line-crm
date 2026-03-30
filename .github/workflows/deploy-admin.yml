@@ -1,0 +1,65 @@
+name: Deploy Admin UI to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/shared/**'
+      - '.github/workflows/deploy-admin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: 依存関係インストール
+        run: pnpm install --frozen-lockfile
+
+      - name: shared パッケージビルド
+        run: pnpm --filter @line-crm/shared build
+
+      - name: 管理画面ビルド
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          GITHUB_PAGES: 'true'
+        run: pnpm build
+
+      - name: GitHub Pages 設定
+        run: |
+          touch apps/web/out/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/out
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
