@@ -161,11 +161,86 @@ function NavIcon({ d }: { d: string }) {
   )
 }
 
+// ─── 使い方ガイド ───
+const helpSections = [
+  {
+    title: '📋 基本の流れ',
+    body: 'LINE公式アカウントに友だち追加 → 自動タグ付け → シナリオ配信が自動で動きます。',
+  },
+  {
+    title: '👥 友だち管理',
+    body: '友だち追加した人の一覧。タグで分類、検索でフィルタリングできます。',
+  },
+  {
+    title: '🏷️ タグ（分類）',
+    body: '「購入済み」「VIP」などのラベルを友だちに付けて絞り込みに使います。シナリオのトリガーにも使えます。',
+  },
+  {
+    title: '📨 シナリオ配信',
+    body: '「友だち追加後3日目にメッセージ送る」など、時間差の自動配信。一度作れば全員に自動で送られます。',
+  },
+  {
+    title: '📢 一斉配信',
+    body: '特定のタグが付いた人や全員に今すぐ一括送信。キャンペーン告知などに使います。',
+  },
+  {
+    title: '⚡ オートメーション',
+    body: '「購入タグが付いたら購入後フローに登録する」などの条件→自動実行ルールを設定します。',
+  },
+  {
+    title: '🔗 Shopify連携',
+    body: 'Shopifyで購入が完了すると自動でタグが付いてシナリオが始まります。GAS（Google Apps Script）経由で連携しています。',
+  },
+  {
+    title: '📊 分析',
+    body: '流入経路・CV計測・スコアリングで「どこから来た人が購入しやすいか」を把握できます。',
+  },
+]
+
+function HelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">使い方ガイド</h2>
+            <p className="text-xs text-gray-400 mt-0.5">LINE Harness 管理画面</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="overflow-y-auto px-6 py-4 space-y-4">
+          {helpSections.map((s) => (
+            <div key={s.title} className="flex gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-800">{s.title}</p>
+                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{s.body}</p>
+              </div>
+            </div>
+          ))}
+          <div className="pt-2 border-t border-gray-100">
+            <p className="text-xs text-gray-400 leading-relaxed">
+              困ったときは右下の「CCに依頼」ボタンからClaudeに相談できます。
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Sidebar() {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
   const [staffName, setStaffName] = useState<string | null>(null)
   const [staffRole, setStaffRole] = useState<string | null>(null)
+  const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
     setStaffName(localStorage.getItem('lh_staff_name'))
@@ -253,6 +328,15 @@ export default function Sidebar() {
         <div className="px-6 py-4 space-y-3">
         <p className="text-xs text-gray-400">LINE Harness v{process.env.APP_VERSION || '0.0.0'}</p>
         <button
+          onClick={() => setShowHelp(true)}
+          className="flex items-center gap-2 text-xs text-gray-500 hover:text-green-600 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          使い方
+        </button>
+        <button
           onClick={() => {
             localStorage.removeItem('lh_api_key')
             localStorage.removeItem('lh_staff_name')
@@ -273,6 +357,8 @@ export default function Sidebar() {
 
   return (
     <>
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+
       {/* モバイル: ハンバーガーヘッダー */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
         <button
