@@ -385,13 +385,15 @@ export async function addLoyaltyTransaction(
     orderId?: string;
     staffId?: string;
     sourceTxId?: string;
+    expiryDays?: number; // award トランザクションの有効期限（日数）。省略時は365日
   },
 ): Promise<void> {
   const now = jstNow();
-  // award トランザクションは付与日 + 1年で失効
+  const days = input.expiryDays ?? 365;
+  // award トランザクションは付与日 + expiryDays 日で失効
   const expiresAt =
     input.type === 'award'
-      ? new Date(new Date(now).getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '.000')
+      ? new Date(new Date(now).getTime() + days * 24 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '.000')
       : null;
   await db
     .prepare(

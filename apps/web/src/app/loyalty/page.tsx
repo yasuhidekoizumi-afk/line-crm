@@ -603,6 +603,11 @@ function SettingsPanel() {
       desc: 'ポイント付与が初めて発生したとき（初回購入時）にボーナスポイントを追加付与します。0 = 無効。',
       format: (v) => parseFloat(v) > 0 ? `${parseFloat(v)} pt 付与` : '無効（0pt）',
     },
+    expiry_days: {
+      title: 'ポイント有効期限（日数）',
+      desc: '付与日からポイントが有効な日数。0 = 無期限。変更は新規付与分から適用されます。',
+      format: (v) => parseInt(v) > 0 ? `${parseInt(v)} 日` : '無期限',
+    },
   }
 
   if (loading) {

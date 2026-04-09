@@ -45,7 +45,7 @@ loyalty.get('/api/loyalty/settings', async (c) => {
 loyalty.put('/api/loyalty/settings/:key', async (c) => {
   try {
     const key = c.req.param('key');
-    const VALID_KEYS = ['point_rate', 'point_value', 'registration_bonus'];
+    const VALID_KEYS = ['point_rate', 'point_value', 'registration_bonus', 'expiry_days'];
     if (!VALID_KEYS.includes(key)) {
       return c.json({ success: false, error: '無効な設定キーです' }, 400);
     }
@@ -60,6 +60,9 @@ loyalty.put('/api/loyalty/settings/:key', async (c) => {
     }
     if (key === 'point_rate' && num > 1) {
       return c.json({ success: false, error: 'ポイント還元率は 1.0（100%）以下にしてください' }, 400);
+    }
+    if (key === 'expiry_days' && (!Number.isInteger(num) || num < 0)) {
+      return c.json({ success: false, error: '有効期限は0以上の整数で入力してください（0=無期限）' }, 400);
     }
     await setLoyaltySetting(c.env.DB, key, String(num));
     return c.json({ success: true });
@@ -356,8 +359,12 @@ loyalty.post('/api/loyalty/award', async (c) => {
 
     const newTotalSpent = currentTotalSpent + body.orderAmount;
     const currentRank = determineRank(currentTotalSpent);
-    const pointRateSetting = await getLoyaltySetting(c.env.DB, 'point_rate').catch(() => null);
+    const [pointRateSetting, expiryDaysSetting] = await Promise.all([
+      getLoyaltySetting(c.env.DB, 'point_rate').catch(() => null),
+      getLoyaltySetting(c.env.DB, 'expiry_days').catch(() => null),
+    ]);
     const pointRate = parseFloat(pointRateSetting ?? '0.01') || 0.01;
+    const expiryDays = parseInt(expiryDaysSetting ?? '365', 10) || 365;
     const basePoints = calculatePoints(body.orderAmount, currentRank, pointRate);
 
     // キャンペーン適用
@@ -394,6 +401,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
       balanceAfter: newBalance,
       reason: `購入ポイント付与（¥${body.orderAmount.toLocaleString('ja-JP')}）`,
       orderId: body.orderId,
+      expiryDays,
     });
 
     return c.json({
