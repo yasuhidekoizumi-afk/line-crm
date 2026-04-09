@@ -53,9 +53,40 @@ const RANK_MULTIPLIERS: Record<LoyaltyRank, number> = {
   'ダイヤモンド': 5.0,
 };
 
-export function calculatePoints(orderAmount: number, rank: LoyaltyRank): number {
-  const rate = 0.01; // 1%
+export function calculatePoints(orderAmount: number, rank: LoyaltyRank, rate = 0.01): number {
   return Math.floor(orderAmount * rate * RANK_MULTIPLIERS[rank]);
+}
+
+// --- 設定ヘルパー ---
+
+export interface LoyaltySetting {
+  key: string;
+  value: string;
+  label: string;
+  updated_at: string;
+}
+
+export async function getLoyaltySettings(db: D1Database): Promise<LoyaltySetting[]> {
+  const rows = await db
+    .prepare(`SELECT key, value, label, updated_at FROM loyalty_settings ORDER BY key`)
+    .all<LoyaltySetting>();
+  return rows.results;
+}
+
+export async function getLoyaltySetting(db: D1Database, key: string): Promise<string | null> {
+  const row = await db
+    .prepare(`SELECT value FROM loyalty_settings WHERE key = ?`)
+    .bind(key)
+    .first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+export async function setLoyaltySetting(db: D1Database, key: string, value: string): Promise<void> {
+  const now = jstNow();
+  await db
+    .prepare(`UPDATE loyalty_settings SET value = ?, updated_at = ? WHERE key = ?`)
+    .bind(value, now, key)
+    .run();
 }
 
 // --- クエリヘルパー ---

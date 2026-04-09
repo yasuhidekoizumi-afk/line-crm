@@ -6,6 +6,9 @@ import {
   getLoyaltyTransactions,
   getLoyaltyTransactionsByShopifyCustomerId,
   getLoyaltyStats,
+  getLoyaltySettings,
+  getLoyaltySetting,
+  setLoyaltySetting,
   getLatestRedeemTransaction,
   getExpiringSoonPoints,
   upsertLoyaltyPoint,
@@ -17,6 +20,43 @@ import {
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
+
+// GET /api/loyalty/settings — 設定一覧取得
+loyalty.get('/api/loyalty/settings', async (c) => {
+  try {
+    const settings = await getLoyaltySettings(c.env.DB);
+    return c.json({ success: true, data: settings });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to fetch settings' }, 500);
+  }
+});
+
+// PUT /api/loyalty/settings/:key — 設定値を更新
+loyalty.put('/api/loyalty/settings/:key', async (c) => {
+  try {
+    const key = c.req.param('key');
+    const VALID_KEYS = ['point_rate', 'point_value', 'registration_bonus'];
+    if (!VALID_KEYS.includes(key)) {
+      return c.json({ success: false, error: '無効な設定キーです' }, 400);
+    }
+    const body = await c.req.json<{ value: string }>();
+    if (body.value === undefined || body.value === null) {
+      return c.json({ success: false, error: 'value は必須です' }, 400);
+    }
+    // バリデーション
+    const num = parseFloat(body.value);
+    if (isNaN(num) || num < 0) {
+      return c.json({ success: false, error: '数値（0以上）で入力してください' }, 400);
+    }
+    if (key === 'point_rate' && num > 1) {
+      return c.json({ success: false, error: 'ポイント還元率は 1.0（100%）以下にしてください' }, 400);
+    }
+    await setLoyaltySetting(c.env.DB, key, String(num));
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to update setting' }, 500);
+  }
+});
 
 // GET /api/loyalty/period-stats — 今月 vs 先月の KPI 比較
 loyalty.get('/api/loyalty/period-stats', async (c) => {
@@ -228,7 +268,9 @@ loyalty.post('/api/loyalty/award', async (c) => {
 
     const newTotalSpent = currentTotalSpent + body.orderAmount;
     const currentRank = determineRank(currentTotalSpent);
-    const earnedPoints = calculatePoints(body.orderAmount, currentRank);
+    const pointRateSetting = await getLoyaltySetting(c.env.DB, 'point_rate').catch(() => null);
+    const pointRate = parseFloat(pointRateSetting ?? '0.01') || 0.01;
+    const earnedPoints = calculatePoints(body.orderAmount, currentRank, pointRate);
     const newBalance = currentBalance + earnedPoints;
     const newRank = determineRank(newTotalSpent);
 
@@ -398,7 +440,9 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
       );
     }
 
-    const discountAmount = body.points; // 100pt = ¥100
+    const pointValueSetting = await getLoyaltySetting(c.env.DB, 'point_value').catch(() => null);
+    const pointValue = parseFloat(pointValueSetting ?? '1') || 1;
+    const discountAmount = Math.floor(body.points * pointValue); // 1pt = pointValue円
     const code = `ORYZAE-${shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
 
     // 1) Price Rule 作成

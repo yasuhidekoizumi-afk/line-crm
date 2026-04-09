@@ -532,7 +532,153 @@ function MembersTab({ onOpenDetail }: { onOpenDetail: (p: LoyaltyPoint) => void 
 }
 
 // ─── メインページ ───
-type TabType = 'members' | 'activity'
+interface LoyaltySetting {
+  key: string
+  value: string
+  label: string
+  updated_at: string
+}
+
+// ─── 設定パネル ───
+function SettingsPanel() {
+  const [settings, setSettings] = useState<LoyaltySetting[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState<Record<string, boolean>>({})
+  const [saved, setSaved] = useState<Record<string, boolean>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    fetchApi<{ success: boolean; data: LoyaltySetting[] }>('/api/loyalty/settings')
+      .then((r) => { if (r.success) setSettings(r.data) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleEdit = (key: string, current: string) => {
+    setEditing((prev) => ({ ...prev, [key]: current }))
+    setErrors((prev) => ({ ...prev, [key]: '' }))
+    setSaved((prev) => ({ ...prev, [key]: false }))
+  }
+
+  const handleSave = async (key: string) => {
+    const val = editing[key]
+    if (val === undefined) return
+    setSaving((prev) => ({ ...prev, [key]: true }))
+    setErrors((prev) => ({ ...prev, [key]: '' }))
+    try {
+      const res = await fetchApi<{ success: boolean; error?: string }>(
+        `/api/loyalty/settings/${key}`,
+        { method: 'PUT', body: JSON.stringify({ value: val }) },
+      )
+      if (res.success) {
+        setSettings((prev) => prev.map((s) => s.key === key ? { ...s, value: val } : s))
+        setEditing((prev) => { const n = { ...prev }; delete n[key]; return n })
+        setSaved((prev) => ({ ...prev, [key]: true }))
+        setTimeout(() => setSaved((prev) => ({ ...prev, [key]: false })), 2000)
+      } else {
+        setErrors((prev) => ({ ...prev, [key]: res.error ?? '保存に失敗しました' }))
+      }
+    } catch {
+      setErrors((prev) => ({ ...prev, [key]: '保存に失敗しました' }))
+    } finally {
+      setSaving((prev) => ({ ...prev, [key]: false }))
+    }
+  }
+
+  const DISPLAY: Record<string, { title: string; desc: string; format: (v: string) => string }> = {
+    point_rate: {
+      title: 'ポイント還元率',
+      desc: '注文金額に対して付与されるポイントの割合。ランク倍率が掛け合わさります。',
+      format: (v) => `${(parseFloat(v) * 100).toFixed(1)}%`,
+    },
+    point_value: {
+      title: 'ポイント価値（1pt = ?円）',
+      desc: '1ポイントを何円の割引コードに換算するか。現在の設定: 1pt = N円',
+      format: (v) => `1 POINT = ${parseFloat(v)} 円`,
+    },
+    registration_bonus: {
+      title: '新規会員登録ボーナス',
+      desc: 'ポイント付与が初めて発生したとき（初回購入時）にボーナスポイントを追加付与します。0 = 無効。',
+      format: (v) => parseFloat(v) > 0 ? `${parseFloat(v)} pt 付与` : '無効（0pt）',
+    },
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="bg-white rounded-xl border border-gray-200 p-5 animate-pulse">
+            <div className="h-4 bg-gray-200 rounded w-32 mb-3" />
+            <div className="h-7 bg-gray-100 rounded w-48" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 max-w-xl">
+      <p className="text-sm text-gray-500 mb-4">変更はすぐに反映されます。ポイント還元率の変更は次回の注文から適用されます。</p>
+      {settings.map((s) => {
+        const meta = DISPLAY[s.key]
+        if (!meta) return null
+        const isEditing = editing[s.key] !== undefined
+        return (
+          <div key={s.key} className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="font-semibold text-gray-900 text-sm mb-1">{meta.title}</p>
+                <p className="text-xs text-gray-500 mb-3">{meta.desc}</p>
+                {isEditing ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editing[s.key]}
+                      onChange={(e) => setEditing((prev) => ({ ...prev, [s.key]: e.target.value }))}
+                      className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => handleSave(s.key)}
+                      disabled={saving[s.key]}
+                      className="px-3 py-1.5 text-xs font-medium text-white rounded-lg disabled:opacity-50"
+                      style={{ backgroundColor: '#06C755' }}
+                    >
+                      {saving[s.key] ? '保存中...' : '保存'}
+                    </button>
+                    <button
+                      onClick={() => setEditing((prev) => { const n = { ...prev }; delete n[s.key]; return n })}
+                      className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xl font-bold text-gray-900">{meta.format(s.value)}</p>
+                )}
+                {errors[s.key] && <p className="text-xs text-red-600 mt-1">{errors[s.key]}</p>}
+                {saved[s.key] && <p className="text-xs text-green-700 mt-1">✓ 保存しました</p>}
+              </div>
+              {!isEditing && (
+                <button
+                  onClick={() => handleEdit(s.key, s.value)}
+                  className="text-sm text-blue-600 hover:underline whitespace-nowrap shrink-0"
+                >
+                  変更する
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+type TabType = 'members' | 'activity' | 'settings'
 
 export default function LoyaltyPage() {
   const [stats, setStats] = useState<Stats | null>(null)
@@ -599,6 +745,7 @@ export default function LoyaltyPage() {
         {([
           { key: 'members',  label: '会員一覧' },
           { key: 'activity', label: '取引履歴' },
+          { key: 'settings', label: '基本設定' },
         ] as { key: TabType; label: string }[]).map(({ key, label }) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -614,6 +761,7 @@ export default function LoyaltyPage() {
       {/* タブコンテンツ */}
       {tab === 'members' && <MembersTab onOpenDetail={setSelected} />}
       {tab === 'activity' && <ActivityTab />}
+      {tab === 'settings' && <SettingsPanel />}
 
       {/* 詳細モーダル */}
       {selected && (
