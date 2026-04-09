@@ -588,6 +588,8 @@ function SettingsPanel() {
     }
   }
 
+  const FLAG_KEYS = ['yen_only', 'order_metafield_enabled', 'customer_metafield_enabled', 'subscription_points_enabled']
+
   const DISPLAY: Record<string, { title: string; desc: string; format: (v: string) => string }> = {
     point_rate: {
       title: 'ポイント還元率',
@@ -608,6 +610,26 @@ function SettingsPanel() {
       title: 'ポイント有効期限（日数）',
       desc: '付与日からポイントが有効な日数。0 = 無期限。変更は新規付与分から適用されます。',
       format: (v) => parseInt(v) > 0 ? `${parseInt(v)} 日` : '無期限',
+    },
+    yen_only: {
+      title: '日本円以外はポイント付与しない',
+      desc: '注文通貨が JPY 以外（USD など）の場合はポイントを付与しません。海外向けストアで利用。',
+      format: (v) => v === '1' ? '有効（JPY のみ付与）' : '無効（全通貨に付与）',
+    },
+    order_metafield_enabled: {
+      title: '注文メタフィールドにポイントを保存',
+      desc: '各注文の Shopify メタフィールド（namespace: loyalty）に付与ポイント数を記録します。',
+      format: (v) => v === '1' ? '有効' : '無効',
+    },
+    customer_metafield_enabled: {
+      title: '顧客メタフィールドに残高を保存',
+      desc: '顧客の Shopify メタフィールド（namespace: loyalty, key: points）に現在の残高を同期します。',
+      format: (v) => v === '1' ? '有効' : '無効',
+    },
+    subscription_points_enabled: {
+      title: 'サブスクリプション注文にポイントを付与',
+      desc: 'Shopify Subscriptions などの定期購入注文にもポイントを付与するか設定します。',
+      format: (v) => v === '1' ? '有効（付与する）' : '無効（付与しない）',
     },
   }
 
@@ -637,7 +659,26 @@ function SettingsPanel() {
               <div className="flex-1">
                 <p className="font-semibold text-gray-900 text-sm mb-1">{meta.title}</p>
                 <p className="text-xs text-gray-500 mb-3">{meta.desc}</p>
-                {isEditing ? (
+                {FLAG_KEYS.includes(s.key) ? (
+                  // フラグ系: トグルボタンで直接切り替え
+                  <button
+                    onClick={async () => {
+                      const newVal = s.value === '1' ? '0' : '1'
+                      setSaved((prev) => ({ ...prev, [s.key]: false }))
+                      try {
+                        await fetchApi(`/api/loyalty/settings/${s.key}`, { method: 'PUT', body: JSON.stringify({ value: newVal }) })
+                        setSettings((prev) => prev.map((x) => x.key === s.key ? { ...x, value: newVal } : x))
+                        setSaved((prev) => ({ ...prev, [s.key]: true }))
+                        setTimeout(() => setSaved((prev) => ({ ...prev, [s.key]: false })), 2000)
+                      } catch {
+                        setErrors((prev) => ({ ...prev, [s.key]: '保存に失敗しました' }))
+                      }
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${s.value === '1' ? 'bg-green-500' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${s.value === '1' ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                ) : isEditing ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -669,7 +710,7 @@ function SettingsPanel() {
                 {errors[s.key] && <p className="text-xs text-red-600 mt-1">{errors[s.key]}</p>}
                 {saved[s.key] && <p className="text-xs text-green-700 mt-1">✓ 保存しました</p>}
               </div>
-              {!isEditing && (
+              {!isEditing && !FLAG_KEYS.includes(s.key) && (
                 <button
                   onClick={() => handleEdit(s.key, s.value)}
                   className="text-sm text-blue-600 hover:underline whitespace-nowrap shrink-0"

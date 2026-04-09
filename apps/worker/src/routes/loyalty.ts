@@ -27,6 +27,7 @@ import {
   type CampaignActionType,
   type CampaignStatus,
 } from '@line-crm/db';
+import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
@@ -45,7 +46,9 @@ loyalty.get('/api/loyalty/settings', async (c) => {
 loyalty.put('/api/loyalty/settings/:key', async (c) => {
   try {
     const key = c.req.param('key');
-    const VALID_KEYS = ['point_rate', 'point_value', 'registration_bonus', 'expiry_days'];
+    const NUMERIC_KEYS = ['point_rate', 'point_value', 'registration_bonus', 'expiry_days'];
+    const FLAG_KEYS = ['yen_only', 'order_metafield_enabled', 'customer_metafield_enabled', 'subscription_points_enabled'];
+    const VALID_KEYS = [...NUMERIC_KEYS, ...FLAG_KEYS];
     if (!VALID_KEYS.includes(key)) {
       return c.json({ success: false, error: '無効な設定キーです' }, 400);
     }
@@ -53,7 +56,15 @@ loyalty.put('/api/loyalty/settings/:key', async (c) => {
     if (body.value === undefined || body.value === null) {
       return c.json({ success: false, error: 'value は必須です' }, 400);
     }
-    // バリデーション
+    // フラグ系（0/1）バリデーション
+    if (FLAG_KEYS.includes(key)) {
+      if (body.value !== '0' && body.value !== '1') {
+        return c.json({ success: false, error: '0 または 1 で入力してください' }, 400);
+      }
+      await setLoyaltySetting(c.env.DB, key, body.value);
+      return c.json({ success: true });
+    }
+    // 数値系バリデーション
     const num = parseFloat(body.value);
     if (isNaN(num) || num < 0) {
       return c.json({ success: false, error: '数値（0以上）で入力してください' }, 400);
@@ -341,6 +352,8 @@ loyalty.post('/api/loyalty/award', async (c) => {
       orderAmount: number;
       orderId?: string;
       shopifyCustomerId?: string;
+      currency?: string;          // 通貨コード（例: "JPY", "USD"）
+      isSubscription?: boolean;   // サブスクリプション注文フラグ
       customerTags?: string[];
       productTags?: string[];
       productIds?: string[];
@@ -353,16 +366,45 @@ loyalty.post('/api/loyalty/award', async (c) => {
       return c.json({ success: false, error: 'friendId and orderAmount are required' }, 400);
     }
 
+    // 設定を並行取得
+    const [
+      pointRateSetting,
+      expiryDaysSetting,
+      yenOnlySetting,
+      orderMetafieldSetting,
+      customerMetafieldSetting,
+      subscriptionPointsSetting,
+    ] = await Promise.all([
+      getLoyaltySetting(c.env.DB, 'point_rate').catch(() => null),
+      getLoyaltySetting(c.env.DB, 'expiry_days').catch(() => null),
+      getLoyaltySetting(c.env.DB, 'yen_only').catch(() => null),
+      getLoyaltySetting(c.env.DB, 'order_metafield_enabled').catch(() => null),
+      getLoyaltySetting(c.env.DB, 'customer_metafield_enabled').catch(() => null),
+      getLoyaltySetting(c.env.DB, 'subscription_points_enabled').catch(() => null),
+    ]);
+
+    // 日本円以外スキップ
+    if ((yenOnlySetting ?? '1') === '1' && body.currency && body.currency !== 'JPY') {
+      return c.json({
+        success: true,
+        data: { earnedPoints: 0, balance: 0, rank: 'レギュラー', skipped: true, reason: 'non_jpy_currency' },
+      });
+    }
+
+    // サブスクリプション注文スキップ
+    if ((subscriptionPointsSetting ?? '1') === '0' && body.isSubscription) {
+      return c.json({
+        success: true,
+        data: { earnedPoints: 0, balance: 0, rank: 'レギュラー', skipped: true, reason: 'subscription_disabled' },
+      });
+    }
+
     const current = await getLoyaltyPoint(c.env.DB, body.friendId);
     const currentBalance = current?.balance ?? 0;
     const currentTotalSpent = current?.total_spent ?? 0;
 
     const newTotalSpent = currentTotalSpent + body.orderAmount;
     const currentRank = determineRank(currentTotalSpent);
-    const [pointRateSetting, expiryDaysSetting] = await Promise.all([
-      getLoyaltySetting(c.env.DB, 'point_rate').catch(() => null),
-      getLoyaltySetting(c.env.DB, 'expiry_days').catch(() => null),
-    ]);
     const pointRate = parseFloat(pointRateSetting ?? '0.01') || 0.01;
     const expiryDays = parseInt(expiryDaysSetting ?? '365', 10) || 365;
     const basePoints = calculatePoints(body.orderAmount, currentRank, pointRate);
@@ -386,12 +428,13 @@ loyalty.post('/api/loyalty/award', async (c) => {
 
     const newBalance = currentBalance + earnedPoints;
     const newRank = determineRank(newTotalSpent);
+    const effectiveCustomerId = body.shopifyCustomerId ?? current?.shopify_customer_id ?? undefined;
 
     await upsertLoyaltyPoint(c.env.DB, body.friendId, {
       balance: newBalance,
       totalSpent: newTotalSpent,
       rank: newRank,
-      shopifyCustomerId: body.shopifyCustomerId ?? current?.shopify_customer_id ?? undefined,
+      shopifyCustomerId: effectiveCustomerId,
     });
 
     await addLoyaltyTransaction(c.env.DB, {
@@ -403,6 +446,26 @@ loyalty.post('/api/loyalty/award', async (c) => {
       orderId: body.orderId,
       expiryDays,
     });
+
+    // Shopify メタフィールド保存（非同期・失敗しても付与には影響させない）
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    if (shopDomain && adminToken) {
+      const metafieldJobs: Promise<void>[] = [];
+      if ((orderMetafieldSetting ?? '1') === '1' && body.orderId) {
+        metafieldJobs.push(
+          saveOrderMetafields(shopDomain, adminToken, body.orderId, { awarded_points: earnedPoints }).catch(() => {}),
+        );
+      }
+      if ((customerMetafieldSetting ?? '0') === '1' && effectiveCustomerId) {
+        metafieldJobs.push(
+          saveCustomerMetafields(shopDomain, adminToken, effectiveCustomerId, newBalance).catch(() => {}),
+        );
+      }
+      if (metafieldJobs.length > 0) {
+        c.executionCtx?.waitUntil(Promise.all(metafieldJobs));
+      }
+    }
 
     return c.json({
       success: true,
@@ -417,6 +480,85 @@ loyalty.post('/api/loyalty/award', async (c) => {
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to award points' }, 500);
+  }
+});
+
+// POST /api/loyalty/order-cancelled — 注文キャンセル時のポイント返還（GAS から呼ぶ）
+loyalty.post('/api/loyalty/order-cancelled', async (c) => {
+  try {
+    const body = await c.req.json<{
+      orderId: string;
+      shopifyCustomerId?: string;
+    }>();
+
+    if (!body.orderId) {
+      return c.json({ success: false, error: 'orderId は必須です' }, 400);
+    }
+
+    // キャンセルされた注文の award トランザクションを取得
+    const awardTx = await c.env.DB
+      .prepare(`SELECT * FROM loyalty_transactions WHERE order_id = ? AND type = 'award' ORDER BY created_at DESC LIMIT 1`)
+      .bind(body.orderId)
+      .first<{ id: string; friend_id: string; points: number; balance_after: number }>();
+
+    if (!awardTx) {
+      // 付与記録なし（ポイント非対象の注文）→ 正常終了
+      return c.json({ success: true, data: { refundedPoints: 0, message: '対象のポイント付与記録なし' } });
+    }
+
+    // すでに返還済みかチェック（同一 order_id の adjust で「キャンセル」reason が存在するか）
+    const existingCancel = await c.env.DB
+      .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? AND type = 'adjust' AND reason LIKE '%注文キャンセル%' LIMIT 1`)
+      .bind(body.orderId)
+      .first<{ id: string }>();
+    if (existingCancel) {
+      return c.json({ success: true, data: { refundedPoints: 0, message: 'すでに返還済みです' } });
+    }
+
+    const current = await getLoyaltyPoint(c.env.DB, awardTx.friend_id);
+    if (!current) {
+      return c.json({ success: false, error: 'ポイント情報が見つかりません' }, 404);
+    }
+
+    const refundPoints = awardTx.points; // 付与したポイント数（正の値）
+    const newBalance = Math.max(0, current.balance - refundPoints);
+    const newRank = determineRank(current.total_spent);
+    const effectiveCustomerId = body.shopifyCustomerId ?? current.shopify_customer_id ?? undefined;
+
+    await upsertLoyaltyPoint(c.env.DB, awardTx.friend_id, {
+      balance: newBalance,
+      totalSpent: current.total_spent,
+      rank: newRank,
+      shopifyCustomerId: effectiveCustomerId,
+    });
+
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId: awardTx.friend_id,
+      type: 'adjust',
+      points: -refundPoints,
+      balanceAfter: newBalance,
+      reason: `注文キャンセルによるポイント返還（注文ID: ${body.orderId}）`,
+      orderId: body.orderId,
+    });
+
+    // 顧客メタフィールド更新
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    if (shopDomain && adminToken && effectiveCustomerId) {
+      const customerMetafieldSetting = await getLoyaltySetting(c.env.DB, 'customer_metafield_enabled').catch(() => null);
+      if ((customerMetafieldSetting ?? '0') === '1') {
+        c.executionCtx?.waitUntil(
+          saveCustomerMetafields(shopDomain, adminToken, effectiveCustomerId, newBalance).catch(() => {}),
+        );
+      }
+    }
+
+    return c.json({
+      success: true,
+      data: { refundedPoints: refundPoints, balance: newBalance, rank: newRank },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to process order cancellation' }, 500);
   }
 });
 
