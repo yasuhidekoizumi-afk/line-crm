@@ -6,6 +6,11 @@ import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 
+interface EnrollStat {
+  status: string
+  count: number
+}
+
 interface Reminder {
   id: string
   name: string
@@ -13,6 +18,7 @@ interface Reminder {
   isActive: boolean
   createdAt: string
   updatedAt: string
+  enrollStats?: EnrollStat[]
 }
 
 interface ReminderStep {
@@ -370,7 +376,34 @@ export default function RemindersPage() {
                       {reminder.isActive ? '有効' : '無効'}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
+                  <div className="flex flex-wrap items-center gap-2 mt-3">
+                    {reminder.enrollStats && reminder.enrollStats.length > 0 && (
+                      <div className="flex gap-1.5">
+                        {reminder.enrollStats.map((stat) => (
+                          <span
+                            key={stat.status}
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                              stat.status === 'active'
+                                ? 'bg-yellow-100 text-yellow-700'
+                                : stat.status === 'completed'
+                                ? 'bg-blue-100 text-blue-700'
+                                : stat.status === 'cancelled'
+                                ? 'bg-gray-100 text-gray-500'
+                                : 'bg-purple-100 text-purple-700'
+                            }`}
+                          >
+                            {stat.status === 'active' ? 'PENDING' : stat.status.toUpperCase()} {stat.count}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {reminder.enrollStats && reminder.enrollStats.some((s) => s.status === 'active') && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-600 border border-green-200">
+                        Shopify連携
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
                     <span>作成日: {new Date(reminder.createdAt).toLocaleDateString('ja-JP')}</span>
                     <span className="flex items-center gap-1">
                       {isExpanded ? '▲ 閉じる' : '▼ 詳細'}

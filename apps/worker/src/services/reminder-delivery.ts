@@ -39,7 +39,27 @@ export async function processReminderDeliveries(
       }
 
       for (const step of fr.steps) {
-        const message = buildMessage(step.message_type, step.message_content);
+        // {{metadata}} プレースホルダーをカートFlexメッセージで置換
+        let resolvedContent = step.message_content;
+        if (resolvedContent.includes('{{metadata}}') && fr.metadata) {
+          try {
+            const cartFlex = buildCartFlexMessage(fr.metadata);
+            await lineClient.pushMessage(friend.line_user_id, [cartFlex]);
+            const logId = crypto.randomUUID();
+            await db
+              .prepare(
+                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, created_at)
+                 VALUES (?, ?, 'outgoing', ?, ?, ?)`,
+              )
+              .bind(logId, friend.id, 'flex', resolvedContent, jstNow())
+              .run();
+            await markReminderStepDelivered(db, fr.id, step.id);
+            continue;
+          } catch (e) {
+            console.error('buildCartFlexMessage エラー:', e);
+          }
+        }
+        const message = buildMessage(step.message_type, resolvedContent);
         await lineClient.pushMessage(friend.line_user_id, [message]);
 
         // メッセージログに記録
@@ -62,6 +82,128 @@ export async function processReminderDeliveries(
       console.error(`リマインダ配信エラー (friend_reminder ${fr.id}):`, err);
     }
   }
+}
+
+interface CartMetadata {
+  checkout_url?: string;
+  items?: Array<{ title: string; image_url?: string; price: string }>;
+  type?: 'CHECKOUT' | 'CART';
+}
+
+export function buildCartFlexMessage(metadataJson: string): Message {
+  const meta: CartMetadata = JSON.parse(metadataJson);
+  const items = meta.items ?? [];
+  const firstItem = items[0];
+  const checkoutUrl = meta.checkout_url ?? '';
+  const type = meta.type ?? 'CHECKOUT';
+
+  const titleText = type === 'CART' ? 'カートに商品が残っています' : 'チェックアウトが未完了です';
+  const buttonLabel = type === 'CART' ? 'カートを見る' : '購入を完了する';
+
+  const bodyContents: object[] = [];
+
+  if (firstItem) {
+    const itemComponents: object[] = [];
+    if (firstItem.image_url) {
+      itemComponents.push({
+        type: 'image',
+        url: firstItem.image_url,
+        size: 'md',
+        aspectMode: 'cover',
+        aspectRatio: '1:1',
+        margin: 'none',
+      });
+    }
+    itemComponents.push({
+      type: 'text',
+      text: firstItem.title,
+      weight: 'bold',
+      size: 'sm',
+      wrap: true,
+    });
+    itemComponents.push({
+      type: 'text',
+      text: firstItem.price,
+      size: 'sm',
+      color: '#666666',
+    });
+    bodyContents.push({
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      contents: itemComponents,
+    });
+  }
+
+  if (items.length > 1) {
+    bodyContents.push({
+      type: 'text',
+      text: `他 ${items.length - 1} 点`,
+      size: 'xs',
+      color: '#888888',
+    });
+  }
+
+  bodyContents.push({
+    type: 'text',
+    text: 'ご購入はお済みですか？',
+    size: 'sm',
+    color: '#888888',
+    wrap: true,
+    margin: 'md',
+  });
+
+  const bubble: object = {
+    type: 'bubble',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: `\uD83D\uDED2 ${titleText}`,
+          weight: 'bold',
+          size: 'sm',
+          color: '#ffffff',
+        },
+      ],
+      backgroundColor: '#06C755',
+      paddingAll: '12px',
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'md',
+      contents: bodyContents,
+    },
+    ...(checkoutUrl
+      ? {
+          footer: {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                color: '#06C755',
+                action: {
+                  type: 'uri',
+                  label: buttonLabel,
+                  uri: checkoutUrl,
+                },
+              },
+            ],
+          },
+        }
+      : {}),
+  };
+
+  const altItemLabel = firstItem ? firstItem.title : '商品';
+  return {
+    type: 'flex',
+    altText: `${altItemLabel}が${type === 'CART' ? 'カート' : 'チェックアウト'}に残っています`,
+    contents: bubble,
+  } as Message;
 }
 
 function buildMessage(messageType: string, messageContent: string, altText?: string): Message {

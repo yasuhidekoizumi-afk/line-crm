@@ -25,6 +25,7 @@ export interface FriendReminderRow {
   reminder_id: string;
   target_date: string;
   status: string;
+  metadata: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -99,13 +100,21 @@ export async function deleteReminderStep(db: D1Database, id: string): Promise<vo
 
 export async function enrollFriendInReminder(
   db: D1Database,
-  input: { friendId: string; reminderId: string; targetDate: string },
+  input: { friendId: string; reminderId: string; targetDate: string; metadata?: string | null },
 ): Promise<FriendReminderRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
-  await db.prepare(`INSERT INTO friend_reminders (id, friend_id, reminder_id, target_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
-    .bind(id, input.friendId, input.reminderId, input.targetDate, now, now).run();
+  await db.prepare(`INSERT INTO friend_reminders (id, friend_id, reminder_id, target_date, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, input.friendId, input.reminderId, input.targetDate, input.metadata ?? null, now, now).run();
   return (await db.prepare(`SELECT * FROM friend_reminders WHERE id = ?`).bind(id).first<FriendReminderRow>())!;
+}
+
+export async function getReminderEnrollStats(db: D1Database, reminderId: string): Promise<{ status: string; count: number }[]> {
+  const result = await db
+    .prepare(`SELECT status, COUNT(*) as count FROM friend_reminders WHERE reminder_id = ? GROUP BY status`)
+    .bind(reminderId)
+    .all<{ status: string; count: number }>();
+  return result.results;
 }
 
 export async function getFriendReminders(db: D1Database, friendId: string): Promise<FriendReminderRow[]> {

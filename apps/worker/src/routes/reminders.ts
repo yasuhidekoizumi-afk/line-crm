@@ -11,6 +11,7 @@ import {
   enrollFriendInReminder,
   getFriendReminders,
   cancelFriendReminder,
+  getReminderEnrollStats,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
 
@@ -31,15 +32,19 @@ reminders.get('/api/reminders', async (c) => {
     } else {
       items = await getReminders(c.env.DB);
     }
+    const statsPerReminder = await Promise.all(
+      items.map((r) => getReminderEnrollStats(c.env.DB, r.id)),
+    );
     return c.json({
       success: true,
-      data: items.map((r) => ({
+      data: items.map((r, i) => ({
         id: r.id,
         name: r.name,
         description: r.description,
         isActive: Boolean(r.is_active),
         createdAt: r.created_at,
         updatedAt: r.updated_at,
+        enrollStats: statsPerReminder[i],
       })),
     });
   } catch (err) {
@@ -158,9 +163,9 @@ reminders.post('/api/reminders/:id/enroll/:friendId', async (c) => {
   try {
     const reminderId = c.req.param('id');
     const friendId = c.req.param('friendId');
-    const body = await c.req.json<{ targetDate: string }>();
+    const body = await c.req.json<{ targetDate: string; metadata?: string }>();
     if (!body.targetDate) return c.json({ success: false, error: 'targetDate is required' }, 400);
-    const enrollment = await enrollFriendInReminder(c.env.DB, { friendId, reminderId, targetDate: body.targetDate });
+    const enrollment = await enrollFriendInReminder(c.env.DB, { friendId, reminderId, targetDate: body.targetDate, metadata: body.metadata ?? null });
     return c.json({
       success: true,
       data: { id: enrollment.id, friendId: enrollment.friend_id, reminderId: enrollment.reminder_id, targetDate: enrollment.target_date, status: enrollment.status },
@@ -174,7 +179,11 @@ reminders.post('/api/reminders/:id/enroll/:friendId', async (c) => {
 reminders.get('/api/friends/:friendId/reminders', async (c) => {
   try {
     const friendId = c.req.param('friendId');
-    const items = await getFriendReminders(c.env.DB, friendId);
+    const statusFilter = c.req.query('status');
+    let items = await getFriendReminders(c.env.DB, friendId);
+    if (statusFilter) {
+      items = items.filter((fr) => fr.status === statusFilter);
+    }
     return c.json({
       success: true,
       data: items.map((fr) => ({
