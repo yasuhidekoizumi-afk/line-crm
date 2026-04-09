@@ -186,6 +186,16 @@ export async function getLoyaltyTransactions(
   return { items: rows.results, total: countRow?.n ?? 0 };
 }
 
+export async function getLoyaltyPointByShopifyCustomerId(
+  db: D1Database,
+  shopifyCustomerId: string,
+): Promise<LoyaltyPointRow | null> {
+  return db
+    .prepare(`SELECT * FROM loyalty_points WHERE shopify_customer_id = ?`)
+    .bind(shopifyCustomerId)
+    .first<LoyaltyPointRow>();
+}
+
 export async function getLoyaltyStats(db: D1Database): Promise<{
   total: number;
   byRank: Record<LoyaltyRank, number>;

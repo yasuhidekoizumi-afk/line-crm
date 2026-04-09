@@ -21,3 +21,7 @@ database_id = "e47571b1-cd3f-4791-9040-2c2e55034ed8"
 
 [triggers]
 crons = ["*/5 * * * *"]
+
+[vars]
+SHOPIFY_SHOP_DOMAIN = "yasuhide-koizumi.myshopify.com"
+# SHOPIFY_ADMIN_TOKEN は wrangler secret put SHOPIFY_ADMIN_TOKEN で設定すること
