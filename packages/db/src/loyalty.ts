@@ -24,6 +24,8 @@ export interface LoyaltyTransactionRow {
   order_id: string | null;
   staff_id: string | null;
   created_at: string;
+  expires_at: string | null;
+  source_tx_id: string | null;
 }
 
 // ランク閾値（累計購入額 円）
@@ -141,13 +143,19 @@ export async function addLoyaltyTransaction(
     reason?: string;
     orderId?: string;
     staffId?: string;
+    sourceTxId?: string;
   },
 ): Promise<void> {
   const now = jstNow();
+  // award トランザクションは付与日 + 1年で失効
+  const expiresAt =
+    input.type === 'award'
+      ? new Date(new Date(now).getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '.000')
+      : null;
   await db
     .prepare(
-      `INSERT INTO loyalty_transactions (id, friend_id, type, points, balance_after, reason, order_id, staff_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO loyalty_transactions (id, friend_id, type, points, balance_after, reason, order_id, staff_id, created_at, expires_at, source_tx_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       crypto.randomUUID(),
@@ -159,6 +167,8 @@ export async function addLoyaltyTransaction(
       input.orderId ?? null,
       input.staffId ?? null,
       now,
+      expiresAt,
+      input.sourceTxId ?? null,
     )
     .run();
 }
@@ -194,6 +204,106 @@ export async function getLoyaltyPointByShopifyCustomerId(
     .prepare(`SELECT * FROM loyalty_points WHERE shopify_customer_id = ?`)
     .bind(shopifyCustomerId)
     .first<LoyaltyPointRow>();
+}
+
+// Shopify顧客IDでトランザクション履歴取得
+export async function getLoyaltyTransactionsByShopifyCustomerId(
+  db: D1Database,
+  shopifyCustomerId: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<{ items: LoyaltyTransactionRow[]; total: number }> {
+  const limit = opts.limit ?? 10;
+  const offset = opts.offset ?? 0;
+
+  const pointRow = await db
+    .prepare(`SELECT friend_id FROM loyalty_points WHERE shopify_customer_id = ?`)
+    .bind(shopifyCustomerId)
+    .first<{ friend_id: string }>();
+
+  if (!pointRow) return { items: [], total: 0 };
+
+  const countRow = await db
+    .prepare(`SELECT COUNT(*) as n FROM loyalty_transactions WHERE friend_id = ?`)
+    .bind(pointRow.friend_id)
+    .first<{ n: number }>();
+
+  const rows = await db
+    .prepare(`SELECT * FROM loyalty_transactions WHERE friend_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .bind(pointRow.friend_id, limit, offset)
+    .all<LoyaltyTransactionRow>();
+
+  return { items: rows.results, total: countRow?.n ?? 0 };
+}
+
+// 次に失効するポイント（FIFO計算）
+export async function getExpiringSoonPoints(
+  db: D1Database,
+  friendId: string,
+): Promise<{ points: number; expires_at: string } | null> {
+  const now = new Date().toISOString();
+
+  // 未失効の award を古い順に取得
+  const awards = await db
+    .prepare(`SELECT id, points, created_at, expires_at FROM loyalty_transactions WHERE friend_id = ? AND type = 'award' AND expires_at > ? ORDER BY created_at ASC`)
+    .bind(friendId, now)
+    .all<{ id: string; points: number; created_at: string; expires_at: string }>();
+
+  if (!awards.results.length) return null;
+
+  // 消費済みポイントの合計（redeem + expire）
+  const consumed = await db
+    .prepare(`SELECT COALESCE(SUM(ABS(points)), 0) as total FROM loyalty_transactions WHERE friend_id = ? AND type IN ('redeem', 'expire')`)
+    .bind(friendId)
+    .first<{ total: number }>();
+
+  let remaining = consumed?.total ?? 0;
+  for (const award of awards.results) {
+    if (remaining >= award.points) {
+      remaining -= award.points;
+      continue;
+    }
+    // このバッチにまだポイントが残っている
+    const leftInBatch = award.points - remaining;
+    return { points: leftInBatch, expires_at: award.expires_at };
+  }
+  return null;
+}
+
+// 期限切れの未処理 award トランザクションを取得
+export async function getExpiredUnprocessedAwards(
+  db: D1Database,
+): Promise<{ friend_id: string; award_id: string; points: number }[]> {
+  const now = new Date().toISOString();
+
+  const rows = await db
+    .prepare(`
+      SELECT lt.friend_id, lt.id as award_id, lt.points
+      FROM loyalty_transactions lt
+      WHERE lt.type = 'award'
+        AND lt.expires_at IS NOT NULL
+        AND lt.expires_at <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM loyalty_transactions ex
+          WHERE ex.type = 'expire' AND ex.source_tx_id = lt.id
+        )
+      ORDER BY lt.expires_at ASC
+    `)
+    .bind(now)
+    .all<{ friend_id: string; award_id: string; points: number }>();
+
+  return rows.results;
+}
+
+export async function getLatestRedeemTransaction(
+  db: D1Database,
+  friendId: string,
+): Promise<LoyaltyTransactionRow | null> {
+  return db
+    .prepare(
+      `SELECT * FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(friendId)
+    .first<LoyaltyTransactionRow>();
 }
 
 export async function getLoyaltyStats(db: D1Database): Promise<{

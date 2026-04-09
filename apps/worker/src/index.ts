@@ -38,6 +38,7 @@ import { adPlatforms } from './routes/ad-platforms.js';
 import { staff } from './routes/staff.js';
 import { images } from './routes/images.js';
 import { loyalty } from './routes/loyalty.js';
+import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
 
 export type Env = {
   Bindings: {
@@ -184,6 +185,7 @@ async function scheduled(
   }
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
+  jobs.push(processLoyaltyExpirations(env.DB));
 
   await Promise.allSettled(jobs);
 }

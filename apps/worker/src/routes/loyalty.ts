@@ -4,7 +4,10 @@ import {
   getLoyaltyPointByShopifyCustomerId,
   getLoyaltyPoints,
   getLoyaltyTransactions,
+  getLoyaltyTransactionsByShopifyCustomerId,
   getLoyaltyStats,
+  getLatestRedeemTransaction,
+  getExpiringSoonPoints,
   upsertLoyaltyPoint,
   addLoyaltyTransaction,
   determineRank,
@@ -14,6 +17,104 @@ import {
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
+
+// GET /api/loyalty/period-stats — 今月 vs 先月の KPI 比較
+loyalty.get('/api/loyalty/period-stats', async (c) => {
+  try {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth(); // 0-indexed
+
+    // 今月 1日 00:00 JST
+    const thisMonthStart = new Date(y, m, 1).toISOString().slice(0, 10) + 'T00:00:00.000+09:00';
+    // 先月 1日 〜 今月 1日
+    const lastMonthStart = new Date(y, m - 1, 1).toISOString().slice(0, 10) + 'T00:00:00.000+09:00';
+    const lastMonthEnd   = thisMonthStart;
+
+    const [thisTx, lastTx, thisNew, lastNew] = await Promise.all([
+      c.env.DB
+        .prepare(`SELECT type, COALESCE(SUM(ABS(points)), 0) as total FROM loyalty_transactions WHERE type IN ('award','redeem') AND created_at >= ? GROUP BY type`)
+        .bind(thisMonthStart)
+        .all<{ type: string; total: number }>(),
+      c.env.DB
+        .prepare(`SELECT type, COALESCE(SUM(ABS(points)), 0) as total FROM loyalty_transactions WHERE type IN ('award','redeem') AND created_at >= ? AND created_at < ? GROUP BY type`)
+        .bind(lastMonthStart, lastMonthEnd)
+        .all<{ type: string; total: number }>(),
+      c.env.DB
+        .prepare(`SELECT COUNT(*) as n FROM loyalty_points WHERE created_at >= ?`)
+        .bind(thisMonthStart)
+        .first<{ n: number }>(),
+      c.env.DB
+        .prepare(`SELECT COUNT(*) as n FROM loyalty_points WHERE created_at >= ? AND created_at < ?`)
+        .bind(lastMonthStart, lastMonthEnd)
+        .first<{ n: number }>(),
+    ]);
+
+    const toMap = (rows: { type: string; total: number }[]) => {
+      const m: Record<string, number> = { award: 0, redeem: 0 };
+      for (const r of rows) m[r.type] = r.total;
+      return m;
+    };
+
+    const thisMap = toMap(thisTx.results);
+    const lastMap = toMap(lastTx.results);
+
+    return c.json({
+      success: true,
+      data: {
+        current:  { awarded: thisMap.award, redeemed: thisMap.redeem, newMembers: thisNew?.n ?? 0 },
+        previous: { awarded: lastMap.award, redeemed: lastMap.redeem, newMembers: lastNew?.n ?? 0 },
+      },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to fetch period stats' }, 500);
+  }
+});
+
+// GET /api/loyalty/activity — 全体取引履歴（スタッフ向け）
+loyalty.get('/api/loyalty/activity', async (c) => {
+  try {
+    const limit  = Math.min(Number(c.req.query('limit')  ?? '30'), 100);
+    const offset = Number(c.req.query('offset') ?? '0');
+    const type   = c.req.query('type');    // award | redeem | adjust | expire
+    const from   = c.req.query('from');    // ISO date string
+    const to     = c.req.query('to');
+
+    let where = '1=1';
+    const bindings: unknown[] = [];
+    if (type)  { where += ' AND lt.type = ?';          bindings.push(type); }
+    if (from)  { where += ' AND lt.created_at >= ?';   bindings.push(from); }
+    if (to)    { where += ' AND lt.created_at <= ?';   bindings.push(to); }
+
+    const countRow = await c.env.DB
+      .prepare(`SELECT COUNT(*) as n FROM loyalty_transactions lt WHERE ${where}`)
+      .bind(...bindings)
+      .first<{ n: number }>();
+
+    const rows = await c.env.DB
+      .prepare(`
+        SELECT lt.id, lt.friend_id, lt.type, lt.points, lt.balance_after,
+               lt.reason, lt.order_id, lt.created_at, lt.expires_at,
+               f.display_name, f.picture_url
+        FROM loyalty_transactions lt
+        LEFT JOIN friends f ON f.id = lt.friend_id
+        WHERE ${where}
+        ORDER BY lt.created_at DESC
+        LIMIT ? OFFSET ?
+      `)
+      .bind(...bindings, limit, offset)
+      .all<{
+        id: string; friend_id: string; type: string; points: number;
+        balance_after: number; reason: string | null; order_id: string | null;
+        created_at: string; expires_at: string | null;
+        display_name: string | null; picture_url: string | null;
+      }>();
+
+    return c.json({ success: true, data: { items: rows.results, total: countRow?.n ?? 0 } });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to fetch activity' }, 500);
+  }
+});
 
 // GET /api/loyalty/stats — ランク別サマリー
 loyalty.get('/api/loyalty/stats', async (c) => {
@@ -177,22 +278,59 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
       c.req.param('shopifyCustomerId'),
     );
     if (!point) {
-      // 未購入ユーザーはポイントなし → 0 を返す
       return c.json({
         success: true,
-        data: { balance: 0, rank: 'レギュラー', total_spent: 0 },
+        data: { balance: 0, rank: 'レギュラー', total_spent: 0, pending_code: null },
       });
     }
+
+    // 最新の割引コードを reason から抽出
+    let pendingCode: string | null = null;
+    try {
+      const latest = await c.env.DB
+        .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
+        .bind(point.friend_id)
+        .first<{ reason: string }>();
+      if (latest?.reason) {
+        const m = latest.reason.match(/コード: ([A-Z0-9-]+)/);
+        if (m) pendingCode = m[1];
+      }
+    } catch (_) {}
+
+    // 期限切れが近いポイントを取得
+    let expiringSoon: { points: number; expires_at: string } | null = null;
+    try {
+      expiringSoon = await getExpiringSoonPoints(c.env.DB, point.friend_id);
+    } catch (_) {}
+
     return c.json({
       success: true,
       data: {
         balance: point.balance,
         rank: point.rank,
         total_spent: point.total_spent,
+        pending_code: pendingCode,
+        expiring_soon: expiringSoon,
       },
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to fetch loyalty point' }, 500);
+  }
+});
+
+// GET /api/loyalty/shopify/:shopifyCustomerId/history — 取引履歴（Shopify マイページ）
+loyalty.get('/api/loyalty/shopify/:shopifyCustomerId/history', async (c) => {
+  try {
+    const limit = Math.min(Number(c.req.query('limit') ?? '10'), 50);
+    const offset = Number(c.req.query('offset') ?? '0');
+    const result = await getLoyaltyTransactionsByShopifyCustomerId(
+      c.env.DB,
+      c.req.param('shopifyCustomerId'),
+      { limit, offset },
+    );
+    return c.json({ success: true, data: result });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to fetch history' }, 500);
   }
 });
 
@@ -214,9 +352,45 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
       return c.json({ success: false, error: 'ポイント残高が不足しています' }, 400);
     }
 
-    // Shopify Admin API でディスカウントコードを発行
+    // 既存の未使用コードがあれば発行をブロック
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
     const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    try {
+      const latestRedeem = await c.env.DB
+        .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
+        .bind(point.friend_id)
+        .first<{ reason: string }>();
+      const existingCodeMatch = latestRedeem?.reason?.match(/コード: ([A-Z0-9-]+)/);
+      if (existingCodeMatch && shopDomain && adminToken) {
+        const existingCode = existingCodeMatch[1];
+        const rulesRes = await fetch(
+          `https://${shopDomain}/admin/api/2024-10/price_rules.json?limit=250`,
+          { headers: { 'X-Shopify-Access-Token': adminToken } },
+        );
+        if (rulesRes.ok) {
+          const { price_rules } = await rulesRes.json() as { price_rules: { id: number; title: string }[] };
+          const rule = price_rules.find((r) => r.title === `ポイント割引 ${existingCode}`);
+          if (rule) {
+            const dcRes = await fetch(
+              `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}/discount_codes.json`,
+              { headers: { 'X-Shopify-Access-Token': adminToken } },
+            );
+            if (dcRes.ok) {
+              const { discount_codes } = await dcRes.json() as { discount_codes: { usage_count: number }[] };
+              if (discount_codes[0]?.usage_count === 0) {
+                return c.json({
+                  success: false,
+                  error: `未使用の割引コードがあります: ${existingCode}。先にご利用いただくか、取り消してからお試しください。`,
+                  existing_code: existingCode,
+                }, 400);
+              }
+            }
+          }
+        }
+      }
+    } catch (_) { /* チェック失敗は無視して続行 */ }
+
+    // Shopify Admin API でディスカウントコードを発行
     if (!shopDomain || !adminToken) {
       return c.json(
         { success: false, error: 'Shopify 設定が未構成です（サーバー管理者にお問い合わせください）' },
@@ -225,7 +399,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
     }
 
     const discountAmount = body.points; // 100pt = ¥100
-    const code = `KOJIPOP-${shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
+    const code = `ORYZAE-${shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
 
     // 1) Price Rule 作成
     const priceRuleRes = await fetch(
@@ -309,6 +483,116 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to redeem points' }, 500);
+  }
+});
+
+// POST /api/loyalty/shopify/:shopifyCustomerId/cancel-code — 未使用割引コードをキャンセルしてポイント返還
+loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) => {
+  try {
+    const shopifyCustomerId = c.req.param('shopifyCustomerId');
+    const body = await c.req.json<{ code: string }>();
+
+    if (!body.code || typeof body.code !== 'string') {
+      return c.json({ success: false, error: 'code は必須です' }, 400);
+    }
+    const code = body.code.trim().toUpperCase();
+
+    // コードがこの顧客のものか確認（コード末尾6桁 = customer ID 末尾6桁）
+    const expectedSuffix = shopifyCustomerId.slice(-6);
+    if (!code.startsWith(`ORYZAE-${expectedSuffix}-`)) {
+      return c.json({ success: false, error: '指定されたコードはこのアカウントのものではありません' }, 403);
+    }
+
+    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (!point) {
+      return c.json({ success: false, error: 'ポイント情報が見つかりません' }, 404);
+    }
+
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    if (!shopDomain || !adminToken) {
+      return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+    }
+
+    // Price Rule を title で検索
+    const searchRes = await fetch(
+      `https://${shopDomain}/admin/api/2024-10/price_rules.json?limit=250`,
+      { headers: { 'X-Shopify-Access-Token': adminToken } },
+    );
+    if (!searchRes.ok) {
+      return c.json({ success: false, error: 'Shopify API エラー' }, 500);
+    }
+    const { price_rules } = (await searchRes.json()) as { price_rules: { id: number; title: string }[] };
+    const rule = price_rules.find((r) => r.title === `ポイント割引 ${code}`);
+    if (!rule) {
+      return c.json({ success: false, error: 'コードが見つかりません（すでに削除済みの可能性があります）' }, 404);
+    }
+
+    // Discount Code の使用状況を確認
+    const dcRes = await fetch(
+      `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}/discount_codes.json`,
+      { headers: { 'X-Shopify-Access-Token': adminToken } },
+    );
+    if (!dcRes.ok) {
+      return c.json({ success: false, error: 'コード状況の確認に失敗しました' }, 500);
+    }
+    const { discount_codes } = (await dcRes.json()) as { discount_codes: { usage_count: number }[] };
+    if (discount_codes[0]?.usage_count > 0) {
+      return c.json({ success: false, error: 'このコードはすでに使用済みのためキャンセルできません' }, 400);
+    }
+
+    // Price Rule（＝割引コード）を削除
+    const delRes = await fetch(
+      `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}.json`,
+      { method: 'DELETE', headers: { 'X-Shopify-Access-Token': adminToken } },
+    );
+    if (!delRes.ok && delRes.status !== 404) {
+      return c.json({ success: false, error: 'コードの削除に失敗しました' }, 500);
+    }
+
+    // 元のポイント数を reason から逆算
+    const latestRedeem = await c.env.DB
+      .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? ORDER BY created_at DESC LIMIT 1`)
+      .bind(point.friend_id, `%コード: ${code}%`)
+      .first<{ reason: string }>();
+    const m = latestRedeem?.reason?.match(/¥(\d+)割引/);
+    const refundPoints = m ? parseInt(m[1], 10) : 0;
+
+    if (refundPoints <= 0) {
+      return c.json({ success: false, error: '返還ポイント数を特定できませんでした' }, 500);
+    }
+
+    // ポイント残高を返還
+    const newBalance = point.balance + refundPoints;
+    const newRank = determineRank(point.total_spent);
+    await upsertLoyaltyPoint(c.env.DB, point.friend_id, {
+      balance: newBalance,
+      totalSpent: point.total_spent,
+      rank: newRank,
+      shopifyCustomerId,
+    });
+
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId: point.friend_id,
+      type: 'adjust',
+      points: refundPoints,
+      balanceAfter: newBalance,
+      reason: `コード取り消しによるポイント返還（${code} 未使用削除）`,
+    });
+
+    // 元の redeem トランザクションを「取り消し済み」にマーク
+    await c.env.DB
+      .prepare(`UPDATE loyalty_transactions SET reason = '[取り消し済み] ' || reason WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ?`)
+      .bind(point.friend_id, `%コード: ${code}%`)
+      .run();
+
+
+    return c.json({
+      success: true,
+      data: { refundPoints, balance: newBalance, rank: newRank },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to cancel code' }, 500);
   }
 });
 
