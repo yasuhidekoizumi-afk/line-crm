@@ -23,7 +23,9 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.match(/^\/api\/loyalty\/shopify\/[^/]+$/) || // GET loyalty balance (Shopify customer page)
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redeem$/) || // POST redeem (Shopify customer page)
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) || // POST cancel code (Shopify customer page)
-    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) // GET history (Shopify customer page)
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) || // GET history (Shopify customer page)
+    path === '/api/rewards' || // GET active reward items (Shopify widget)
+    path.match(/^\/api\/rewards\/[^/]+\/exchange$/) // POST exchange (Shopify widget)
   ) {
     return next();
   }

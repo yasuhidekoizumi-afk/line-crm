@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Header from '@/components/layout/header'
 import { fetchApi } from '@/lib/api'
 import CampaignsTab from './campaigns'
+import RewardsTab from './rewards'
 
 type LoyaltyRank = 'レギュラー' | 'シルバー' | 'ゴールド' | 'プラチナ' | 'ダイヤモンド'
 
@@ -684,7 +685,7 @@ function SettingsPanel() {
   )
 }
 
-type TabType = 'members' | 'activity' | 'campaigns' | 'settings'
+type TabType = 'members' | 'activity' | 'campaigns' | 'rewards' | 'settings'
 
 export default function LoyaltyPage() {
   const [stats, setStats] = useState<Stats | null>(null)
@@ -752,6 +753,7 @@ export default function LoyaltyPage() {
           { key: 'members',   label: '会員一覧' },
           { key: 'activity',  label: '取引履歴' },
           { key: 'campaigns', label: 'キャンペーン' },
+          { key: 'rewards',   label: '交換アイテム' },
           { key: 'settings',  label: '基本設定' },
         ] as { key: TabType; label: string }[]).map(({ key, label }) => (
           <button key={key} onClick={() => setTab(key)}
@@ -769,6 +771,7 @@ export default function LoyaltyPage() {
       {tab === 'members'   && <MembersTab onOpenDetail={setSelected} />}
       {tab === 'activity'  && <ActivityTab />}
       {tab === 'campaigns' && <CampaignsTab />}
+      {tab === 'rewards'   && <RewardsTab />}
       {tab === 'settings'  && <SettingsPanel />}
 
       {/* 詳細モーダル */}
