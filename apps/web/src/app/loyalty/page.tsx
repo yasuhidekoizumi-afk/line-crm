@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Header from '@/components/layout/header'
 import { fetchApi } from '@/lib/api'
+import CampaignsTab from './campaigns'
 
 type LoyaltyRank = 'レギュラー' | 'シルバー' | 'ゴールド' | 'プラチナ' | 'ダイヤモンド'
 
@@ -678,7 +679,7 @@ function SettingsPanel() {
   )
 }
 
-type TabType = 'members' | 'activity' | 'settings'
+type TabType = 'members' | 'activity' | 'campaigns' | 'settings'
 
 export default function LoyaltyPage() {
   const [stats, setStats] = useState<Stats | null>(null)
@@ -743,9 +744,10 @@ export default function LoyaltyPage() {
       {/* タブ */}
       <div className="flex border-b border-gray-200 mb-4">
         {([
-          { key: 'members',  label: '会員一覧' },
-          { key: 'activity', label: '取引履歴' },
-          { key: 'settings', label: '基本設定' },
+          { key: 'members',   label: '会員一覧' },
+          { key: 'activity',  label: '取引履歴' },
+          { key: 'campaigns', label: 'キャンペーン' },
+          { key: 'settings',  label: '基本設定' },
         ] as { key: TabType; label: string }[]).map(({ key, label }) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
@@ -759,9 +761,10 @@ export default function LoyaltyPage() {
       </div>
 
       {/* タブコンテンツ */}
-      {tab === 'members' && <MembersTab onOpenDetail={setSelected} />}
-      {tab === 'activity' && <ActivityTab />}
-      {tab === 'settings' && <SettingsPanel />}
+      {tab === 'members'   && <MembersTab onOpenDetail={setSelected} />}
+      {tab === 'activity'  && <ActivityTab />}
+      {tab === 'campaigns' && <CampaignsTab />}
+      {tab === 'settings'  && <SettingsPanel />}
 
       {/* 詳細モーダル */}
       {selected && (

@@ -57,6 +57,202 @@ export function calculatePoints(orderAmount: number, rank: LoyaltyRank, rate = 0
   return Math.floor(orderAmount * rate * RANK_MULTIPLIERS[rank]);
 }
 
+// --- キャンペーン ---
+
+export type CampaignActionType = 'rate_multiply' | 'rate_add' | 'fixed_points';
+export type CampaignStatus = 'active' | 'draft';
+
+export type CampaignCondition =
+  | { type: 'customer_tag';    value: string }   // 顧客タグが value を含む
+  | { type: 'product_tag';     value: string }   // 商品タグが value を含む
+  | { type: 'product_id';      value: string }   // 商品ID（カンマ区切り）
+  | { type: 'min_order_amount'; value: number }  // 注文金額が value 以上
+  | { type: 'order_count_gte'; value: number };  // 累計注文回数が value 以上
+
+export interface LoyaltyCampaignRow {
+  id: string;
+  name: string;
+  description: string | null;
+  status: CampaignStatus;
+  starts_at: string | null;
+  ends_at: string | null;
+  conditions: string; // JSON
+  action_type: CampaignActionType;
+  action_value: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoyaltyCampaign extends Omit<LoyaltyCampaignRow, 'conditions'> {
+  conditions: CampaignCondition[];
+}
+
+function parseCampaign(row: LoyaltyCampaignRow): LoyaltyCampaign {
+  return { ...row, conditions: JSON.parse(row.conditions || '[]') };
+}
+
+export async function getCampaigns(db: D1Database): Promise<LoyaltyCampaign[]> {
+  const rows = await db
+    .prepare(`SELECT * FROM loyalty_campaigns ORDER BY created_at DESC`)
+    .all<LoyaltyCampaignRow>();
+  return rows.results.map(parseCampaign);
+}
+
+export async function getActiveCampaigns(db: D1Database): Promise<LoyaltyCampaign[]> {
+  const now = new Date().toISOString();
+  const rows = await db
+    .prepare(`
+      SELECT * FROM loyalty_campaigns
+      WHERE status = 'active'
+        AND (starts_at IS NULL OR starts_at <= ?)
+        AND (ends_at   IS NULL OR ends_at   >= ?)
+      ORDER BY created_at ASC
+    `)
+    .bind(now, now)
+    .all<LoyaltyCampaignRow>();
+  return rows.results.map(parseCampaign);
+}
+
+export async function getCampaign(db: D1Database, id: string): Promise<LoyaltyCampaign | null> {
+  const row = await db
+    .prepare(`SELECT * FROM loyalty_campaigns WHERE id = ?`)
+    .bind(id)
+    .first<LoyaltyCampaignRow>();
+  return row ? parseCampaign(row) : null;
+}
+
+export async function createCampaign(
+  db: D1Database,
+  input: {
+    name: string;
+    description?: string;
+    status?: CampaignStatus;
+    starts_at?: string;
+    ends_at?: string;
+    conditions?: CampaignCondition[];
+    action_type: CampaignActionType;
+    action_value: number;
+  },
+): Promise<string> {
+  const id = crypto.randomUUID();
+  const now = jstNow();
+  await db
+    .prepare(`
+      INSERT INTO loyalty_campaigns
+        (id, name, description, status, starts_at, ends_at, conditions, action_type, action_value, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .bind(
+      id,
+      input.name,
+      input.description ?? null,
+      input.status ?? 'draft',
+      input.starts_at ?? null,
+      input.ends_at ?? null,
+      JSON.stringify(input.conditions ?? []),
+      input.action_type,
+      input.action_value,
+      now,
+      now,
+    )
+    .run();
+  return id;
+}
+
+export async function updateCampaign(
+  db: D1Database,
+  id: string,
+  updates: Partial<{
+    name: string;
+    description: string | null;
+    status: CampaignStatus;
+    starts_at: string | null;
+    ends_at: string | null;
+    conditions: CampaignCondition[];
+    action_type: CampaignActionType;
+    action_value: number;
+  }>,
+): Promise<void> {
+  const now = jstNow();
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  for (const [k, v] of Object.entries(updates)) {
+    fields.push(`${k} = ?`);
+    values.push(k === 'conditions' ? JSON.stringify(v) : v);
+  }
+  if (!fields.length) return;
+  fields.push('updated_at = ?');
+  values.push(now, id);
+  await db.prepare(`UPDATE loyalty_campaigns SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+}
+
+export async function deleteCampaign(db: D1Database, id: string): Promise<void> {
+  await db.prepare(`DELETE FROM loyalty_campaigns WHERE id = ?`).bind(id).run();
+}
+
+/**
+ * アクティブなキャンペーンを適用してポイントを計算する
+ * @param basePoints   calculatePoints() で算出した基本ポイント数
+ * @param orderAmount  注文金額
+ * @param context      顧客タグ・商品タグ等の情報
+ * @param campaigns    getActiveCampaigns() の結果
+ */
+export function applyCampaigns(
+  basePoints: number,
+  orderAmount: number,
+  context: {
+    customerTags?: string[];
+    productTags?: string[];
+    productIds?: string[];
+    orderCount?: number;
+  },
+  campaigns: LoyaltyCampaign[],
+): { finalPoints: number; appliedCampaigns: string[] } {
+  let finalPoints = basePoints;
+  const appliedCampaigns: string[] = [];
+
+  for (const campaign of campaigns) {
+    // 条件チェック
+    const matched = campaign.conditions.every((cond) => {
+      switch (cond.type) {
+        case 'customer_tag':
+          return (context.customerTags ?? []).some((t) => t.toLowerCase().includes(cond.value.toLowerCase()));
+        case 'product_tag':
+          return (context.productTags ?? []).some((t) => t.toLowerCase().includes(cond.value.toLowerCase()));
+        case 'product_id': {
+          const ids = cond.value.split(',').map((s) => s.trim());
+          return (context.productIds ?? []).some((id) => ids.includes(id));
+        }
+        case 'min_order_amount':
+          return orderAmount >= cond.value;
+        case 'order_count_gte':
+          return (context.orderCount ?? 0) >= cond.value;
+        default:
+          return false;
+      }
+    });
+
+    if (!matched) continue;
+
+    appliedCampaigns.push(campaign.name);
+
+    switch (campaign.action_type) {
+      case 'rate_multiply':
+        finalPoints = Math.floor(finalPoints * campaign.action_value);
+        break;
+      case 'rate_add':
+        // 基本ポイントへの上乗せ（追加 N% 分）
+        finalPoints = finalPoints + Math.floor(orderAmount * (campaign.action_value / 100));
+        break;
+      case 'fixed_points':
+        finalPoints = Math.floor(campaign.action_value);
+        break;
+    }
+  }
+
+  return { finalPoints, appliedCampaigns };
+}
+
 // --- 設定ヘルパー ---
 
 export interface LoyaltySetting {

@@ -9,6 +9,13 @@ import {
   getLoyaltySettings,
   getLoyaltySetting,
   setLoyaltySetting,
+  getCampaigns,
+  getCampaign,
+  getActiveCampaigns,
+  createCampaign,
+  updateCampaign,
+  deleteCampaign,
+  applyCampaigns,
   getLatestRedeemTransaction,
   getExpiringSoonPoints,
   upsertLoyaltyPoint,
@@ -16,6 +23,9 @@ import {
   determineRank,
   calculatePoints,
   type LoyaltyRank,
+  type CampaignCondition,
+  type CampaignActionType,
+  type CampaignStatus,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
 
@@ -55,6 +65,78 @@ loyalty.put('/api/loyalty/settings/:key', async (c) => {
     return c.json({ success: true });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to update setting' }, 500);
+  }
+});
+
+// ──────────────────────────────────────────────────────────
+// キャンペーン CRUD
+// ──────────────────────────────────────────────────────────
+
+// GET /api/loyalty/campaigns
+loyalty.get('/api/loyalty/campaigns', async (c) => {
+  try {
+    const campaigns = await getCampaigns(c.env.DB);
+    return c.json({ success: true, data: campaigns });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to fetch campaigns' }, 500);
+  }
+});
+
+// POST /api/loyalty/campaigns
+loyalty.post('/api/loyalty/campaigns', async (c) => {
+  try {
+    const body = await c.req.json<{
+      name: string;
+      description?: string;
+      status?: CampaignStatus;
+      starts_at?: string;
+      ends_at?: string;
+      conditions?: CampaignCondition[];
+      action_type: CampaignActionType;
+      action_value: number;
+    }>();
+    if (!body.name?.trim()) return c.json({ success: false, error: 'name は必須です' }, 400);
+    if (!body.action_type) return c.json({ success: false, error: 'action_type は必須です' }, 400);
+    if (typeof body.action_value !== 'number') return c.json({ success: false, error: 'action_value は数値で指定してください' }, 400);
+    const id = await createCampaign(c.env.DB, body);
+    return c.json({ success: true, data: { id } }, 201);
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to create campaign' }, 500);
+  }
+});
+
+// GET /api/loyalty/campaigns/:id
+loyalty.get('/api/loyalty/campaigns/:id', async (c) => {
+  try {
+    const campaign = await getCampaign(c.env.DB, c.req.param('id'));
+    if (!campaign) return c.json({ success: false, error: 'Not found' }, 404);
+    return c.json({ success: true, data: campaign });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to fetch campaign' }, 500);
+  }
+});
+
+// PUT /api/loyalty/campaigns/:id
+loyalty.put('/api/loyalty/campaigns/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const existing = await getCampaign(c.env.DB, id);
+    if (!existing) return c.json({ success: false, error: 'Not found' }, 404);
+    const body = await c.req.json<Record<string, unknown>>();
+    await updateCampaign(c.env.DB, id, body as Parameters<typeof updateCampaign>[2]);
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to update campaign' }, 500);
+  }
+});
+
+// DELETE /api/loyalty/campaigns/:id
+loyalty.delete('/api/loyalty/campaigns/:id', async (c) => {
+  try {
+    await deleteCampaign(c.env.DB, c.req.param('id'));
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to delete campaign' }, 500);
   }
 });
 
@@ -256,6 +338,10 @@ loyalty.post('/api/loyalty/award', async (c) => {
       orderAmount: number;
       orderId?: string;
       shopifyCustomerId?: string;
+      customerTags?: string[];
+      productTags?: string[];
+      productIds?: string[];
+      orderCount?: number;
     }>();
 
     if (!body.friendId || typeof body.orderAmount !== 'number' || body.orderAmount <= 0) {
@@ -270,7 +356,22 @@ loyalty.post('/api/loyalty/award', async (c) => {
     const currentRank = determineRank(currentTotalSpent);
     const pointRateSetting = await getLoyaltySetting(c.env.DB, 'point_rate').catch(() => null);
     const pointRate = parseFloat(pointRateSetting ?? '0.01') || 0.01;
-    const earnedPoints = calculatePoints(body.orderAmount, currentRank, pointRate);
+    const basePoints = calculatePoints(body.orderAmount, currentRank, pointRate);
+
+    // キャンペーン適用
+    const activeCampaigns = await getActiveCampaigns(c.env.DB).catch(() => []);
+    const { finalPoints: earnedPoints, appliedCampaigns } = applyCampaigns(
+      basePoints,
+      body.orderAmount,
+      {
+        customerTags: body.customerTags ?? [],
+        productTags:  body.productTags ?? [],
+        productIds:   body.productIds ?? [],
+        orderCount:   body.orderCount,
+      },
+      activeCampaigns,
+    );
+
     const newBalance = currentBalance + earnedPoints;
     const newRank = determineRank(newTotalSpent);
 
@@ -298,6 +399,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
         rank: newRank,
         rankChanged: newRank !== currentRank,
         previousRank: currentRank,
+        appliedCampaigns,
       },
     });
   } catch (e) {
