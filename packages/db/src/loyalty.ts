@@ -63,11 +63,14 @@ export type CampaignActionType = 'rate_multiply' | 'rate_add' | 'fixed_points';
 export type CampaignStatus = 'active' | 'draft';
 
 export type CampaignCondition =
-  | { type: 'customer_tag';    value: string }   // 顧客タグが value を含む
-  | { type: 'product_tag';     value: string }   // 商品タグが value を含む
-  | { type: 'product_id';      value: string }   // 商品ID（カンマ区切り）
+  | { type: 'customer_tag';     value: string }  // 顧客タグが value を含む
+  | { type: 'product_tag';      value: string }  // 商品タグが value を含む
+  | { type: 'product_id';       value: string }  // 商品ID（カンマ区切り）
+  | { type: 'product_type';     value: string }  // 商品タイプが value を含む
+  | { type: 'collection_id';    value: string }  // コレクションID（カンマ区切り）
   | { type: 'min_order_amount'; value: number }  // 注文金額が value 以上
-  | { type: 'order_count_gte'; value: number };  // 累計注文回数が value 以上
+  | { type: 'order_count_gte';  value: number }  // 累計注文回数が value 以上
+  | { type: 'total_spent_gte';  value: number };  // 累計購入金額が value 以上
 
 export interface LoyaltyCampaignRow {
   id: string;
@@ -204,7 +207,10 @@ export function applyCampaigns(
     customerTags?: string[];
     productTags?: string[];
     productIds?: string[];
+    productTypes?: string[];
+    collectionIds?: string[];
     orderCount?: number;
+    totalSpent?: number;
   },
   campaigns: LoyaltyCampaign[],
 ): { finalPoints: number; appliedCampaigns: string[] } {
@@ -223,10 +229,18 @@ export function applyCampaigns(
           const ids = cond.value.split(',').map((s) => s.trim());
           return (context.productIds ?? []).some((id) => ids.includes(id));
         }
+        case 'product_type':
+          return (context.productTypes ?? []).some((t) => t.toLowerCase().includes(cond.value.toLowerCase()));
+        case 'collection_id': {
+          const ids = cond.value.split(',').map((s) => s.trim());
+          return (context.collectionIds ?? []).some((id) => ids.includes(id));
+        }
         case 'min_order_amount':
           return orderAmount >= cond.value;
         case 'order_count_gte':
           return (context.orderCount ?? 0) >= cond.value;
+        case 'total_spent_gte':
+          return (context.totalSpent ?? 0) >= cond.value;
         default:
           return false;
       }

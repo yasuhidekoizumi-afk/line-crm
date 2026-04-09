@@ -10,8 +10,11 @@ type Condition =
   | { type: 'customer_tag';     value: string }
   | { type: 'product_tag';      value: string }
   | { type: 'product_id';       value: string }
+  | { type: 'product_type';     value: string }
+  | { type: 'collection_id';    value: string }
   | { type: 'min_order_amount'; value: number }
   | { type: 'order_count_gte';  value: number }
+  | { type: 'total_spent_gte';  value: number }
 
 interface Campaign {
   id: string
@@ -43,8 +46,11 @@ const COND_TYPE_LABELS: Record<string, string> = {
   customer_tag:     '顧客タグ',
   product_tag:      '商品タグ',
   product_id:       '商品ID',
-  min_order_amount: '最小注文金額',
-  order_count_gte:  '累計注文回数（以上）',
+  product_type:     '商品タイプ',
+  collection_id:    'コレクションID',
+  min_order_amount: '購入時の金額（以上）',
+  order_count_gte:  '累計購入回数（以上）',
+  total_spent_gte:  '累計購入金額（以上）',
 }
 
 const EMPTY_FORM = {
@@ -66,7 +72,7 @@ function ConditionRow({
   onChange: (i: number, c: Condition) => void
   onRemove: (i: number) => void
 }) {
-  const isNumeric = cond.type === 'min_order_amount' || cond.type === 'order_count_gte'
+  const isNumeric = cond.type === 'min_order_amount' || cond.type === 'order_count_gte' || cond.type === 'total_spent_gte'
   return (
     <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
       <select

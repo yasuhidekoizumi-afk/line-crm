@@ -341,6 +341,8 @@ loyalty.post('/api/loyalty/award', async (c) => {
       customerTags?: string[];
       productTags?: string[];
       productIds?: string[];
+      productTypes?: string[];
+      collectionIds?: string[];
       orderCount?: number;
     }>();
 
@@ -364,10 +366,13 @@ loyalty.post('/api/loyalty/award', async (c) => {
       basePoints,
       body.orderAmount,
       {
-        customerTags: body.customerTags ?? [],
-        productTags:  body.productTags ?? [],
-        productIds:   body.productIds ?? [],
-        orderCount:   body.orderCount,
+        customerTags:  body.customerTags ?? [],
+        productTags:   body.productTags ?? [],
+        productIds:    body.productIds ?? [],
+        productTypes:  body.productTypes ?? [],
+        collectionIds: body.collectionIds ?? [],
+        orderCount:    body.orderCount,
+        totalSpent:    currentTotalSpent,
       },
       activeCampaigns,
     );
