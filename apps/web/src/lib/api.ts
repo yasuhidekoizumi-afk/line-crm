@@ -163,6 +163,7 @@ export const api = {
       targetTagId?: string | null
       scheduledAt?: string | null
       status?: ApiBroadcast['status']
+      lineAccountId?: string | null
     }) =>
       fetchApi<ApiResponse<ApiBroadcast>>('/api/broadcasts', {
         method: 'POST',
