@@ -67,8 +67,15 @@ friends.get('/api/friends', async (c) => {
       binds.push(lineAccountId);
     }
     if (search) {
-      conditions.push('f.display_name LIKE ?');
-      binds.push(`%${search}%`);
+      // 表示名またはLINE UIDで検索（LINE UIDは前方一致で32文字の制約がある場合も考慮）
+      conditions.push('(f.display_name LIKE ? OR f.line_user_id = ?)');
+      binds.push(`%${search}%`, search);
+    }
+    // LINE UID 専用の完全一致検索（?lineUserId=U... または ?line_user_id=U...）
+    const lineUserIdQuery = c.req.query('lineUserId') ?? c.req.query('line_user_id') ?? c.req.query('line_uid');
+    if (lineUserIdQuery) {
+      conditions.push('f.line_user_id = ?');
+      binds.push(lineUserIdQuery);
     }
     // Metadata filters: ?metadata.key=value (e.g. ?metadata.monthly_cost=〜100万円)
     const url = new URL(c.req.url);
