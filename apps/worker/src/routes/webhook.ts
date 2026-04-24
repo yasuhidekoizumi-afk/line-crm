@@ -92,16 +92,28 @@ async function handleEvent(
     if (!userId) return;
 
     // プロフィール取得 & 友だち登録/更新
+    // 一時的な LINE API 失敗で display_name が null になると
+    // 検索にヒットしなくなるため、リトライ + フォールバック名を付与する
     let profile;
-    try {
-      profile = await lineClient.getProfile(userId);
-    } catch (err) {
-      console.error('Failed to get profile for', userId, err);
+    const MAX_PROFILE_RETRIES = 3;
+    for (let attempt = 0; attempt < MAX_PROFILE_RETRIES; attempt++) {
+      try {
+        profile = await lineClient.getProfile(userId);
+        break;
+      } catch (err) {
+        console.error(`Profile fetch attempt ${attempt + 1}/${MAX_PROFILE_RETRIES} failed for`, userId, err);
+        if (attempt < MAX_PROFILE_RETRIES - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        }
+      }
     }
+
+    // フォールバック: プロフィール取得に失敗しても LINE UID 末尾で識別可能な名前を付ける
+    const fallbackName = `未取得-${userId.slice(1, 7)}`;
 
     const friend = await upsertFriend(db, {
       lineUserId: userId,
-      displayName: profile?.displayName ?? null,
+      displayName: profile?.displayName ?? fallbackName,
       pictureUrl: profile?.pictureUrl ?? null,
       statusMessage: profile?.statusMessage ?? null,
     });
