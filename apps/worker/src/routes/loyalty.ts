@@ -28,6 +28,7 @@ import {
   type CampaignStatus,
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
+import { backfillPendingOrders } from '../services/loyalty-backfill.js';
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
@@ -321,6 +322,8 @@ loyalty.post('/api/loyalty/:friendId/adjust', async (c) => {
     const newRank = determineRank(currentTotalSpent);
 
     const staff = c.get('staff');
+    // 'env-owner' は staff_members に存在しないため FK 制約違反になる
+    const staffId = staff?.id && staff.id !== 'env-owner' ? staff.id : undefined;
 
     await upsertLoyaltyPoint(c.env.DB, friendId, {
       balance: newBalance,
@@ -335,7 +338,7 @@ loyalty.post('/api/loyalty/:friendId/adjust', async (c) => {
       points: body.points,
       balanceAfter: newBalance,
       reason: body.reason.trim(),
-      staffId: staff?.id,
+      staffId,
     });
 
     return c.json({ success: true, data: { balance: newBalance, rank: newRank } });
@@ -585,14 +588,19 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
 
     // 最新の割引コードを reason から抽出
     let pendingCode: string | null = null;
+    let pendingDiscount: number | null = null;
+    let pendingPoints: number | null = null;
     try {
       const latest = await c.env.DB
-        .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
+        .prepare(`SELECT reason, points FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
         .bind(point.friend_id)
-        .first<{ reason: string }>();
+        .first<{ reason: string; points: number }>();
       if (latest?.reason) {
         const m = latest.reason.match(/コード: ([A-Z0-9-]+)/);
         if (m) pendingCode = m[1];
+        const d = latest.reason.match(/¥([0-9,]+)割引/);
+        if (d) pendingDiscount = parseInt(d[1].replace(/,/g, ''), 10);
+        if (typeof latest.points === 'number') pendingPoints = Math.abs(latest.points);
       }
     } catch (_) {}
 
@@ -609,6 +617,8 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
         rank: point.rank,
         total_spent: point.total_spent,
         pending_code: pendingCode,
+        pending_discount: pendingDiscount,
+        pending_points: pendingPoints,
         expiring_soon: expiringSoon,
       },
     });
@@ -894,6 +904,89 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to cancel code' }, 500);
+  }
+});
+
+// POST /api/loyalty/link-shopify — LINE友だちとShopify顧客を紐付けて保留注文を自動バックフィル + 連携ボーナス付与
+loyalty.post('/api/loyalty/link-shopify', async (c) => {
+  try {
+    const body = await c.req.json<{ friendId: string; shopifyCustomerId: string }>();
+    if (!body.friendId || !body.shopifyCustomerId) {
+      return c.json({ success: false, error: 'friendId と shopifyCustomerId は必須です' }, 400);
+    }
+
+    // 他の友だちが既にこのShopify顧客と紐付いていないかチェック
+    const existing = await getLoyaltyPointByShopifyCustomerId(c.env.DB, body.shopifyCustomerId);
+    if (existing && existing.friend_id !== body.friendId) {
+      return c.json({
+        success: false,
+        error: 'この Shopify 顧客 ID は既に別の友だちに紐付いています',
+        data: { linked_friend_id: existing.friend_id },
+      }, 409);
+    }
+
+    // 紐付け（既存 loyalty_points を作成 or shopify_customer_id を更新）
+    const current = await getLoyaltyPoint(c.env.DB, body.friendId);
+    await upsertLoyaltyPoint(c.env.DB, body.friendId, {
+      balance: current?.balance ?? 0,
+      totalSpent: current?.total_spent ?? 0,
+      rank: current?.rank ?? 'レギュラー',
+      shopifyCustomerId: body.shopifyCustomerId,
+    });
+
+    // LINE連携ボーナス（友だち単位で1回のみ・冪等性確保）
+    const bonusEnabledSetting = await getLoyaltySetting(c.env.DB, 'link_bonus_enabled').catch(() => null);
+    const bonusPointsSetting = await getLoyaltySetting(c.env.DB, 'link_bonus_points').catch(() => null);
+    const bonusEnabled = (bonusEnabledSetting ?? '1') === '1';
+    const bonusPoints = parseInt(bonusPointsSetting ?? '300', 10) || 300;
+
+    let bonusAwarded = 0;
+    if (bonusEnabled && bonusPoints > 0) {
+      const existingBonus = await c.env.DB
+        .prepare(`SELECT 1 FROM loyalty_transactions WHERE friend_id = ? AND reason = 'LINE連携ボーナス' LIMIT 1`)
+        .bind(body.friendId)
+        .first();
+      if (!existingBonus) {
+        const beforeBonus = await getLoyaltyPoint(c.env.DB, body.friendId);
+        const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
+        await upsertLoyaltyPoint(c.env.DB, body.friendId, {
+          balance: newBalance,
+          totalSpent: beforeBonus?.total_spent ?? 0,
+          rank: beforeBonus?.rank ?? 'レギュラー',
+          shopifyCustomerId: body.shopifyCustomerId,
+        });
+        await addLoyaltyTransaction(c.env.DB, {
+          friendId: body.friendId,
+          type: 'adjust',
+          points: bonusPoints,
+          balanceAfter: newBalance,
+          reason: 'LINE連携ボーナス',
+        });
+        bonusAwarded = bonusPoints;
+      }
+    }
+
+    // 保留注文をバックフィル
+    const backfill = await backfillPendingOrders(c.env.DB, body.friendId, body.shopifyCustomerId);
+
+    return c.json({ success: true, data: { ...backfill, bonusAwarded } });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to link and backfill' }, 500);
+  }
+});
+
+// POST /api/loyalty/shopify/:shopifyCustomerId/backfill-pending — 管理者用：既存連携先の保留注文を手動でバックフィル
+loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/backfill-pending', async (c) => {
+  try {
+    const shopifyCustomerId = c.req.param('shopifyCustomerId');
+    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (!point) {
+      return c.json({ success: false, error: 'この Shopify 顧客 ID は LINE に連携されていません' }, 404);
+    }
+    const backfill = await backfillPendingOrders(c.env.DB, point.friend_id, shopifyCustomerId);
+    return c.json({ success: true, data: backfill });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to backfill' }, 500);
   }
 });
 
