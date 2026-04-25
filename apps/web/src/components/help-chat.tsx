@@ -10,18 +10,18 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL
 const INITIAL: Msg = {
   role: 'assistant',
   content:
-    'やぁ、ぼくはコウジくん！🌾\nLINE Harness の使い方ならぼくに聞いてね。\n\n例：\n・「シナリオ配信ってどう作るの？」\n・「セグメントとタグの違いは？」\n・「この画面で何ができる？」',
+    'やぁ、ぼくはオリゼくん！🌾\nLINE Harness の使い方ならぼくに聞いてね。\n\n例：\n・「シナリオ配信ってどう作るの？」\n・「セグメントとタグの違いは？」\n・「この画面で何ができる？」',
 }
 
-// コウジくん：米麹をモチーフにしたキャラクターアバター
-function KojiAvatar({ size = 36, animated = false }: { size?: number; animated?: boolean }) {
+// オリゼくん：米麹をモチーフにしたキャラクターアバター
+function OryzaeAvatar({ size = 36, animated = false }: { size?: number; animated?: boolean }) {
   return (
     <div
       className={`relative inline-flex items-center justify-center rounded-full bg-gradient-to-br from-[#f5e6a8] via-[#e8d27a] to-[#c9a94f] shadow-md ${
-        animated ? 'animate-koji-bob' : ''
+        animated ? 'animate-oryzae-bob' : ''
       }`}
       style={{ width: size, height: size }}
-      aria-label="コウジくん"
+      aria-label="オリゼくん"
     >
       <svg width={size * 0.7} height={size * 0.7} viewBox="0 0 32 32" fill="none">
         {/* 顔 */}
@@ -105,44 +105,44 @@ export default function HelpChat() {
     <>
       {/* キャラクター用の軽いアニメーション定義 */}
       <style jsx global>{`
-        @keyframes koji-bob {
+        @keyframes oryzae-bob {
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-3px); }
         }
-        .animate-koji-bob { animation: koji-bob 2.4s ease-in-out infinite; }
+        .animate-oryzae-bob { animation: oryzae-bob 2.4s ease-in-out infinite; }
 
-        @keyframes koji-glow {
+        @keyframes oryzae-glow {
           0%, 100% { box-shadow: 0 0 0 0 rgba(34, 85, 51, 0.4), 0 8px 24px rgba(34, 85, 51, 0.25); }
           50%      { box-shadow: 0 0 0 12px rgba(34, 85, 51, 0), 0 8px 28px rgba(34, 85, 51, 0.35); }
         }
-        .animate-koji-glow { animation: koji-glow 2.6s ease-out infinite; }
+        .animate-oryzae-glow { animation: oryzae-glow 2.6s ease-out infinite; }
 
-        @keyframes koji-sparkle {
+        @keyframes oryzae-sparkle {
           0%, 100% { opacity: 0.2; transform: scale(0.8) rotate(0deg); }
           50%      { opacity: 1;   transform: scale(1.2) rotate(20deg); }
         }
-        .animate-koji-sparkle { animation: koji-sparkle 2s ease-in-out infinite; }
+        .animate-oryzae-sparkle { animation: oryzae-sparkle 2s ease-in-out infinite; }
 
-        @keyframes koji-typing {
+        @keyframes oryzae-typing {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
           40%           { transform: scale(1);   opacity: 1; }
         }
-        .koji-dot { animation: koji-typing 1.2s ease-in-out infinite; }
+        .oryzae-dot { animation: oryzae-typing 1.2s ease-in-out infinite; }
       `}</style>
 
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-full bg-gradient-to-r from-[#225533] via-[#2d6e44] to-[#3a8856] px-4 py-3 pr-5 text-white shadow-xl hover:scale-105 transition animate-koji-glow"
-          aria-label="コウジくんに使い方を聞く"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-full bg-gradient-to-r from-[#225533] via-[#2d6e44] to-[#3a8856] px-4 py-3 pr-5 text-white shadow-xl hover:scale-105 transition animate-oryzae-glow"
+          aria-label="オリゼくんに使い方を聞く"
         >
-          <KojiAvatar size={40} animated />
+          <OryzaeAvatar size={40} animated />
           <div className="flex flex-col items-start leading-tight">
             <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wide text-yellow-200">
-              <span className="animate-koji-sparkle">✨</span>
+              <span className="animate-oryzae-sparkle">✨</span>
               AI アシスタント
             </span>
-            <span className="text-sm font-bold">コウジくんに聞く</span>
+            <span className="text-sm font-bold">オリゼくんに聞く</span>
           </div>
         </button>
       )}
@@ -151,10 +151,10 @@ export default function HelpChat() {
         <div className="fixed bottom-6 right-6 z-50 flex h-[600px] w-[400px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
           {/* ヘッダー */}
           <div className="relative flex items-center gap-3 bg-gradient-to-r from-[#225533] via-[#2d6e44] to-[#3a8856] px-4 py-3 text-white">
-            <KojiAvatar size={42} animated />
+            <OryzaeAvatar size={42} animated />
             <div className="flex-1 leading-tight">
               <div className="flex items-center gap-1.5">
-                <h3 className="text-sm font-bold">コウジくん</h3>
+                <h3 className="text-sm font-bold">オリゼくん</h3>
                 <span className="rounded-full bg-yellow-300/30 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide">
                   ✨ AI
                 </span>
@@ -191,7 +191,7 @@ export default function HelpChat() {
           >
             {messages.map((m, i) => (
               <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                {m.role === 'assistant' && <KojiAvatar size={32} />}
+                {m.role === 'assistant' && <OryzaeAvatar size={32} />}
                 <div
                   className={`max-w-[78%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-sm ${
                     m.role === 'user'
@@ -205,12 +205,12 @@ export default function HelpChat() {
             ))}
             {loading && (
               <div className="flex gap-2">
-                <KojiAvatar size={32} animated />
+                <OryzaeAvatar size={32} animated />
                 <div className="rounded-2xl rounded-tl-sm border border-[#e8d27a]/40 bg-white px-4 py-3 shadow-sm">
                   <div className="flex items-center gap-1.5">
-                    <span className="koji-dot inline-block h-2 w-2 rounded-full bg-[#225533]" style={{ animationDelay: '0s' }} />
-                    <span className="koji-dot inline-block h-2 w-2 rounded-full bg-[#225533]" style={{ animationDelay: '0.2s' }} />
-                    <span className="koji-dot inline-block h-2 w-2 rounded-full bg-[#225533]" style={{ animationDelay: '0.4s' }} />
+                    <span className="oryzae-dot inline-block h-2 w-2 rounded-full bg-[#225533]" style={{ animationDelay: '0s' }} />
+                    <span className="oryzae-dot inline-block h-2 w-2 rounded-full bg-[#225533]" style={{ animationDelay: '0.2s' }} />
+                    <span className="oryzae-dot inline-block h-2 w-2 rounded-full bg-[#225533]" style={{ animationDelay: '0.4s' }} />
                     <span className="ml-1 text-[11px] text-gray-500">考えてるよ…</span>
                   </div>
                 </div>
@@ -231,7 +231,7 @@ export default function HelpChat() {
                     send()
                   }
                 }}
-                placeholder="コウジくんに質問する…"
+                placeholder="オリゼくんに質問する…"
                 disabled={loading}
                 className="flex-1 rounded-full border border-gray-300 bg-gray-50 px-4 py-2 text-sm focus:border-[#225533] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#225533]/20 disabled:bg-gray-100"
               />
