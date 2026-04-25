@@ -717,8 +717,8 @@ export async function replaceSegmentMembers(
     .bind(segmentId)
     .run();
 
-  // 新メンバーをバッチ挿入（100件ずつ）
-  const chunkSize = 100;
+  // 新メンバーをバッチ挿入（D1 binding limit ~100 対応で40件ずつ = 80 placeholders）
+  const chunkSize = 40;
   for (let i = 0; i < customerIds.length; i += chunkSize) {
     const chunk = customerIds.slice(i, i + chunkSize);
     if (chunk.length === 0) continue;
