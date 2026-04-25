@@ -69,7 +69,7 @@ import {
   phase5Routes,
   cockpitRoutes,
 } from './ferment/routes/index.js';
-import { detectAnomalies, detectNewGeminiModels } from './ferment/cron-cockpit.js';
+import { detectAnomalies } from './ferment/cron-cockpit.js';
 import { recomputeAllCustomerInsights } from './ferment/cron-insights.js';
 import {
   recomputeChurnRisk,
@@ -303,8 +303,8 @@ async function scheduled(
     jobs.push(sendDailySummary(env));
     // 日次：顧客インサイト（CLV / 購入確率 / 最適送信時刻）の再計算
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
-    // 日次：Gemini 新モデル検知 → Slack 通知
-    jobs.push(detectNewGeminiModels(env).then(() => undefined));
+    // 注: Gemini 新モデル検知は全社版 Watcher に寄せたため、FERMENT 内 cron は無効化
+    // 手動チェック API は残してある: POST /api/ferment/cockpit/models/check-now
   } else {
     // デフォルト（5分毎）でもキャンペーン・フロー処理を実行
     jobs.push(processScheduledEmailCampaigns(env));
