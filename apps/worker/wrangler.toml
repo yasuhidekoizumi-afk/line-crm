@@ -44,3 +44,13 @@ FERMENT_UNSUBSCRIBE_BASE_URL = "https://oryzae-line-crm.oryzae.workers.dev/email
 # wrangler secret put SLACK_WEBHOOK_URL
 # wrangler secret put FERMENT_SHOPIFY_WEBHOOK_SECRET
 # wrangler secret put FERMENT_HMAC_SECRET
+
+# CS Phase 1: vars
+GCP_PUBSUB_TOPIC = "projects/oryzae/topics/cs-gmail-inbound"
+CS_SLACK_CHANNEL_ID = "C02ET1YNMRQ"
+CS_FAQ_SHEET_RANGE = "FAQ!A2:F1000"
+
+# CS Phase 1: シークレット（要 wrangler secret put）
+# wrangler secret put GCP_SERVICE_ACCOUNT_JSON < ~/Downloads/oryzae-secrets/cs-harness-key.json
+# wrangler secret put SLACK_BOT_TOKEN
+# wrangler secret put CS_FAQ_SHEET_ID
