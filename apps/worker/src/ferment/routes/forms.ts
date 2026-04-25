@@ -136,10 +136,32 @@ formPublicRoutes.get('/embed/:formId.js', async (c) => {
       });
     };
   }
+  var TRIGGER_TYPE = '${form.trigger_type ?? 'time_delay'}';
+  var TRIGGER_VALUE = ${form.trigger_value ?? 3000};
+  function setupTrigger() {
+    if (TRIGGER_TYPE === 'exit_intent') {
+      var fired = false;
+      document.addEventListener('mouseleave', function(e){
+        if (fired) return;
+        if (e.clientY < 0) { fired = true; show(); }
+      });
+    } else if (TRIGGER_TYPE === 'scroll_depth') {
+      var fired = false;
+      window.addEventListener('scroll', function(){
+        if (fired) return;
+        var pct = (window.scrollY + window.innerHeight) / document.documentElement.scrollHeight * 100;
+        if (pct >= TRIGGER_VALUE) { fired = true; show(); }
+      });
+    } else if (TRIGGER_TYPE === 'manual') {
+      window.fermentShowForm_${formId.replace(/[^a-z0-9]/gi, '_')} = show;
+    } else {
+      setTimeout(show, TRIGGER_VALUE);
+    }
+  }
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function(){ setTimeout(show, 3000); });
+    document.addEventListener('DOMContentLoaded', setupTrigger);
   } else {
-    setTimeout(show, 3000);
+    setupTrigger();
   }
 })();
 `.trim();

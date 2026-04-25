@@ -40,6 +40,8 @@ export default function FormsPage() {
     name: '',
     description: '',
     form_type: 'popup',
+    trigger_type: 'time_delay',
+    trigger_value: 3000,
     title: 'ニュースレター登録',
     desc: '米麹発酵の最新情報をお届けします 🌾',
     button: '登録する',
@@ -65,6 +67,7 @@ export default function FormsPage() {
 
   const resetForm = () => setForm({
     name: '', description: '', form_type: 'popup',
+    trigger_type: 'time_delay', trigger_value: 3000,
     title: 'ニュースレター登録', desc: '米麹発酵の最新情報をお届けします 🌾',
     button: '登録する', placeholder: 'メールアドレス',
     success: 'ご登録ありがとうございます！', accent: '#225533', bg: '#ffffff',
@@ -81,6 +84,8 @@ export default function FormsPage() {
       name: form.name,
       description: form.description || null,
       form_type: form.form_type,
+      trigger_type: form.trigger_type,
+      trigger_value: form.trigger_value,
       display_config,
     }
     const res = editId
@@ -98,6 +103,8 @@ export default function FormsPage() {
     try { cfg = JSON.parse(f.display_config) } catch { /* noop */ }
     setForm({
       name: f.name, description: f.description ?? '', form_type: f.form_type,
+      trigger_type: (f as unknown as { trigger_type?: string }).trigger_type ?? 'time_delay',
+      trigger_value: (f as unknown as { trigger_value?: number }).trigger_value ?? 3000,
       title: cfg.title ?? 'ニュースレター登録',
       desc: cfg.description ?? '',
       button: cfg.button ?? '登録する',
@@ -179,6 +186,27 @@ export default function FormsPage() {
               <input type="color" value={form.accent}
                 onChange={(e) => setForm({ ...form, accent: e.target.value })}
                 className="w-full h-9 border border-gray-300 rounded-lg" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">表示トリガー</label>
+              <select className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                value={form.trigger_type}
+                onChange={(e) => setForm({ ...form, trigger_type: e.target.value })}>
+                <option value="time_delay">時間経過</option>
+                <option value="exit_intent">離脱インテント（マウスが画面外へ）</option>
+                <option value="scroll_depth">スクロール深度</option>
+                <option value="manual">手動（JS から呼ぶ）</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                トリガー値 {form.trigger_type === 'time_delay' && '(ms)'}
+                {form.trigger_type === 'scroll_depth' && '(%)'}
+              </label>
+              <input type="number" value={form.trigger_value}
+                onChange={(e) => setForm({ ...form, trigger_value: parseInt(e.target.value) || 0 })}
+                disabled={form.trigger_type === 'exit_intent' || form.trigger_type === 'manual'}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-100" />
             </div>
           </div>
 

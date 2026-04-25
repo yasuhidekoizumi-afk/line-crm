@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { fermentApi, type EmailTemplate } from '@/lib/ferment-api'
+import { fetchApi } from '@/lib/api'
+
+interface ApiResult<T> { success: boolean; data?: T; error?: string }
 
 const MailEditor = dynamic(() => import('@/components/email/MailEditor'), { ssr: false })
 
@@ -18,6 +21,10 @@ function EditPageInner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [savedAt, setSavedAt] = useState<Date | null>(null)
+  const [aiSubjects, setAiSubjects] = useState<string[]>([])
+  const [aiLoading, setAiLoading] = useState(false)
+  const [spam, setSpam] = useState<{ score: number; warnings: string[]; suggestions: string[] } | null>(null)
+  const [spamLoading, setSpamLoading] = useState(false)
 
   useEffect(() => {
     if (!id) {
@@ -109,6 +116,88 @@ function EditPageInner() {
       {error && (
         <div className="mb-3 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>
       )}
+
+      {/* AI ヘルパー + スパムチェック */}
+      <div className="mb-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-100 rounded-xl">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={async () => {
+              if (!template.subject_base) return
+              setAiLoading(true)
+              try {
+                const res = await fetchApi<ApiResult<{ variants: string[] }>>('/api/ferment/ai/subject-suggestions', {
+                  method: 'POST',
+                  body: JSON.stringify({ base_subject: template.subject_base, body_preview: html.slice(0, 200), count: 5 }),
+                })
+                if (res.success && res.data) setAiSubjects(res.data.variants)
+                else setError(res.error ?? 'AI生成失敗')
+              } finally {
+                setAiLoading(false)
+              }
+            }}
+            disabled={aiLoading || !template.subject_base}
+            className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+          >
+            {aiLoading ? 'AI生成中...' : '✨ AI 件名提案 (Gemini)'}
+          </button>
+          <button
+            onClick={async () => {
+              setSpamLoading(true)
+              try {
+                const res = await fetchApi<ApiResult<{ score: number; warnings: string[]; suggestions: string[] }>>('/api/ferment/ai/spam-check', {
+                  method: 'POST',
+                  body: JSON.stringify({ subject: template.subject_base ?? '', html }),
+                })
+                if (res.success && res.data) setSpam(res.data)
+              } finally {
+                setSpamLoading(false)
+              }
+            }}
+            disabled={spamLoading}
+            className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {spamLoading ? 'チェック中...' : '🛡️ スパムチェック'}
+          </button>
+        </div>
+        {aiSubjects.length > 0 && (
+          <div className="mt-3 space-y-1">
+            <p className="text-xs font-semibold text-purple-700">提案された件名（クリックでクリップボードコピー）：</p>
+            {aiSubjects.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => { navigator.clipboard.writeText(s); alert('コピーしました: ' + s) }}
+                className="block w-full text-left text-sm bg-white border border-purple-200 rounded-lg px-3 py-2 hover:bg-purple-50"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+        {spam && (
+          <div className="mt-3 p-3 bg-white border border-blue-200 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-semibold">スパムスコア: {spam.score}/100</span>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                spam.score < 30 ? 'bg-green-100 text-green-700' :
+                spam.score < 50 ? 'bg-yellow-100 text-yellow-700' :
+                'bg-red-100 text-red-700'
+              }`}>
+                {spam.score < 30 ? '👍 良好' : spam.score < 50 ? '⚠️ 注意' : '🚨 危険'}
+              </span>
+            </div>
+            {spam.warnings.length > 0 && (
+              <ul className="text-xs text-red-700 list-disc list-inside space-y-0.5">
+                {spam.warnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            )}
+            {spam.suggestions.length > 0 && (
+              <ul className="text-xs text-blue-700 list-disc list-inside space-y-0.5 mt-2">
+                {spam.suggestions.map((s, i) => <li key={i}>💡 {s}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <MailEditor initialHtml={html} onChange={setHtml} onSave={handleSave} />
