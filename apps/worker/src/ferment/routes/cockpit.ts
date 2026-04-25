@@ -223,6 +223,151 @@ ${JSON.stringify({ stats, recent_campaigns: recentCampaigns.results, segments: s
   }
 });
 
+// ─── 1.5. AI ドラフト生成（実行ボタン用） ──────
+//
+// 戦略提案のアクション内容から、配信ドラフトを Gemini に生成させ、
+// セグメント・テンプレ ID も DB から解決して返す。
+// フロントは結果を base64 化してクエリパラメータで遷移先のフォームをプレフィルする。
+
+cockpitRoutes.post('/draft-from-action', async (c) => {
+  if (await isKilled(c.env, 'strategy')) {
+    return c.json({ success: false, error: 'Strategy agent is paused' }, 503);
+  }
+  const apiKey = c.env.GEMINI_API_KEY;
+  if (!apiKey) return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 503);
+
+  const body = await c.req.json<{
+    action: {
+      title: string;
+      segment_name?: string;
+      template_hint?: string;
+      expected_impact?: string;
+      reasoning?: string;
+      execute_url?: string;
+    };
+  }>();
+  const action = body.action;
+  if (!action || !action.title) {
+    return c.json({ success: false, error: 'action.title is required' }, 400);
+  }
+
+  const url = action.execute_url ?? '';
+  const isLine = url.startsWith('/broadcasts') || url.startsWith('/scenarios');
+  const isEmail = url.startsWith('/email/');
+  if (!isLine && !isEmail) {
+    return c.json({ success: false, error: `Unsupported execute_url: ${url}` }, 400);
+  }
+
+  // セグメント解決（部分一致 → 顧客数最多優先）
+  let segment_id: string | null = null;
+  let segment_name_resolved: string | null = null;
+  if (action.segment_name) {
+    const seg = await c.env.DB
+      .prepare(
+        "SELECT segment_id, name FROM segments WHERE name LIKE ? ORDER BY customer_count DESC LIMIT 1",
+      )
+      .bind(`%${action.segment_name}%`)
+      .first<{ segment_id: string; name: string }>();
+    if (seg) {
+      segment_id = seg.segment_id;
+      segment_name_resolved = seg.name;
+    }
+  }
+
+  // テンプレ解決（メールのみ）
+  let template_id: string | null = null;
+  let template_name_resolved: string | null = null;
+  if (isEmail && action.template_hint) {
+    const tmpl = await c.env.DB
+      .prepare(
+        "SELECT template_id, name FROM email_templates WHERE name LIKE ? OR category LIKE ? ORDER BY created_at DESC LIMIT 1",
+      )
+      .bind(`%${action.template_hint}%`, `%${action.template_hint}%`)
+      .first<{ template_id: string; name: string }>();
+    if (tmpl) {
+      template_id = tmpl.template_id;
+      template_name_resolved = tmpl.name;
+    }
+  }
+
+  let draft: Record<string, unknown> = {};
+  let cost = 0;
+
+  if (isLine) {
+    // LINE 一斉配信用テキスト本文を生成
+    const prompt = `あなたはオリゼ（米麹発酵食品EC）の LINE 配信担当です。
+以下の AI 提案アクションを基に、LINE 一斉配信のテキストメッセージ本文を作成してください。
+
+# AI 提案
+- タイトル: ${action.title}
+- 対象セグメント: ${action.segment_name ?? '（指定なし）'}
+- 推奨内容: ${action.template_hint ?? '（指定なし）'}
+- 期待効果: ${action.expected_impact ?? '（指定なし）'}
+- 提案理由: ${action.reasoning ?? '（指定なし）'}
+
+# ルール
+- LINE 一斉配信用のテキストメッセージ（プレーンテキスト、マークダウン禁止）
+- 全角 250〜450 文字
+- ブランドトーン: 誠実・温かみ・専門性（米麹）・健康志向
+- 絵文字は適度に（1〜3 個）
+- 末尾に明確な行動喚起（CTA）
+- 「{{name}}」のようなパーソナライズタグは使わない（一斉配信のため）
+
+# 出力フォーマット (JSON のみ、説明不要)
+{
+  "messageContent": "..."
+}`;
+    const result = await callGemini(apiKey, prompt, true, MODEL_PRO);
+    cost = result.cost;
+    const parsed = JSON.parse(result.text) as { messageContent: string };
+    draft = {
+      title: action.title,
+      messageType: 'text',
+      messageContent: parsed.messageContent,
+      targetType: 'all',
+      ai_generated: true,
+    };
+  } else if (isEmail) {
+    // メールキャンペーンはテンプレートを既存から選ぶ前提なので、
+    // 名前・テンプレ・セグメントの prefill のみ。本文は触らない。
+    draft = {
+      name: action.title,
+      template_id,
+      segment_id,
+      ai_generated: true,
+    };
+  }
+
+  // 利用統計
+  const today = new Date().toISOString().slice(0, 10);
+  await c.env.DB
+    .prepare(
+      `INSERT INTO ai_usage_stats (date, draft_calls, total_cost_usd) VALUES (?, 1, ?)
+       ON CONFLICT(date) DO UPDATE SET
+         draft_calls = COALESCE(draft_calls, 0) + 1,
+         total_cost_usd = total_cost_usd + ?`,
+    )
+    .bind(today, cost, cost)
+    .run()
+    .catch(() => {/* draft_calls カラムが無い旧スキーマでも握りつぶす */});
+
+  return c.json({
+    success: true,
+    data: {
+      channel: isLine ? 'line' : 'email',
+      draft,
+      resolved: {
+        segment_id,
+        segment_name: segment_name_resolved,
+        template_id,
+        template_name: template_name_resolved,
+      },
+      execute_url: url,
+      cost_usd: cost,
+    },
+  });
+});
+
 cockpitRoutes.post('/strategy/action/:actionId/decide', async (c) => {
   const actionId = c.req.param('actionId');
   const body = await c.req.json<{ status: 'approved' | 'rejected' | 'edited' | 'executed'; campaign_id?: string; user?: string }>();
