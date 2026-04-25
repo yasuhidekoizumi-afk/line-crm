@@ -282,9 +282,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 🤖 AI コックピット — 戦略提案・チャット・異常検知・週次振り返り */}
-      <AiCockpit />
-
       {/* Demo banner */}
       <a
         href="https://line-crm-worker.line-crm-api.workers.dev/auth/line?ref=dashboard"
@@ -566,6 +563,9 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* 🤖 AI コックピット — 上記の数字を見て、AI が今日やるべきことを提案 */}
+      <AiCockpit />
 
       {/* Quick links */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
