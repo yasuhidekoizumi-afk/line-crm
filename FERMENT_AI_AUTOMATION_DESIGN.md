@@ -90,7 +90,7 @@ AI API 呼び出しは月額予算上限を設定。超過時は自動停止。
 ```
 
 #### モデル
-Claude Sonnet 4.6（戦略立案・推論）
+Gemini 3 Flash Preview（戦略立案・推論。コスト最適化のため Gemini 統一）
 
 #### システムプロンプト
 ```
@@ -125,7 +125,7 @@ Claude Sonnet 4.6（戦略立案・推論）
 - ダッシュボード表示時にキャッシュから取得
 
 #### コスト
-1日1回 × 月30回 × Claude Sonnet ~$0.05/回 = **月¥225 程度**
+1日1回 × 月30回 × Gemini 3 Flash Preview ~$0.01/回 = **月¥45 程度**
 
 ---
 
@@ -142,7 +142,7 @@ Claude Sonnet 4.6（戦略立案・推論）
 
 #### モデル
 - 件名: Gemini 3 Flash Preview（既存）
-- 本文: Claude Sonnet 4.6（既存）
+- 本文: Gemini 3 Flash Preview（Claude → 変更、API統一のため）
 
 #### 改善点（現状から）
 1. **過去成績学習**：subject_line_history を参考に

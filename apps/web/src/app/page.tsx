@@ -6,6 +6,7 @@ import { api, fetchApi } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
 import { ORYZAE_BENCHMARK, compareToBenchmark } from '@/lib/benchmarks'
+import AiCockpit from '@/components/dashboard/AiCockpit'
 
 const ccPrompts = [
   {
@@ -280,6 +281,9 @@ export default function DashboardPage() {
           {error}
         </div>
       )}
+
+      {/* 🤖 AI コックピット — 戦略提案・チャット・異常検知・週次振り返り */}
+      <AiCockpit />
 
       {/* Demo banner */}
       <a
