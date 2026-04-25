@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { api } from '@/lib/api'
+import { api, fetchApi } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
+import { ORYZAE_BENCHMARK, compareToBenchmark } from '@/lib/benchmarks'
 
 const ccPrompts = [
   {
@@ -33,6 +34,22 @@ interface DashboardStats {
   automationCount: number | null
   scoringRuleCount: number | null
 }
+
+interface FermentStats {
+  totalCustomers: number | null
+  emailSubscribers: number | null
+  emailTemplates: number | null
+  emailCampaigns: number | null
+  totalSent30d: number | null
+  totalOpened30d: number | null
+  totalClicked30d: number | null
+  attributedRevenue30d: number | null
+  predictedClvSum: number | null
+  highIntent: number | null
+  topCampaigns: Array<{ campaign_id: string; name: string; total_sent: number; total_opened: number; total_attributed_revenue: number }>
+}
+
+interface ApiResultGeneric<T> { success: boolean; data?: T; meta?: { total: number } }
 
 interface StatCardProps {
   title: string
@@ -80,6 +97,19 @@ export default function DashboardPage() {
     templateCount: null,
     automationCount: null,
     scoringRuleCount: null,
+  })
+  const [ferment, setFerment] = useState<FermentStats>({
+    totalCustomers: null,
+    emailSubscribers: null,
+    emailTemplates: null,
+    emailCampaigns: null,
+    totalSent30d: null,
+    totalOpened30d: null,
+    totalClicked30d: null,
+    attributedRevenue30d: null,
+    predictedClvSum: null,
+    highIntent: null,
+    topCampaigns: [],
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -131,7 +161,57 @@ export default function DashboardPage() {
       }
     }
 
+    const loadFerment = async () => {
+      try {
+        const [
+          customersRes,
+          subscribersRes,
+          templatesRes,
+          campaignsRes,
+          insightsRes,
+          funnelRes,
+          attributionRes,
+        ] = await Promise.allSettled([
+          fetchApi<ApiResultGeneric<unknown[]>>('/api/customers?limit=1'),
+          fetchApi<ApiResultGeneric<unknown[]>>('/api/customers?limit=1&subscribed_email=true'),
+          fetchApi<ApiResultGeneric<unknown[]>>('/api/email/templates'),
+          fetchApi<ApiResultGeneric<unknown[]>>('/api/email/campaigns'),
+          fetchApi<ApiResultGeneric<{ total: number; with_clv: number; total_clv: number; high_intent: number }>>('/api/ferment/insights/summary'),
+          fetchApi<ApiResultGeneric<{ sent: number; opened: number; clicked: number; total_revenue: number }>>('/api/ferment/analytics/funnel-overall'),
+          fetchApi<ApiResultGeneric<Array<{ campaign_id: string; name: string; total_sent: number; total_opened: number; total_attributed_revenue: number }>>>('/api/ferment/attribution/summary' as string).catch(() => ({ value: { success: false } } as PromiseFulfilledResult<{ success: boolean }>)),
+        ])
+
+        const getMeta = (res: PromiseSettledResult<ApiResultGeneric<unknown[]>>): number | null =>
+          res.status === 'fulfilled' && res.value.success
+            ? (res.value.meta?.total ?? res.value.data?.length ?? 0)
+            : null
+
+        const insights = insightsRes.status === 'fulfilled' && insightsRes.value.success ? insightsRes.value.data : null
+        const funnel = funnelRes.status === 'fulfilled' && funnelRes.value.success ? funnelRes.value.data : null
+        const attribution = attributionRes.status === 'fulfilled' && (attributionRes.value as ApiResultGeneric<unknown[]>).success
+          ? (attributionRes.value as ApiResultGeneric<Array<{ campaign_id: string; name: string; total_sent: number; total_opened: number; total_attributed_revenue: number }>>).data ?? []
+          : []
+
+        setFerment({
+          totalCustomers: getMeta(customersRes),
+          emailSubscribers: getMeta(subscribersRes),
+          emailTemplates: getMeta(templatesRes),
+          emailCampaigns: getMeta(campaignsRes),
+          totalSent30d: funnel?.sent ?? 0,
+          totalOpened30d: funnel?.opened ?? 0,
+          totalClicked30d: funnel?.clicked ?? 0,
+          attributedRevenue30d: funnel?.total_revenue ?? 0,
+          predictedClvSum: insights?.total_clv ?? 0,
+          highIntent: insights?.high_intent ?? 0,
+          topCampaigns: attribution.slice(0, 5),
+        })
+      } catch {
+        // FERMENT データ取得失敗は無視（既存ダッシュボードは表示）
+      }
+    }
+
     load()
+    loadFerment()
   }, [selectedAccountId])
 
   return (
@@ -252,6 +332,112 @@ export default function DashboardPage() {
             </svg>
           }
         />
+      </div>
+
+      {/* FERMENT メールマーケティング セクション */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            🌾 <span>FERMENT メール</span>
+            <span className="text-xs font-normal text-gray-400">過去30日</span>
+          </h2>
+          <Link href="/email/analytics" className="text-xs text-green-600 hover:underline">分析詳細 →</Link>
+        </div>
+
+        {/* KPI 4枚 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">統合顧客数</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalCustomers?.toLocaleString() ?? '-'}</p>
+            <p className="text-xs text-gray-400 mt-1">メール購読: {ferment.emailSubscribers?.toLocaleString() ?? '-'}人</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">送信数 (30日)</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalSent30d?.toLocaleString() ?? '-'}</p>
+            <p className="text-xs text-gray-400 mt-1">
+              開封率: {ferment.totalSent30d && ferment.totalSent30d > 0
+                ? ((ferment.totalOpened30d ?? 0) / ferment.totalSent30d * 100).toFixed(1) + '%'
+                : '-'}
+            </p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">帰属売上 (30日)</p>
+            <p className="text-2xl font-bold text-green-600 mt-1">¥{(ferment.attributedRevenue30d ?? 0).toLocaleString()}</p>
+            <p className="text-xs text-gray-400 mt-1">メール経由</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">高購入意欲</p>
+            <p className="text-2xl font-bold text-purple-600 mt-1">{ferment.highIntent?.toLocaleString() ?? '-'}</p>
+            <p className="text-xs text-gray-400 mt-1">30日内 50%以上</p>
+          </div>
+        </div>
+
+        {/* 業界ベンチマーク */}
+        {ferment.totalSent30d != null && ferment.totalSent30d > 0 && (() => {
+          const openRate = (ferment.totalOpened30d ?? 0) / ferment.totalSent30d * 100
+          const clickRate = (ferment.totalClicked30d ?? 0) / ferment.totalSent30d * 100
+          const openCmp = compareToBenchmark('open', openRate)
+          const clickCmp = compareToBenchmark('click', clickRate)
+          return (
+            <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-100 rounded-lg p-4 mb-4">
+              <p className="text-xs font-semibold text-gray-700 mb-2">📊 業界ベンチマーク（{ORYZAE_BENCHMARK.industry}）との比較</p>
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <span className="text-gray-500">開封率</span>
+                  <span className={`ml-2 font-semibold ${openCmp.status === 'good' ? 'text-green-600' : openCmp.status === 'bad' ? 'text-red-600' : 'text-gray-700'}`}>
+                    {openRate.toFixed(1)}% {openCmp.label}
+                  </span>
+                  <span className="text-gray-400 ml-1">(平均 {ORYZAE_BENCHMARK.open_rate}%)</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">クリック率</span>
+                  <span className={`ml-2 font-semibold ${clickCmp.status === 'good' ? 'text-green-600' : clickCmp.status === 'bad' ? 'text-red-600' : 'text-gray-700'}`}>
+                    {clickRate.toFixed(1)}% {clickCmp.label}
+                  </span>
+                  <span className="text-gray-400 ml-1">(平均 {ORYZAE_BENCHMARK.click_rate}%)</span>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* 直近キャンペーン Top 5 */}
+        {ferment.topCampaigns.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs font-semibold text-gray-700 mb-3">💰 売上貢献 Top 5 キャンペーン</p>
+            <div className="space-y-2">
+              {ferment.topCampaigns.map((c) => {
+                const openRate = c.total_sent > 0 ? (c.total_opened / c.total_sent) * 100 : 0
+                return (
+                  <div key={c.campaign_id} className="flex items-center justify-between text-sm border-b border-gray-50 pb-2 last:border-0">
+                    <span className="truncate flex-1 text-gray-700">{c.name}</span>
+                    <div className="flex gap-4 text-xs text-gray-500 shrink-0 ml-2">
+                      <span>{c.total_sent.toLocaleString()}通</span>
+                      <span>開封{openRate.toFixed(0)}%</span>
+                      <span className="text-green-600 font-semibold">¥{(c.total_attributed_revenue ?? 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* メール用クイックアクション */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+          <Link href="/email/campaigns" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-green-50 hover:border-green-300">
+            ✉️ 新規キャンペーン
+          </Link>
+          <Link href="/email/templates" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300">
+            📝 テンプレ編集
+          </Link>
+          <Link href="/email/insights" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300">
+            🎯 顧客インサイト
+          </Link>
+          <Link href="/email/forms" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-yellow-50 hover:border-yellow-300">
+            📋 フォーム管理
+          </Link>
+        </div>
       </div>
 
       {/* Quick links */}
