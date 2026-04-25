@@ -31,6 +31,7 @@ import {
   smsCampaignRoutes,
 } from './phase4.js';
 import { phase5Routes } from './phase5.js';
+import { cockpitRoutes } from './cockpit.js';
 import type { FermentEnv } from '../types.js';
 
 // /api/email/* 配下のルートをまとめる
@@ -62,4 +63,5 @@ export {
   analyticsRoutes,
   smsCampaignRoutes,
   phase5Routes,
+  cockpitRoutes,
 };

@@ -63,7 +63,9 @@ import {
   analyticsRoutes,
   smsCampaignRoutes,
   phase5Routes,
+  cockpitRoutes,
 } from './ferment/routes/index.js';
+import { detectAnomalies } from './ferment/cron-cockpit.js';
 import { recomputeAllCustomerInsights } from './ferment/cron-insights.js';
 import {
   recomputeChurnRisk,
@@ -176,6 +178,7 @@ app.route('/api/sms', smsRoutes);
 app.route('/api/ferment/recommend', recommendRoutes);
 app.route('/api/ferment/insights', insightRoutes);
 app.route('/api/ferment/phase5', phase5Routes);
+app.route('/api/ferment/cockpit', cockpitRoutes);
 app.route('/api/ferment/ai', aiRoutes);
 app.route('/api/ferment/analytics', analyticsRoutes);
 app.route('/api/sms/campaign', smsCampaignRoutes);
@@ -280,6 +283,7 @@ async function scheduled(
   if (cronExpr === '*/10 * * * *') {
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
+    jobs.push(detectAnomalies(env).then(() => undefined));
   } else if (cronExpr === '0 * * * *') {
     jobs.push(recomputeAllSegments(env));
   } else if (cronExpr === '0 0 * * *') {
