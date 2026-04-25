@@ -51,6 +51,17 @@ interface FermentStats {
 
 interface ApiResultGeneric<T> { success: boolean; data?: T; meta?: { total: number } }
 
+interface LoyaltyStats {
+  totalMembers: number | null
+  rankBreakdown: { rank: string; count: number }[] | null
+  thisMonthAwarded: number | null
+  thisMonthRedeemed: number | null
+  thisMonthNewMembers: number | null
+  lastMonthAwarded: number | null
+  lastMonthRedeemed: number | null
+  lastMonthNewMembers: number | null
+}
+
 interface StatCardProps {
   title: string
   value: number | null
@@ -97,6 +108,16 @@ export default function DashboardPage() {
     templateCount: null,
     automationCount: null,
     scoringRuleCount: null,
+  })
+  const [loyalty, setLoyalty] = useState<LoyaltyStats>({
+    totalMembers: null,
+    rankBreakdown: null,
+    thisMonthAwarded: null,
+    thisMonthRedeemed: null,
+    thisMonthNewMembers: null,
+    lastMonthAwarded: null,
+    lastMonthRedeemed: null,
+    lastMonthNewMembers: null,
   })
   const [ferment, setFerment] = useState<FermentStats>({
     totalCustomers: null,
@@ -210,8 +231,37 @@ export default function DashboardPage() {
       }
     }
 
+    const loadLoyalty = async () => {
+      try {
+        const [statsRes, periodRes] = await Promise.allSettled([
+          fetchApi<ApiResultGeneric<{ ranks: { rank: string; count: number }[]; total: number }>>('/api/loyalty/stats'),
+          fetchApi<ApiResultGeneric<{
+            this_month: { awarded: number; redeemed: number; new_members: number }
+            last_month: { awarded: number; redeemed: number; new_members: number }
+          }>>('/api/loyalty/period-stats'),
+        ])
+
+        const stats = statsRes.status === 'fulfilled' && statsRes.value.success ? statsRes.value.data : null
+        const period = periodRes.status === 'fulfilled' && periodRes.value.success ? periodRes.value.data : null
+
+        setLoyalty({
+          totalMembers: stats?.total ?? null,
+          rankBreakdown: stats?.ranks ?? null,
+          thisMonthAwarded: period?.this_month?.awarded ?? null,
+          thisMonthRedeemed: period?.this_month?.redeemed ?? null,
+          thisMonthNewMembers: period?.this_month?.new_members ?? null,
+          lastMonthAwarded: period?.last_month?.awarded ?? null,
+          lastMonthRedeemed: period?.last_month?.redeemed ?? null,
+          lastMonthNewMembers: period?.last_month?.new_members ?? null,
+        })
+      } catch {
+        // 既存ダッシュボードへの影響を回避（無視）
+      }
+    }
+
     load()
     loadFerment()
+    loadLoyalty()
   }, [selectedAccountId])
 
   return (
@@ -332,6 +382,79 @@ export default function DashboardPage() {
             </svg>
           }
         />
+      </div>
+
+      {/* 💎 ロイヤルティ セクション */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            💎 <span>ロイヤルティ会員</span>
+            <span className="text-xs font-normal text-gray-400">今月実績</span>
+          </h2>
+          <Link href="/loyalty" className="text-xs text-yellow-600 hover:underline">詳細管理 →</Link>
+        </div>
+
+        {/* KPI 4枚 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">総会員数</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{loyalty.totalMembers?.toLocaleString() ?? '-'}</p>
+            <p className="text-xs text-gray-400 mt-1">名</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">付与ポイント (今月)</p>
+            <p className="text-2xl font-bold text-green-600 mt-1">{loyalty.thisMonthAwarded?.toLocaleString() ?? '-'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p>
+            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthAwarded?.toLocaleString() ?? '-'} pt</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">利用ポイント (今月)</p>
+            <p className="text-2xl font-bold text-red-600 mt-1">{loyalty.thisMonthRedeemed?.toLocaleString() ?? '-'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p>
+            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthRedeemed?.toLocaleString() ?? '-'} pt</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500">新規会員 (今月)</p>
+            <p className="text-2xl font-bold text-blue-600 mt-1">{loyalty.thisMonthNewMembers?.toLocaleString() ?? '-'}<span className="text-sm font-normal text-gray-400 ml-1">名</span></p>
+            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthNewMembers?.toLocaleString() ?? '-'} 名</p>
+          </div>
+        </div>
+
+        {/* ランク内訳 */}
+        {loyalty.rankBreakdown && loyalty.rankBreakdown.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+            <p className="text-xs font-semibold text-gray-700 mb-3">📊 会員ランク内訳</p>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {loyalty.rankBreakdown.map((r) => {
+                const colors: Record<string, string> = {
+                  'ダイヤモンド': 'bg-cyan-50 text-cyan-700 border-cyan-200',
+                  'プラチナ':     'bg-purple-50 text-purple-700 border-purple-200',
+                  'ゴールド':     'bg-yellow-50 text-yellow-700 border-yellow-200',
+                  'シルバー':     'bg-gray-100 text-gray-700 border-gray-300',
+                  'レギュラー':   'bg-green-50 text-green-700 border-green-200',
+                }
+                return (
+                  <div key={r.rank} className={`p-3 rounded-lg border ${colors[r.rank] ?? 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                    <p className="text-xs font-medium">{r.rank}</p>
+                    <p className="text-lg font-bold mt-1">{r.count.toLocaleString()}</p>
+                    <p className="text-xs opacity-70">名</p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ロイヤルティ クイックアクション */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <Link href="/loyalty" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-yellow-50 hover:border-yellow-300">
+            💎 会員一覧
+          </Link>
+          <Link href="/loyalty?tab=campaigns" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300">
+            🎉 キャンペーン
+          </Link>
+          <Link href="/loyalty?tab=transactions" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300">
+            📊 取引履歴
+          </Link>
+        </div>
       </div>
 
       {/* FERMENT メールマーケティング セクション */}
