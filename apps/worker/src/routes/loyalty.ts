@@ -343,6 +343,7 @@ loyalty.post('/api/loyalty/:friendId/adjust', async (c) => {
 
     return c.json({ success: true, data: { balance: newBalance, rank: newRank } });
   } catch (e) {
+    console.error('adjust points error:', e);
     return c.json({ success: false, error: 'Failed to adjust points' }, 500);
   }
 });

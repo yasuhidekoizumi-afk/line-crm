@@ -39,7 +39,21 @@ import { staff } from './routes/staff.js';
 import { images } from './routes/images.js';
 import { loyalty } from './routes/loyalty.js';
 import { rewards } from './routes/rewards.js';
+import { shopifyWebhooks } from './routes/shopify-webhooks.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
+// FERMENT: メールマーケティング拡張
+import {
+  emailApiRouter,
+  segmentRoutes,
+  customerRoutes,
+  webhookRoutes as fermentWebhookRoutes,
+  publicEmailRoutes,
+  backfillRoutes,
+} from './ferment/routes/index.js';
+import { processScheduledEmailCampaigns } from './ferment/cron-campaigns.js';
+import { processFlowDeliveries } from './ferment/cron-flows.js';
+import { recomputeAllSegments } from './ferment/cron-segments.js';
+import { sendDailySummary } from './ferment/cron-daily-summary.js';
 
 export type Env = {
   Bindings: {
@@ -53,9 +67,23 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
-    X_HARNESS_URL?: string;  // Optional: X Harness API URL for account linking
+    X_HARNESS_URL?: string;
     SHOPIFY_ADMIN_TOKEN?: string;
     SHOPIFY_SHOP_DOMAIN?: string;
+    // FERMENT 追加シークレット
+    RESEND_API_KEY?: string;
+    RESEND_WEBHOOK_SECRET?: string;
+    ANTHROPIC_API_KEY?: string;
+    GEMINI_API_KEY?: string;
+    SLACK_WEBHOOK_URL?: string;
+    FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
+    FERMENT_HMAC_SECRET?: string;
+    // FERMENT 追加 vars
+    FERMENT_FROM_EMAIL_JP?: string;
+    FERMENT_FROM_EMAIL_US?: string;
+    FERMENT_FROM_NAME_JP?: string;
+    FERMENT_FROM_NAME_US?: string;
+    FERMENT_UNSUBSCRIBE_BASE_URL?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -105,6 +133,18 @@ app.route('/', staff);
 app.route('/', images);
 app.route('/', loyalty);
 app.route('/', rewards);
+app.route('/', shopifyWebhooks);
+
+// FERMENT ルート登録
+// 認証が必要な API エンドポイント
+app.route('/api/email', emailApiRouter);
+app.route('/api/segments', segmentRoutes);
+app.route('/api/customers', customerRoutes);
+app.route('/api/ferment/backfill', backfillRoutes);
+// 認証不要の公開エンドポイント（auth middleware は内部でスキップ済み）
+app.route('/email', publicEmailRoutes);
+// Webhook（署名検証を使用するため Bearer 認証はスキップ）
+app.route('/webhook', fermentWebhookRoutes);
 
 // Short link: /r/:ref → landing page with LINE open button
 app.get('/r/:ref', (c) => {
@@ -188,6 +228,25 @@ async function scheduled(
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
   jobs.push(processLoyaltyExpirations(env.DB));
+
+  // FERMENT: cron 種別に応じた処理を追加
+  // "*/5 * * * *"  → 5分毎（既存）
+  // "*/10 * * * *" → 10分毎: キャンペーン配信チェック + フロー配信
+  // "0 * * * *"    → 1時間毎: セグメント再計算
+  // "0 0 * * *"    → 毎日 0:00 UTC (9:00 JST): 日次サマリー
+  const cronExpr = (_event as ScheduledEvent).cron;
+  if (cronExpr === '*/10 * * * *') {
+    jobs.push(processScheduledEmailCampaigns(env));
+    jobs.push(processFlowDeliveries(env));
+  } else if (cronExpr === '0 * * * *') {
+    jobs.push(recomputeAllSegments(env));
+  } else if (cronExpr === '0 0 * * *') {
+    jobs.push(sendDailySummary(env));
+  } else {
+    // デフォルト（5分毎）でもキャンペーン・フロー処理を実行
+    jobs.push(processScheduledEmailCampaigns(env));
+    jobs.push(processFlowDeliveries(env));
+  }
 
   await Promise.allSettled(jobs);
 }

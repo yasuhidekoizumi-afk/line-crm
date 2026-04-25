@@ -678,6 +678,207 @@ liffRoutes.post('/api/liff/link', async (c) => {
   }
 });
 
+// POST /api/liff/link-shopify — LIFFからLINEとShopify顧客を紐付け＋300ptボーナス付与
+liffRoutes.post('/api/liff/link-shopify', async (c) => {
+  try {
+    const body = await c.req.json<{ accessToken?: string; idToken?: string; shopifyCustomerId: string }>();
+    if (!body.shopifyCustomerId) {
+      return c.json({ success: false, error: 'shopifyCustomerId は必須です' }, 400);
+    }
+    if (!body.accessToken && !body.idToken) {
+      return c.json({ success: false, error: 'accessToken または idToken は必須です' }, 400);
+    }
+
+    // 許可チャネルID一覧（デフォルト + DB保存分）
+    const loginChannelIds = [c.env.LINE_LOGIN_CHANNEL_ID];
+    const dbAccounts = await getLineAccounts(c.env.DB);
+    for (const acct of dbAccounts) {
+      if (acct.login_channel_id && !loginChannelIds.includes(acct.login_channel_id)) {
+        loginChannelIds.push(acct.login_channel_id);
+      }
+    }
+
+    let lineUserId: string | null = null;
+
+    // アクセストークン検証（LIFFチャネルに openid スコープが無くても動く）
+    if (body.accessToken) {
+      // 1) /oauth2/v2.1/verify でトークン発行元チャネルを検証
+      const tokenInfoRes = await fetch(
+        `https://api.line.me/oauth2/v2.1/verify?access_token=${encodeURIComponent(body.accessToken)}`,
+      );
+      if (!tokenInfoRes.ok) {
+        return c.json({ success: false, error: 'Invalid access token' }, 401);
+      }
+      const tokenInfo = await tokenInfoRes.json<{ client_id: string; expires_in: number }>();
+      if (!loginChannelIds.includes(tokenInfo.client_id)) {
+        return c.json({ success: false, error: 'Access token was issued for a different channel' }, 401);
+      }
+      if (tokenInfo.expires_in <= 0) {
+        return c.json({ success: false, error: 'Access token expired' }, 401);
+      }
+      // 2) /v2/profile で userId 取得
+      const profileRes = await fetch('https://api.line.me/v2/profile', {
+        headers: { Authorization: `Bearer ${body.accessToken}` },
+      });
+      if (!profileRes.ok) {
+        return c.json({ success: false, error: 'Failed to fetch LINE profile' }, 401);
+      }
+      const profile = await profileRes.json<{ userId: string }>();
+      lineUserId = profile.userId;
+    } else if (body.idToken) {
+      // IDトークン検証（後方互換・openidスコープ付きチャネル用）
+      let verifyRes: Response | null = null;
+      for (const channelId of loginChannelIds) {
+        verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ id_token: body.idToken, client_id: channelId }),
+        });
+        if (verifyRes.ok) break;
+      }
+      if (!verifyRes?.ok) {
+        return c.json({ success: false, error: 'Invalid ID token' }, 401);
+      }
+      const verified = await verifyRes.json<{ sub: string }>();
+      lineUserId = verified.sub;
+    }
+
+    if (!lineUserId) {
+      return c.json({ success: false, error: 'Unable to verify LINE user' }, 401);
+    }
+
+    // LINE userID → friend_id
+    const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
+    if (!friend) {
+      return c.json({ success: false, error: 'Friend not found（まずLINE公式アカウントを友だち追加してください）' }, 404);
+    }
+
+    // /api/loyalty/link-shopify を内部経由で呼ぶ（管理者ルーターを経由するのが手間なので、同ロジックをここで直接実行）
+    const shopifyCustomerId = String(body.shopifyCustomerId);
+    const {
+      getLoyaltyPoint,
+      getLoyaltyPointByShopifyCustomerId,
+      getLoyaltySetting,
+      upsertLoyaltyPoint,
+      addLoyaltyTransaction,
+    } = await import('@line-crm/db');
+    const { backfillPendingOrders } = await import('../services/loyalty-backfill.js');
+
+    // 他の友だちが既にこのShopify顧客と紐付いていないかチェック
+    const existing = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (existing && existing.friend_id !== friend.id) {
+      // sp_ プレフィックスは Shopify webhook が先行で作成したプレースホルダー友だち。
+      // 実 LINE 連携時は当該データを本 friend に合流させる。
+      if (existing.friend_id.startsWith('sp_')) {
+        const spFriendId = existing.friend_id;
+        const realLoyalty = await getLoyaltyPoint(c.env.DB, friend.id);
+
+        // トランザクションをすべて本 friend に付け替え
+        await c.env.DB
+          .prepare(`UPDATE loyalty_transactions SET friend_id = ? WHERE friend_id = ?`)
+          .bind(friend.id, spFriendId)
+          .run();
+
+        if (realLoyalty) {
+          // 両方に loyalty_points 行あり → 本 friend 側にマージして sp_ 側は削除
+          const mergedBalance = (realLoyalty.balance ?? 0) + (existing.balance ?? 0);
+          const mergedTotalSpent = (realLoyalty.total_spent ?? 0) + (existing.total_spent ?? 0);
+          const rankOrder = ['レギュラー', 'シルバー', 'ゴールド', 'プラチナ', 'ダイヤモンド'];
+          const higherRank =
+            rankOrder.indexOf(existing.rank ?? 'レギュラー') > rankOrder.indexOf(realLoyalty.rank ?? 'レギュラー')
+              ? (existing.rank ?? 'レギュラー')
+              : (realLoyalty.rank ?? 'レギュラー');
+          await upsertLoyaltyPoint(c.env.DB, friend.id, {
+            balance: mergedBalance,
+            totalSpent: mergedTotalSpent,
+            rank: higherRank,
+            shopifyCustomerId,
+          });
+          await c.env.DB
+            .prepare(`DELETE FROM loyalty_points WHERE friend_id = ?`)
+            .bind(spFriendId)
+            .run();
+        } else {
+          // 本 friend 側に loyalty_points が無い → sp_ 行の friend_id を付け替え
+          await c.env.DB
+            .prepare(`UPDATE loyalty_points SET friend_id = ? WHERE friend_id = ?`)
+            .bind(friend.id, spFriendId)
+            .run();
+        }
+
+        // sp_ プレースホルダー friend を削除（残るCASCADE対象は webhook 由来で発生し得ないため安全）
+        await c.env.DB
+          .prepare(`DELETE FROM friends WHERE id = ?`)
+          .bind(spFriendId)
+          .run();
+
+        console.log(`[link-shopify] Merged placeholder ${spFriendId} into ${friend.id}`);
+      } else {
+        return c.json({
+          success: false,
+          error: 'この Shopify 顧客は既に別のLINEアカウントに紐付いています',
+        }, 409);
+      }
+    }
+
+    // 紐付け
+    const current = await getLoyaltyPoint(c.env.DB, friend.id);
+    await upsertLoyaltyPoint(c.env.DB, friend.id, {
+      balance: current?.balance ?? 0,
+      totalSpent: current?.total_spent ?? 0,
+      rank: current?.rank ?? 'レギュラー',
+      shopifyCustomerId,
+    });
+
+    // LINE連携ボーナス（friend_id単位で1回のみ）
+    const bonusEnabledSetting = await getLoyaltySetting(c.env.DB, 'link_bonus_enabled').catch(() => null);
+    const bonusPointsSetting = await getLoyaltySetting(c.env.DB, 'link_bonus_points').catch(() => null);
+    const bonusEnabled = (bonusEnabledSetting ?? '1') === '1';
+    const bonusPoints = parseInt(bonusPointsSetting ?? '300', 10) || 300;
+
+    let bonusAwarded = 0;
+    if (bonusEnabled && bonusPoints > 0) {
+      const existingBonus = await c.env.DB
+        .prepare(`SELECT 1 FROM loyalty_transactions WHERE friend_id = ? AND reason = 'LINE連携ボーナス' LIMIT 1`)
+        .bind(friend.id)
+        .first();
+      if (!existingBonus) {
+        const beforeBonus = await getLoyaltyPoint(c.env.DB, friend.id);
+        const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
+        await upsertLoyaltyPoint(c.env.DB, friend.id, {
+          balance: newBalance,
+          totalSpent: beforeBonus?.total_spent ?? 0,
+          rank: beforeBonus?.rank ?? 'レギュラー',
+          shopifyCustomerId,
+        });
+        await addLoyaltyTransaction(c.env.DB, {
+          friendId: friend.id,
+          type: 'adjust',
+          points: bonusPoints,
+          balanceAfter: newBalance,
+          reason: 'LINE連携ボーナス',
+        });
+        bonusAwarded = bonusPoints;
+      }
+    }
+
+    // 保留注文バックフィル
+    const backfill = await backfillPendingOrders(c.env.DB, friend.id, shopifyCustomerId);
+
+    return c.json({
+      success: true,
+      data: {
+        bonusAwarded,
+        backfilledOrders: backfill.processed,
+        backfilledPoints: backfill.totalPointsAwarded,
+      },
+    });
+  } catch (err) {
+    console.error('POST /api/liff/link-shopify error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // ─── Attribution Analytics ──────────────────────────────────────
 
 /**

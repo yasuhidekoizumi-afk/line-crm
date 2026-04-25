@@ -17,6 +17,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.startsWith('/api/liff/') ||
     path.startsWith('/auth/') ||
     path === '/api/integrations/stripe/webhook' ||
+    path.startsWith('/api/shopify/webhooks/') ||
     path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
     path.match(/^\/api\/forms\/[^/]+$/) || // GET form definition (public for LIFF)
@@ -25,7 +26,12 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) || // POST cancel code (Shopify customer page)
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) || // GET history (Shopify customer page)
     path === '/api/rewards' || // GET active reward items (Shopify widget)
-    path.match(/^\/api\/rewards\/[^/]+\/exchange$/) // POST exchange (Shopify widget)
+    path.match(/^\/api\/rewards\/[^/]+\/exchange$/) || // POST exchange (Shopify widget)
+    // FERMENT: 認証不要エンドポイント
+    path.startsWith('/email/unsubscribe') ||          // 配信停止ページ
+    path.startsWith('/email/view/') ||                // 開封トラッキングピクセル
+    path === '/webhook/resend' ||                     // Resend Webhook（署名検証を使用）
+    path.startsWith('/webhook/shopify/')              // Shopify Webhook（共有シークレット）
   ) {
     return next();
   }

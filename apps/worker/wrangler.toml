@@ -20,8 +20,27 @@ database_id = "e47571b1-cd3f-4791-9040-2c2e55034ed8"
 # bucket_name = "oryzae-line-crm-images"
 
 [triggers]
-crons = ["*/5 * * * *"]
+# 5分毎: LINE ステップ配信・ブロードキャスト + FERMENT キャンペーン/フロー処理
+# 1時間毎: FERMENT セグメント再計算
+# 毎日 0:00 UTC (9:00 JST): FERMENT 日次サマリー
+crons = ["*/5 * * * *", "0 * * * *", "0 0 * * *"]
 
 [vars]
 SHOPIFY_SHOP_DOMAIN = "yasuhide-koizumi.myshopify.com"
 # SHOPIFY_ADMIN_TOKEN は wrangler secret put SHOPIFY_ADMIN_TOKEN で設定すること
+
+# FERMENT: 送信元アドレス設定（秘匿不要）
+FERMENT_FROM_EMAIL_JP = "hello@oryzae.site"
+FERMENT_FROM_EMAIL_US = "hello@oryzae.site"
+FERMENT_FROM_NAME_JP = "オリゼ"
+FERMENT_FROM_NAME_US = "ORYZAE"
+FERMENT_UNSUBSCRIBE_BASE_URL = "https://oryzae-line-crm.oryzae.workers.dev/email/unsubscribe"
+
+# FERMENT シークレット（要 wrangler secret put コマンドで設定）
+# wrangler secret put RESEND_API_KEY
+# wrangler secret put RESEND_WEBHOOK_SECRET
+# wrangler secret put ANTHROPIC_API_KEY
+# wrangler secret put GEMINI_API_KEY
+# wrangler secret put SLACK_WEBHOOK_URL
+# wrangler secret put FERMENT_SHOPIFY_WEBHOOK_SECRET
+# wrangler secret put FERMENT_HMAC_SECRET

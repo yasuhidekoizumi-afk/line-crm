@@ -24,6 +24,8 @@ export * from './ad-platforms';
 export * from './staff';
 export * from './loyalty';
 export * from './rewards';
+// FERMENT: メールマーケティング拡張
+export * from './ferment';
 
 /**
  * Thin wrapper around D1Database.
