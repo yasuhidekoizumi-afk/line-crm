@@ -1,7 +1,42 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { fetchApi } from '@/lib/api'
+
+// AI が返す可能性のある execute_url を実在ルートにマッピング
+const EXECUTE_URL_ALIASES: Record<string, string> = {
+  '/line/campaigns': '/broadcasts',
+  '/line/broadcasts': '/broadcasts',
+  '/line': '/broadcasts',
+  '/email': '/email/campaigns',
+  '/sms': '/email/sms',
+  '/segment': '/segments',
+  '/customer': '/customers',
+}
+
+const ALLOWED_EXECUTE_PREFIXES = [
+  '/broadcasts', '/scenarios', '/templates', '/automations', '/scoring',
+  '/email/campaigns', '/email/templates', '/email/flows', '/email/forms',
+  '/email/insights', '/email/analytics', '/email/sms', '/email/reviews',
+  '/segments', '/customers', '/friends', '/chats', '/loyalty',
+  '/reminders', '/notifications', '/affiliates', '/conversions',
+  '/form-submissions', '/health', '/automations',
+]
+
+function normalizeExecuteUrl(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '/broadcasts'
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('/')) return '/broadcasts'
+  // クエリ・ハッシュを切り離してパスだけで判定
+  const [pathOnly, ...rest] = trimmed.split(/[?#]/)
+  const suffix = rest.length > 0 ? trimmed.slice(pathOnly.length) : ''
+  if (EXECUTE_URL_ALIASES[pathOnly]) return EXECUTE_URL_ALIASES[pathOnly] + suffix
+  if (ALLOWED_EXECUTE_PREFIXES.some((p) => pathOnly === p || pathOnly.startsWith(p + '/'))) {
+    return trimmed
+  }
+  return '/broadcasts'
+}
 
 interface ApiResult<T> { success: boolean; data?: T; error?: string }
 
@@ -192,12 +227,12 @@ export default function AiCockpit() {
                     <p className="text-xs text-green-700 mt-1 font-medium">期待効果: {a.expected_impact}</p>
                     <p className="text-xs text-gray-600 mt-2">{a.reasoning}</p>
                   </div>
-                  <a
-                    href={a.execute_url}
+                  <Link
+                    href={normalizeExecuteUrl(a.execute_url)}
                     className="shrink-0 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"
                   >
                     実行 →
-                  </a>
+                  </Link>
                 </div>
               </div>
             ))}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { fermentApi, type EmailTemplate } from '@/lib/ferment-api'
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -112,12 +113,12 @@ export default function EmailTemplatesPage() {
           <p className="text-sm text-gray-500 mt-1">AI パーソナライズ対応のメールテンプレート管理</p>
         </div>
         <div className="flex gap-2">
-          <a
+          <Link
             href="/email/templates/library"
             className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700"
           >
             📚 ライブラリから作成
-          </a>
+          </Link>
           <button
             onClick={() => { setShowCreate(true); setEditId(null); resetForm() }}
             className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
@@ -276,13 +277,13 @@ export default function EmailTemplatesPage() {
                 >
                   プレビュー
                 </button>
-                <a
+                <Link
                   href={`/email/templates/edit?id=${t.template_id}`}
                   className="px-3 py-1.5 text-xs text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-50"
                   title="ドラッグ&ドロップで編集"
                 >
                   ✨ ビジュアル編集
-                </a>
+                </Link>
                 <button
                   onClick={() => handleEdit(t)}
                   className="px-3 py-1.5 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50"
