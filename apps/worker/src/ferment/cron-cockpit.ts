@@ -171,6 +171,95 @@ export async function generateWeeklyReport(env: FermentEnv): Promise<{ generated
   const env_ = env as unknown as FermentEnv['Bindings'];
   const apiKey = env_.GEMINI_API_KEY;
   if (!apiKey) return { generated: false };
-  // POST /weekly-report/generate 相当
   return { generated: true };
+}
+
+/**
+ * Gemini 新モデル検知（日次）
+ * Google AI Studio の /models を叩いて、新規追加されたモデルを Slack 通知。
+ */
+export async function detectNewGeminiModels(env: FermentEnv): Promise<{ new_models: string[] }> {
+  const env_ = env as unknown as FermentEnv['Bindings'];
+  const apiKey = env_.GEMINI_API_KEY;
+  if (!apiKey) return { new_models: [] };
+
+  try {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    if (!r.ok) return { new_models: [] };
+    const data = await r.json<{
+      models?: Array<{ name?: string; supportedGenerationMethods?: string[]; description?: string }>;
+    }>();
+
+    // gemini で generateContent をサポートするモデルだけ対象
+    const liveModels = (data.models ?? [])
+      .filter((m) => m.name?.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m) => ({
+        name: (m.name ?? '').replace('models/', ''),
+        methods: m.supportedGenerationMethods ?? [],
+        description: m.description ?? '',
+      }));
+
+    const newModels: Array<{ name: string; methods: string[]; description: string }> = [];
+
+    for (const m of liveModels) {
+      const existing = await env_.DB
+        .prepare('SELECT model_name, notified FROM ai_model_registry WHERE model_name = ?')
+        .bind(m.name)
+        .first<{ model_name: string; notified: number }>();
+
+      if (!existing) {
+        // 新規モデル発見
+        await env_.DB
+          .prepare(
+            'INSERT INTO ai_model_registry (model_name, supported_methods, notified) VALUES (?, ?, 0)',
+          )
+          .bind(m.name, JSON.stringify(m.methods))
+          .run();
+        newModels.push(m);
+      } else {
+        // 既存モデルの last_seen_at 更新
+        await env_.DB
+          .prepare("UPDATE ai_model_registry SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours') WHERE model_name = ?")
+          .bind(m.name)
+          .run();
+      }
+    }
+
+    // 新モデルがあれば Slack 通知 + DB マーク
+    if (newModels.length > 0) {
+      const slackUrl = (env_ as unknown as { FERMENT_SLACK_WEBHOOK_URL?: string }).FERMENT_SLACK_WEBHOOK_URL;
+      if (slackUrl) {
+        const lines = newModels.map((m) => {
+          // モデル名から世代を判定して優先度示唆
+          const isPro = m.name.includes('pro');
+          const isFlash = m.name.includes('flash');
+          const tier = isPro ? '🥇 Pro系（戦略・本文生成向け）' : isFlash ? '🥈 Flash系（件名・週次向け）' : '⚙️ その他';
+          return `• \`${m.name}\` — ${tier}`;
+        }).join('\n');
+
+        await fetch(slackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: `🌟 *新しい Gemini モデルが利用可能になりました* (${newModels.length}件)\n\n${lines}\n\n` +
+                  `現在の FERMENT 利用状況:\n• 戦略・チャット・本文: \`gemini-3.1-pro-preview\`\n• 週次振り返り・件名: \`gemini-3-flash-preview\`\n\n` +
+                  `必要なら CC（Claude Code）に「Gemini を最新版に切り替えて」と依頼してください。`,
+          }),
+        }).catch(() => {});
+      }
+
+      // 通知済みマーク
+      for (const m of newModels) {
+        await env_.DB
+          .prepare('UPDATE ai_model_registry SET notified = 1 WHERE model_name = ?')
+          .bind(m.name)
+          .run();
+      }
+    }
+
+    return { new_models: newModels.map((m) => m.name) };
+  } catch (e) {
+    console.error('detectNewGeminiModels error:', e);
+    return { new_models: [] };
+  }
 }

@@ -41,6 +41,10 @@ import { loyalty } from './routes/loyalty.js';
 import { rewards } from './routes/rewards.js';
 import { shopifyWebhooks } from './routes/shopify-webhooks.js';
 import { help } from './routes/help.js';
+// CS Phase 1: 統合受信箱 + AIトリアージ
+import { cs } from './routes/cs.js';
+import { syncFaqFromSheets } from './services/cs-faq-sync.js';
+import { notifyDraftBacklog } from './services/cs-slack-notify.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
 // FERMENT: メールマーケティング拡張
 import {
@@ -65,7 +69,7 @@ import {
   phase5Routes,
   cockpitRoutes,
 } from './ferment/routes/index.js';
-import { detectAnomalies } from './ferment/cron-cockpit.js';
+import { detectAnomalies, detectNewGeminiModels } from './ferment/cron-cockpit.js';
 import { recomputeAllCustomerInsights } from './ferment/cron-insights.js';
 import {
   recomputeChurnRisk,
@@ -114,6 +118,13 @@ export type Env = {
     FERMENT_FROM_NAME_JP?: string;
     FERMENT_FROM_NAME_US?: string;
     FERMENT_UNSUBSCRIBE_BASE_URL?: string;
+    // CS Phase 1
+    GCP_SERVICE_ACCOUNT_JSON?: string;
+    GCP_PUBSUB_TOPIC?: string;
+    SLACK_BOT_TOKEN?: string;
+    CS_SLACK_CHANNEL_ID?: string;
+    CS_FAQ_SHEET_ID?: string;
+    CS_FAQ_SHEET_RANGE?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -165,6 +176,8 @@ app.route('/', loyalty);
 app.route('/', rewards);
 app.route('/', shopifyWebhooks);
 app.route('/', help);
+// CS Phase 1: Gmail webhook + AI下書き承認API
+app.route('/', cs);
 
 // FERMENT ルート登録
 // 認証が必要な API エンドポイント
@@ -290,13 +303,31 @@ async function scheduled(
     jobs.push(sendDailySummary(env));
     // 日次：顧客インサイト（CLV / 購入確率 / 最適送信時刻）の再計算
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
+    // 日次：Gemini 新モデル検知 → Slack 通知
+    jobs.push(detectNewGeminiModels(env).then(() => undefined));
   } else {
     // デフォルト（5分毎）でもキャンペーン・フロー処理を実行
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
+    // CS Phase 1: FAQシート同期 + 下書き滞留チェック（5分毎）
+    jobs.push(syncFaqFromSheets(env).then(() => undefined).catch(() => undefined));
+    jobs.push(checkCsDraftBacklog(env).catch(() => undefined));
   }
 
   await Promise.allSettled(jobs);
+}
+
+// CS Phase 1: 30分以上滞留している下書きをSlack通知
+async function checkCsDraftBacklog(env: Env['Bindings']): Promise<void> {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const result = await env.DB.prepare(
+    `SELECT COUNT(*) as cnt, MIN(created_at) as oldest FROM ai_drafts WHERE status = 'pending' AND created_at < ?`,
+  )
+    .bind(cutoff)
+    .first<{ cnt: number; oldest: string | null }>();
+  if (!result || result.cnt === 0) return;
+  const oldestMs = result.oldest ? Date.now() - new Date(result.oldest).getTime() : 0;
+  await notifyDraftBacklog(env, result.cnt, Math.floor(oldestMs / 60000));
 }
 
 export default {

@@ -15,7 +15,9 @@ import type { FermentEnv } from '../types.js';
 export const cockpitRoutes = new Hono<FermentEnv>();
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_MODEL = 'gemini-3-flash-preview';
+// 用途別モデル使い分け
+const MODEL_PRO = 'gemini-3.1-pro-preview';      // 深い推論：戦略・チャット・本文生成
+const MODEL_FLASH = 'gemini-3-flash-preview';    // 高速・低コスト：振り返り・件名生成
 
 // ─── Kill Switch チェック ───────────────────
 
@@ -29,12 +31,13 @@ async function isKilled(env: FermentEnv['Bindings'], scope: string): Promise<boo
 
 // ─── Gemini API ヘルパー ───────────────────
 
-async function callGemini(apiKey: string, prompt: string, jsonOutput = false): Promise<{
+async function callGemini(apiKey: string, prompt: string, jsonOutput = false, model: string = MODEL_PRO): Promise<{
   text: string;
   cost: number;
+  model: string;
 }> {
   const res = await fetch(
-    `${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    `${GEMINI_API_BASE}/models/${model}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -43,7 +46,8 @@ async function callGemini(apiKey: string, prompt: string, jsonOutput = false): P
         generationConfig: {
           temperature: 0.7,
           maxOutputTokens: 4096,
-          thinkingConfig: { thinkingBudget: 0 },
+          // Pro モデルは thinking 必須、Flash モデルは無効化でレスポンス短縮
+          ...(model.includes('pro') ? {} : { thinkingConfig: { thinkingBudget: 0 } }),
           ...(jsonOutput ? { responseMimeType: 'application/json' } : {}),
         },
       }),
@@ -56,9 +60,12 @@ async function callGemini(apiKey: string, prompt: string, jsonOutput = false): P
   }>();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
   const tokens = data.usageMetadata?.totalTokenCount ?? 0;
-  // Gemini 3 Flash Preview 仮料金 0.0000003/token
-  const cost = tokens * 0.0000003;
-  return { text, cost };
+  // モデル別料金概算（Preview 段階のため仮）
+  // Pro: $1.25/1M input + $5.00/1M output → 平均 $0.00000175/token
+  // Flash: $0.15/1M input + $0.60/1M output → 平均 $0.0000003/token
+  const perToken = model.includes('pro') ? 0.00000175 : 0.0000003;
+  const cost = tokens * perToken;
+  return { text, cost, model };
 }
 
 // ─── 1. 戦略エージェント ─────────────────────
@@ -173,7 +180,7 @@ ${JSON.stringify({ stats, recent_campaigns: recentCampaigns.results, segments: s
         JSON.stringify(parsed.actions),
         JSON.stringify(parsed.warnings ?? []),
         JSON.stringify({ stats, recent_campaigns: recentCampaigns.results }),
-        GEMINI_MODEL,
+        MODEL_PRO,
         cost,
       )
       .run();
@@ -265,7 +272,7 @@ ${body.message}
         `INSERT INTO ai_chat_history (chat_id, user_id, user_name, user_message, ai_response, ai_model, ai_cost_usd)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(generateFermentId('chat'), null, body.user ?? null, body.message, text, GEMINI_MODEL, cost)
+      .bind(generateFermentId('chat'), null, body.user ?? null, body.message, text, MODEL_PRO, cost)
       .run();
     await c.env.DB
       .prepare(
@@ -367,7 +374,8 @@ ${JSON.stringify(prevStats, null, 2)}
 - 数値で根拠を示す`;
 
   try {
-    const { text, cost } = await callGemini(apiKey, prompt, false);
+    // 週次振り返りは事実集計が中心なので Flash で十分（コスト最適）
+    const { text, cost, model } = await callGemini(apiKey, prompt, false, MODEL_FLASH);
     const reportId = generateFermentId('rep');
     await c.env.DB
       .prepare(
@@ -384,7 +392,7 @@ ${JSON.stringify(prevStats, null, 2)}
         weekEnd.toISOString().slice(0, 10),
         text,
         JSON.stringify({ stats, prevStats }),
-        GEMINI_MODEL,
+        MODEL_PRO,
       )
       .run();
     return c.json({ success: true, data: { summary: text, cost_usd: cost } });
@@ -413,6 +421,43 @@ cockpitRoutes.post('/kill-switch/:scope', async (c) => {
     .bind(body.enabled ? 1 : 0, body.reason ?? null, body.user ?? null, body.enabled ? 1 : 0, body.enabled ? 1 : 0, scope)
     .run();
   return c.json({ success: true });
+});
+
+// ─── 7. Gemini 新モデル登録一覧 ──────────────
+
+cockpitRoutes.get('/models/registry', async (c) => {
+  const r = await c.env.DB
+    .prepare('SELECT * FROM ai_model_registry ORDER BY first_discovered_at DESC')
+    .all();
+  return c.json({ success: true, data: r.results });
+});
+
+cockpitRoutes.post('/models/check-now', async (c) => {
+  // 手動で新モデル検知トリガー
+  const apiKey = c.env.GEMINI_API_KEY;
+  if (!apiKey) return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 503);
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+  if (!r.ok) return c.json({ success: false, error: `Gemini ${r.status}` }, 500);
+  const data = await r.json<{ models?: Array<{ name?: string; supportedGenerationMethods?: string[] }> }>();
+  const liveModels = (data.models ?? [])
+    .filter((m) => m.name?.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent'))
+    .map((m) => (m.name ?? '').replace('models/', ''));
+
+  const newOnes: string[] = [];
+  for (const name of liveModels) {
+    const existing = await c.env.DB
+      .prepare('SELECT model_name FROM ai_model_registry WHERE model_name = ?')
+      .bind(name)
+      .first();
+    if (!existing) {
+      await c.env.DB
+        .prepare('INSERT INTO ai_model_registry (model_name, supported_methods) VALUES (?, ?)')
+        .bind(name, JSON.stringify([]))
+        .run();
+      newOnes.push(name);
+    }
+  }
+  return c.json({ success: true, data: { total_live: liveModels.length, new_discovered: newOnes } });
 });
 
 // ─── 6. AI 利用統計 ────────────────────────
