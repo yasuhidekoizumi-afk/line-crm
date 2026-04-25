@@ -1,12 +1,33 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import BroadcastForm from '@/components/broadcasts/broadcast-form'
 import CcPromptButton from '@/components/cc-prompt-button'
+
+interface BroadcastDraft {
+  title?: string
+  messageType?: ApiBroadcast['messageType']
+  messageContent?: string
+  targetType?: ApiBroadcast['targetType']
+  targetTagId?: string
+  scheduledAt?: string
+  sendNow?: boolean
+}
+
+function decodeDraft(token: string | null): BroadcastDraft | null {
+  if (!token) return null
+  try {
+    const json = decodeURIComponent(escape(atob(token)))
+    return JSON.parse(json) as BroadcastDraft
+  } catch {
+    return null
+  }
+}
 
 const ccPrompts = [
   {
@@ -48,13 +69,16 @@ function formatDatetime(iso: string | null): string {
   })
 }
 
-export default function BroadcastsPage() {
+function BroadcastsPageInner() {
   const { selectedAccountId } = useAccount()
+  const searchParams = useSearchParams()
+  const draftToken = searchParams.get('draft')
+  const initialDraft = decodeDraft(draftToken)
   const [broadcasts, setBroadcasts] = useState<ApiBroadcast[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [showCreate, setShowCreate] = useState(false)
+  const [showCreate, setShowCreate] = useState(!!initialDraft)
   const [sendingId, setSendingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -129,11 +153,19 @@ export default function BroadcastsPage() {
 
       {/* Create form */}
       {showCreate && (
-        <BroadcastForm
-          tags={tags}
-          onSuccess={() => { setShowCreate(false); load() }}
-          onCancel={() => setShowCreate(false)}
-        />
+        <>
+          {initialDraft && (
+            <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-800">
+              ✨ AI コックピットの提案からドラフトを生成しました。内容を確認し、必要に応じて編集してから送信してください。
+            </div>
+          )}
+          <BroadcastForm
+            tags={tags}
+            initialDraft={initialDraft}
+            onSuccess={() => { setShowCreate(false); load() }}
+            onCancel={() => setShowCreate(false)}
+          />
+        </>
       )}
 
       {/* Loading */}
@@ -272,5 +304,13 @@ export default function BroadcastsPage() {
 
       <CcPromptButton prompts={ccPrompts} />
     </div>
+  )
+}
+
+export default function BroadcastsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-gray-400 text-sm">読み込み中...</div>}>
+      <BroadcastsPageInner />
+    </Suspense>
   )
 }

@@ -1,7 +1,24 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { fermentApi, type EmailCampaign, type EmailTemplate, type Segment } from '@/lib/ferment-api'
+
+interface CampaignDraft {
+  name?: string
+  template_id?: string | null
+  segment_id?: string | null
+}
+
+function decodeDraft(token: string | null): CampaignDraft | null {
+  if (!token) return null
+  try {
+    const json = decodeURIComponent(escape(atob(token)))
+    return JSON.parse(json) as CampaignDraft
+  } catch {
+    return null
+  }
+}
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   draft:     { label: '下書き',   cls: 'bg-gray-100 text-gray-600' },
@@ -17,14 +34,21 @@ function fmt(iso: string | null) {
   return new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-export default function EmailCampaignsPage() {
+function EmailCampaignsPageInner() {
+  const searchParams = useSearchParams()
+  const draftToken = searchParams.get('draft')
+  const initialDraft = decodeDraft(draftToken)
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([])
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [segments, setSegments] = useState<Segment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', template_id: '', segment_id: '' })
+  const [showCreate, setShowCreate] = useState(!!initialDraft)
+  const [form, setForm] = useState({
+    name: initialDraft?.name ?? '',
+    template_id: initialDraft?.template_id ?? '',
+    segment_id: initialDraft?.segment_id ?? '',
+  })
   const [creating, setCreating] = useState(false)
   const [sendingId, setSendingId] = useState<string | null>(null)
 
@@ -114,6 +138,11 @@ export default function EmailCampaignsPage() {
       {/* 作成フォーム */}
       {showCreate && (
         <div className="mb-6 p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
+          {initialDraft && (
+            <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-800">
+              ✨ AI コックピットの提案からドラフトを生成しました。テンプレートとセグメントを確認し、必要に応じて調整してください。
+            </div>
+          )}
           <h2 className="text-base font-semibold text-gray-800 mb-4">新規キャンペーン</h2>
           <div className="space-y-3">
             <div>
@@ -239,5 +268,13 @@ export default function EmailCampaignsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function EmailCampaignsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-gray-400 text-sm">読み込み中...</div>}>
+      <EmailCampaignsPageInner />
+    </Suspense>
   )
 }

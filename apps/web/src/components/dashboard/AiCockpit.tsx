@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { fetchApi } from '@/lib/api'
 
 // AI が返す可能性のある execute_url を実在ルートにマッピング
@@ -36,6 +36,17 @@ function normalizeExecuteUrl(raw: string): string {
     return trimmed
   }
   return '/broadcasts'
+}
+
+// ドラフトオブジェクトを URL クエリ用に base64 エンコード（マルチバイト対応）
+function encodeDraft(draft: unknown): string {
+  const json = JSON.stringify(draft)
+  return btoa(unescape(encodeURIComponent(json)))
+}
+
+// 実行ボタンで draft 生成 + 遷移先プレフィルをサポートするチャネル判定
+function isDraftableUrl(url: string): boolean {
+  return url.startsWith('/broadcasts') || url.startsWith('/email/campaigns')
 }
 
 interface ApiResult<T> { success: boolean; data?: T; error?: string }
@@ -79,6 +90,7 @@ interface KillSwitch {
 }
 
 export default function AiCockpit() {
+  const router = useRouter()
   const [strategy, setStrategy] = useState<StrategyResp | null>(null)
   const [anomalies, setAnomalies] = useState<Anomaly[]>([])
   const [weekly, setWeekly] = useState<WeeklyReport | null>(null)
@@ -88,6 +100,51 @@ export default function AiCockpit() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [draftingRank, setDraftingRank] = useState<number | null>(null)
+  const [draftError, setDraftError] = useState<string | null>(null)
+
+  const handleExecute = async (a: Action) => {
+    const dest = normalizeExecuteUrl(a.execute_url)
+    setDraftError(null)
+    if (!isDraftableUrl(dest)) {
+      router.push(dest)
+      return
+    }
+    setDraftingRank(a.rank)
+    try {
+      const r = await fetchApi<ApiResult<{
+        channel: 'line' | 'email'
+        draft: Record<string, unknown>
+        execute_url: string
+      }>>('/api/ferment/cockpit/draft-from-action', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: {
+            title: a.title,
+            segment_name: a.segment_name,
+            template_hint: a.template_hint,
+            expected_impact: a.expected_impact,
+            reasoning: a.reasoning,
+            execute_url: dest,
+          },
+        }),
+      })
+      if (r.success && r.data) {
+        const token = encodeDraft(r.data.draft)
+        const sep = dest.includes('?') ? '&' : '?'
+        router.push(`${dest}${sep}draft=${token}`)
+      } else {
+        // 失敗時はドラフト無しで遷移（ユーザーが手動で作れる状態にはなる）
+        setDraftError(r.error ?? 'AI ドラフト生成に失敗しました。手動で作成してください。')
+        router.push(dest)
+      }
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : String(e))
+      router.push(dest)
+    } finally {
+      setDraftingRank(null)
+    }
+  }
 
   const loadAll = async () => {
     const [s, a, w, k] = await Promise.allSettled([
@@ -203,6 +260,11 @@ export default function AiCockpit() {
 
       {/* 戦略提案 TOP 3 */}
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
+        {draftError && (
+          <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+            ⚠️ {draftError}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-800">🎯 今日やるべきアクション TOP 3</h3>
           <button
@@ -227,12 +289,14 @@ export default function AiCockpit() {
                     <p className="text-xs text-green-700 mt-1 font-medium">期待効果: {a.expected_impact}</p>
                     <p className="text-xs text-gray-600 mt-2">{a.reasoning}</p>
                   </div>
-                  <Link
-                    href={normalizeExecuteUrl(a.execute_url)}
-                    className="shrink-0 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  <button
+                    onClick={() => handleExecute(a)}
+                    disabled={draftingRank !== null}
+                    className="shrink-0 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 disabled:cursor-wait"
+                    title={isDraftableUrl(normalizeExecuteUrl(a.execute_url)) ? 'AI が下書きを生成して遷移します' : '画面に遷移します'}
                   >
-                    実行 →
-                  </Link>
+                    {draftingRank === a.rank ? '✨ AI 下書き生成中...' : '実行 →'}
+                  </button>
                 </div>
               </div>
             ))}

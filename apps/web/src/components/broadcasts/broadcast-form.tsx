@@ -10,6 +10,7 @@ interface BroadcastFormProps {
   tags: Tag[]
   onSuccess: () => void
   onCancel: () => void
+  initialDraft?: Partial<FormState> | null
 }
 
 const messageTypeLabels: Record<ApiBroadcast['messageType'], string> = {
@@ -28,16 +29,16 @@ interface FormState {
   sendNow: boolean
 }
 
-export default function BroadcastForm({ tags, onSuccess, onCancel }: BroadcastFormProps) {
+export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft }: BroadcastFormProps) {
   const { selectedAccountId } = useAccount()
   const [form, setForm] = useState<FormState>({
-    title: '',
-    messageType: 'text',
-    messageContent: '',
-    targetType: 'all',
-    targetTagId: '',
-    scheduledAt: '',
-    sendNow: true,
+    title: initialDraft?.title ?? '',
+    messageType: initialDraft?.messageType ?? 'text',
+    messageContent: initialDraft?.messageContent ?? '',
+    targetType: initialDraft?.targetType ?? 'all',
+    targetTagId: initialDraft?.targetTagId ?? '',
+    scheduledAt: initialDraft?.scheduledAt ?? '',
+    sendNow: initialDraft?.sendNow ?? true,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
