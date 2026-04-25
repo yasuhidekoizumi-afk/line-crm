@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { fermentApi, type EmailFlow, type EmailTemplate } from '@/lib/ferment-api'
 
 const TRIGGER_LABEL: Record<string, string> = {
@@ -176,12 +177,12 @@ export default function EmailFlowsPage() {
                   )}
                 </div>
                 <div className="flex gap-2 shrink-0 ml-4">
-                  <a
+                  <Link
                     href={`/email/flows/edit?id=${flow.flow_id}`}
                     className="px-3 py-1.5 text-xs text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-50"
                   >
                     ✨ ビジュアル編集
-                  </a>
+                  </Link>
                   <button
                     onClick={() => handleToggle(flow)}
                     className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${

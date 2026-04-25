@@ -142,6 +142,16 @@ ${JSON.stringify({ stats, recent_campaigns: recentCampaigns.results, segments: s
 - 既存セグメント・既存テンプレで実行可能なもの優先
 - ブランドトーン: 誠実・温かみ・専門性（米麹）・健康志向
 
+# execute_url は以下の実在ルートのいずれかを必ず使うこと（他のパスは禁止）
+- /broadcasts (LINE 一斉配信)
+- /scenarios (LINE シナリオ配信)
+- /email/campaigns (メールキャンペーン)
+- /email/templates (メールテンプレ)
+- /email/flows (メールフロー)
+- /segments (セグメント管理)
+- /loyalty (ロイヤルティ)
+- /chats (個別チャット)
+
 # 出力フォーマット (JSON配列のみ、説明不要)
 {
   "actions": [
