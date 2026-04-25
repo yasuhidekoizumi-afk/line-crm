@@ -33,7 +33,10 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/webhook/resend' ||                     // Resend Webhook（署名検証を使用）
     path.startsWith('/webhook/shopify/') ||           // Shopify Webhook（共有シークレット）
     path.startsWith('/forms/') ||                     // FERMENT 公開フォーム（埋め込みJS・送信）
-    path.startsWith('/reviews/')                      // FERMENT レビュー受信フォーム
+    path.startsWith('/reviews/') ||                   // FERMENT レビュー受信フォーム
+    path === '/email/optin-confirm' ||                // FERMENT 二重オプトイン確認
+    path === '/api/ferment/phase5/double-optin/confirm' || // FERMENT 二重オプトイン確認(直接)
+    path === '/api/ferment/phase5/gdpr/request'      // FERMENT GDPR削除リクエスト（公開）
   ) {
     return next();
   }
