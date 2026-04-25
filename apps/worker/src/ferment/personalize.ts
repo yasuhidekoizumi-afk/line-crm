@@ -15,6 +15,7 @@ import { generatePersonalizedBody } from '@line-crm/ai-sdk';
 import { generateSubjectVariants } from '@line-crm/ai-sdk';
 import type { EmailTemplate, Customer } from '@line-crm/db';
 import type { CustomerContext } from '@line-crm/ai-sdk';
+import { renderTemplate } from './template-engine.js';
 
 /** 配信停止 URL を生成（HMAC-SHA256 署名付きトークン） */
 export async function generateUnsubscribeUrl(
@@ -100,7 +101,18 @@ function buildCustomerContext(customer: Customer): CustomerContext {
   };
 }
 
-/** プレースホルダーを顧客情報で置換する */
+/**
+ * プレースホルダーと動的コンテンツブロックを顧客情報で置換する
+ *
+ * 対応構文:
+ *   - {{var}} 単純置換  例: {{name}}, {{ltv_yen}}
+ *   - {{#if cond}}...{{/if}} 条件分岐  例: {{#if has_purchased}}...{{/if}}
+ *   - {{#if ltv >= 5000}}...{{/if}} 数値比較
+ *   - {{#if region == "JP"}}...{{/if}} 文字列比較
+ *   - {{#unless cond}}...{{/unless}} 否定
+ *   - {{#each tags}}...{{this}}...{{/each}} 繰り返し
+ *   - {{#else}} else 節（if/unless 内）
+ */
 function replacePlaceholders(
   content: string,
   customer: Customer,
@@ -108,12 +120,29 @@ function replacePlaceholders(
 ): string {
   const name = customer.display_name ?? 'お客様';
   const firstName = name.split(/\s+/)[0];
+  const tagsArr = (customer.tags ?? '').split(',').map((t) => t.trim()).filter(Boolean);
 
-  return content
-    .replace(/\{\{name\}\}/g, name)
-    .replace(/\{\{first_name\}\}/g, firstName)
-    .replace(/\{\{region\}\}/g, customer.region)
-    .replace(/\{\{unsubscribe_url\}\}/g, unsubscribeUrl);
+  const context = {
+    name,
+    first_name: firstName,
+    region: customer.region,
+    unsubscribe_url: unsubscribeUrl,
+    email: customer.email ?? '',
+    language: customer.language,
+    ltv: customer.ltv ?? 0,
+    ltv_currency: customer.ltv_currency,
+    ltv_yen: typeof customer.ltv === 'number' ? `¥${customer.ltv.toLocaleString('ja-JP')}` : '',
+    order_count: customer.order_count ?? 0,
+    last_order_at: customer.last_order_at,
+    subscribed_email: customer.subscribed_email === 1,
+    subscribed_line: customer.subscribed_line === 1,
+    has_purchased: (customer.order_count ?? 0) > 0,
+    is_vip: tagsArr.includes('rank:プラチナ') || tagsArr.includes('rank:ダイヤモンド'),
+    has_line: customer.line_user_id != null,
+    tags: tagsArr,
+  };
+
+  return renderTemplate(content, context);
 }
 
 export interface PersonalizeEmailResult {

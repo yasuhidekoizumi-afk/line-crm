@@ -31,7 +31,8 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.startsWith('/email/unsubscribe') ||          // 配信停止ページ
     path.startsWith('/email/view/') ||                // 開封トラッキングピクセル
     path === '/webhook/resend' ||                     // Resend Webhook（署名検証を使用）
-    path.startsWith('/webhook/shopify/')              // Shopify Webhook（共有シークレット）
+    path.startsWith('/webhook/shopify/') ||           // Shopify Webhook（共有シークレット）
+    path.startsWith('/forms/')                        // FERMENT 公開フォーム（埋め込みJS・送信）
   ) {
     return next();
   }

@@ -49,6 +49,8 @@ import {
   webhookRoutes as fermentWebhookRoutes,
   publicEmailRoutes,
   backfillRoutes,
+  formAdminRoutes,
+  formPublicRoutes,
 } from './ferment/routes/index.js';
 import { processScheduledEmailCampaigns } from './ferment/cron-campaigns.js';
 import { processFlowDeliveries } from './ferment/cron-flows.js';
@@ -141,7 +143,9 @@ app.route('/api/email', emailApiRouter);
 app.route('/api/segments', segmentRoutes);
 app.route('/api/customers', customerRoutes);
 app.route('/api/ferment/backfill', backfillRoutes);
+app.route('/api/forms', formAdminRoutes);
 // 認証不要の公開エンドポイント（auth middleware は内部でスキップ済み）
+app.route('/forms', formPublicRoutes);
 app.route('/email', publicEmailRoutes);
 // Webhook（署名検証を使用するため Bearer 認証はスキップ）
 app.route('/webhook', fermentWebhookRoutes);
