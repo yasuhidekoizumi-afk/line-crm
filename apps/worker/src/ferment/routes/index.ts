@@ -1,0 +1,29 @@
+/**
+ * FERMENT: ルートエクスポートインデックス
+ *
+ * apps/worker/src/index.ts からここを import してルートを登録する。
+ */
+
+import { Hono } from 'hono';
+import { emailTemplateRoutes } from './templates.js';
+import { emailCampaignRoutes } from './campaigns.js';
+import { emailFlowRoutes } from './flows.js';
+import { emailLogRoutes } from './logs.js';
+import { suppressionRoutes } from './suppressions.js';
+import { segmentRoutes } from './segments.js';
+import { customerRoutes } from './customers.js';
+import { webhookRoutes } from './webhooks.js';
+import { publicEmailRoutes } from './unsubscribe.js';
+import { backfillRoutes } from '../backfill.js';
+import type { FermentEnv } from '../types.js';
+
+// /api/email/* 配下のルートをまとめる
+const emailApiRouter = new Hono<FermentEnv>();
+emailApiRouter.route('/', emailTemplateRoutes);
+emailApiRouter.route('/', emailCampaignRoutes);
+emailApiRouter.route('/', emailFlowRoutes);
+emailApiRouter.route('/', emailLogRoutes);
+emailApiRouter.route('/', suppressionRoutes);
+
+// エクスポート
+export { emailApiRouter, segmentRoutes, customerRoutes, webhookRoutes, publicEmailRoutes, backfillRoutes };
