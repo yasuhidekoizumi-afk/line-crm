@@ -24,6 +24,12 @@ import {
   recommendRoutes,
   insightRoutes,
 } from './phase2.js';
+import {
+  aiRoutes,
+  attributionRoutes,
+  analyticsRoutes,
+  smsCampaignRoutes,
+} from './phase4.js';
 import type { FermentEnv } from '../types.js';
 
 // /api/email/* 配下のルートをまとめる
@@ -50,4 +56,8 @@ export {
   smsRoutes,
   recommendRoutes,
   insightRoutes,
+  aiRoutes,
+  attributionRoutes,
+  analyticsRoutes,
+  smsCampaignRoutes,
 };

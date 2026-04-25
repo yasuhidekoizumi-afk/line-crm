@@ -57,8 +57,19 @@ import {
   smsRoutes,
   recommendRoutes,
   insightRoutes,
+  aiRoutes,
+  attributionRoutes,
+  analyticsRoutes,
+  smsCampaignRoutes,
 } from './ferment/routes/index.js';
 import { recomputeAllCustomerInsights } from './ferment/cron-insights.js';
+import {
+  selectABWinners,
+  processCartReminders,
+  recomputeProductAffinity,
+  resetWeeklyEmailCounts,
+  processScheduledSends,
+} from './ferment/cron-phase4.js';
 import { processScheduledEmailCampaigns } from './ferment/cron-campaigns.js';
 import { processFlowDeliveries } from './ferment/cron-flows.js';
 import { recomputeAllSegments } from './ferment/cron-segments.js';
@@ -155,10 +166,14 @@ app.route('/api/reviews', reviewAdminRoutes);
 app.route('/api/sms', smsRoutes);
 app.route('/api/ferment/recommend', recommendRoutes);
 app.route('/api/ferment/insights', insightRoutes);
+app.route('/api/ferment/ai', aiRoutes);
+app.route('/api/ferment/analytics', analyticsRoutes);
+app.route('/api/sms/campaign', smsCampaignRoutes);
 // 認証不要の公開エンドポイント（auth middleware は内部でスキップ済み）
 app.route('/forms', formPublicRoutes);
 app.route('/reviews', reviewRoutes);
 app.route('/webhook/shopify', cartWebhookRoutes);
+app.route('/webhook/ferment-attribution', attributionRoutes);
 app.route('/email', publicEmailRoutes);
 // Webhook（署名検証を使用するため Bearer 認証はスキップ）
 app.route('/webhook', fermentWebhookRoutes);
