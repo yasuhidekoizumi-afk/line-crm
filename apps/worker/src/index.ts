@@ -40,6 +40,7 @@ import { images } from './routes/images.js';
 import { loyalty } from './routes/loyalty.js';
 import { rewards } from './routes/rewards.js';
 import { shopifyWebhooks } from './routes/shopify-webhooks.js';
+import { help } from './routes/help.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
 // FERMENT: メールマーケティング拡張
 import {
@@ -61,8 +62,15 @@ import {
   attributionRoutes,
   analyticsRoutes,
   smsCampaignRoutes,
+  phase5Routes,
 } from './ferment/routes/index.js';
 import { recomputeAllCustomerInsights } from './ferment/cron-insights.js';
+import {
+  recomputeChurnRisk,
+  aggregateSubjectHistory,
+  applyDataRetentionPolicy,
+  processScheduledReports,
+} from './ferment/cron-phase5.js';
 import {
   selectABWinners,
   processCartReminders,
@@ -154,6 +162,7 @@ app.route('/', images);
 app.route('/', loyalty);
 app.route('/', rewards);
 app.route('/', shopifyWebhooks);
+app.route('/', help);
 
 // FERMENT ルート登録
 // 認証が必要な API エンドポイント
@@ -166,6 +175,7 @@ app.route('/api/reviews', reviewAdminRoutes);
 app.route('/api/sms', smsRoutes);
 app.route('/api/ferment/recommend', recommendRoutes);
 app.route('/api/ferment/insights', insightRoutes);
+app.route('/api/ferment/phase5', phase5Routes);
 app.route('/api/ferment/ai', aiRoutes);
 app.route('/api/ferment/analytics', analyticsRoutes);
 app.route('/api/sms/campaign', smsCampaignRoutes);
