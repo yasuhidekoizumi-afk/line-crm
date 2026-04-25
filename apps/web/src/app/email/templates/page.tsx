@@ -268,11 +268,18 @@ export default function EmailTemplatesPage() {
                 >
                   プレビュー
                 </button>
+                <a
+                  href={`/email/templates/edit?id=${t.template_id}`}
+                  className="px-3 py-1.5 text-xs text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-50"
+                  title="ドラッグ&ドロップで編集"
+                >
+                  ✨ ビジュアル編集
+                </a>
                 <button
                   onClick={() => handleEdit(t)}
                   className="px-3 py-1.5 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50"
                 >
-                  編集
+                  HTML編集
                 </button>
                 <button
                   onClick={() => handleDelete(t.template_id, t.name)}

@@ -9,6 +9,10 @@
   },
   "dependencies": {
     "@line-crm/shared": "workspace:*",
+    "@xyflow/react": "^12.10.2",
+    "grapesjs": "^0.22.15",
+    "grapesjs-plugin-export": "^1.0.12",
+    "grapesjs-preset-newsletter": "^1.0.2",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

@@ -11,12 +11,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.6.0",
+    "@line-crm/ai-sdk": "workspace:*",
     "@line-crm/db": "workspace:*",
+    "@line-crm/email-sdk": "workspace:*",
     "@line-crm/line-sdk": "workspace:*",
     "@line-crm/shared": "workspace:*",
-    "@line-crm/email-sdk": "workspace:*",
-    "@line-crm/ai-sdk": "workspace:*"
+    "hono": "^4.6.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.0.0",

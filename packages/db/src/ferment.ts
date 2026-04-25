@@ -928,3 +928,134 @@ export async function getSuppressions(
     .all<EmailSuppression>();
   return result.results;
 }
+
+// ============================================================
+// FERMENT フォーム（ポップアップ・埋め込みフォーム）
+// ============================================================
+
+export interface FermentForm {
+  form_id: string;
+  name: string;
+  description: string | null;
+  form_type: string;
+  display_config: string;
+  on_submit_tag: string | null;
+  on_submit_flow_id: string | null;
+  view_count: number;
+  submit_count: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FermentFormSubmission {
+  submission_id: string;
+  form_id: string;
+  email: string;
+  display_name: string | null;
+  customer_id: string | null;
+  source_url: string | null;
+  user_agent: string | null;
+  ip_hash: string | null;
+  created_at: string;
+}
+
+export async function listFermentForms(db: D1Database): Promise<FermentForm[]> {
+  const r = await db
+    .prepare('SELECT * FROM ferment_forms ORDER BY created_at DESC')
+    .all<FermentForm>();
+  return r.results;
+}
+
+export async function getFermentForm(db: D1Database, id: string): Promise<FermentForm | null> {
+  return db.prepare('SELECT * FROM ferment_forms WHERE form_id = ?').bind(id).first<FermentForm>();
+}
+
+export async function createFermentForm(
+  db: D1Database,
+  data: Partial<FermentForm> & { form_id: string; name: string },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO ferment_forms (
+        form_id, name, description, form_type, display_config,
+        on_submit_tag, on_submit_flow_id, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      data.form_id,
+      data.name,
+      data.description ?? null,
+      data.form_type ?? 'popup',
+      data.display_config ?? '{}',
+      data.on_submit_tag ?? null,
+      data.on_submit_flow_id ?? null,
+      data.is_active ?? 1,
+    )
+    .run();
+}
+
+export async function updateFermentForm(
+  db: D1Database,
+  id: string,
+  data: Partial<FermentForm>,
+): Promise<void> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  const allowed: Array<keyof FermentForm> = [
+    'name', 'description', 'form_type', 'display_config',
+    'on_submit_tag', 'on_submit_flow_id', 'is_active',
+  ];
+  for (const k of allowed) {
+    if (data[k] !== undefined) {
+      fields.push(`${k} = ?`);
+      values.push(data[k]);
+    }
+  }
+  if (fields.length === 0) return;
+  fields.push("updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')");
+  values.push(id);
+  await db
+    .prepare(`UPDATE ferment_forms SET ${fields.join(', ')} WHERE form_id = ?`)
+    .bind(...values)
+    .run();
+}
+
+export async function deleteFermentForm(db: D1Database, id: string): Promise<void> {
+  await db.prepare('DELETE FROM ferment_forms WHERE form_id = ?').bind(id).run();
+}
+
+export async function incrementFormView(db: D1Database, id: string): Promise<void> {
+  await db
+    .prepare('UPDATE ferment_forms SET view_count = view_count + 1 WHERE form_id = ?')
+    .bind(id)
+    .run();
+}
+
+export async function recordFormSubmission(
+  db: D1Database,
+  data: Omit<FermentFormSubmission, 'created_at'>,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO ferment_form_submissions (
+        submission_id, form_id, email, display_name, customer_id,
+        source_url, user_agent, ip_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      data.submission_id,
+      data.form_id,
+      data.email,
+      data.display_name,
+      data.customer_id,
+      data.source_url,
+      data.user_agent,
+      data.ip_hash,
+    )
+    .run();
+  await db
+    .prepare('UPDATE ferment_forms SET submit_count = submit_count + 1 WHERE form_id = ?')
+    .bind(data.form_id)
+    .run();
+}

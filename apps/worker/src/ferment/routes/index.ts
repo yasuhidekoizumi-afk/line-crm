@@ -15,6 +15,7 @@ import { customerRoutes } from './customers.js';
 import { webhookRoutes } from './webhooks.js';
 import { publicEmailRoutes } from './unsubscribe.js';
 import { backfillRoutes } from '../backfill.js';
+import { formAdminRoutes, formPublicRoutes } from './forms.js';
 import type { FermentEnv } from '../types.js';
 
 // /api/email/* 配下のルートをまとめる
@@ -26,4 +27,13 @@ emailApiRouter.route('/', emailLogRoutes);
 emailApiRouter.route('/', suppressionRoutes);
 
 // エクスポート
-export { emailApiRouter, segmentRoutes, customerRoutes, webhookRoutes, publicEmailRoutes, backfillRoutes };
+export {
+  emailApiRouter,
+  segmentRoutes,
+  customerRoutes,
+  webhookRoutes,
+  publicEmailRoutes,
+  backfillRoutes,
+  formAdminRoutes,
+  formPublicRoutes,
+};
