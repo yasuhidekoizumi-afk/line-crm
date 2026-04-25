@@ -111,12 +111,20 @@ export default function EmailTemplatesPage() {
           <h1 className="text-2xl font-bold text-gray-900">メールテンプレート</h1>
           <p className="text-sm text-gray-500 mt-1">AI パーソナライズ対応のメールテンプレート管理</p>
         </div>
-        <button
-          onClick={() => { setShowCreate(true); setEditId(null); resetForm() }}
-          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
-        >
-          + 新規作成
-        </button>
+        <div className="flex gap-2">
+          <a
+            href="/email/templates/library"
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700"
+          >
+            📚 ライブラリから作成
+          </a>
+          <button
+            onClick={() => { setShowCreate(true); setEditId(null); resetForm() }}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+          >
+            + 新規作成
+          </button>
+        </div>
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}

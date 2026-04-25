@@ -32,7 +32,8 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.startsWith('/email/view/') ||                // 開封トラッキングピクセル
     path === '/webhook/resend' ||                     // Resend Webhook（署名検証を使用）
     path.startsWith('/webhook/shopify/') ||           // Shopify Webhook（共有シークレット）
-    path.startsWith('/forms/')                        // FERMENT 公開フォーム（埋め込みJS・送信）
+    path.startsWith('/forms/') ||                     // FERMENT 公開フォーム（埋め込みJS・送信）
+    path.startsWith('/reviews/')                      // FERMENT レビュー受信フォーム
   ) {
     return next();
   }

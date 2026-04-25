@@ -16,6 +16,14 @@ import { webhookRoutes } from './webhooks.js';
 import { publicEmailRoutes } from './unsubscribe.js';
 import { backfillRoutes } from '../backfill.js';
 import { formAdminRoutes, formPublicRoutes } from './forms.js';
+import {
+  cartWebhookRoutes,
+  reviewRoutes,
+  reviewAdminRoutes,
+  smsRoutes,
+  recommendRoutes,
+  insightRoutes,
+} from './phase2.js';
 import type { FermentEnv } from '../types.js';
 
 // /api/email/* 配下のルートをまとめる
@@ -36,4 +44,10 @@ export {
   backfillRoutes,
   formAdminRoutes,
   formPublicRoutes,
+  cartWebhookRoutes,
+  reviewRoutes,
+  reviewAdminRoutes,
+  smsRoutes,
+  recommendRoutes,
+  insightRoutes,
 };

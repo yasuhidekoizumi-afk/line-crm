@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { fermentApi, type EmailLog } from '@/lib/ferment-api'
+import { ORYZAE_BENCHMARK, compareToBenchmark } from '@/lib/benchmarks'
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   queued:   { label: 'キュー待ち',  cls: 'bg-gray-100 text-gray-500' },
@@ -71,6 +72,14 @@ export default function EmailLogsPage() {
     return acc
   }, {})
 
+  // ベンチマーク比較用の率計算（送信ベース）
+  const sentTotal = (counts.sent ?? 0) + (counts.opened ?? 0) + (counts.clicked ?? 0)
+  const openRate = sentTotal > 0 ? ((counts.opened ?? 0) + (counts.clicked ?? 0)) / sentTotal * 100 : 0
+  const clickRate = sentTotal > 0 ? (counts.clicked ?? 0) / sentTotal * 100 : 0
+  const bounceRate = sentTotal > 0 ? (counts.bounced ?? 0) / sentTotal * 100 : 0
+  const openCmp = compareToBenchmark('open', openRate)
+  const clickCmp = compareToBenchmark('click', clickRate)
+
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
       <div className="mb-6">
@@ -79,6 +88,35 @@ export default function EmailLogsPage() {
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
+
+      {/* 業界ベンチマーク比較 */}
+      {sentTotal > 0 && (
+        <div className="mb-4 p-4 bg-white border border-gray-200 rounded-xl">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">📊 業界ベンチマーク比較（{ORYZAE_BENCHMARK.industry}）</h3>
+            <span className="text-xs text-gray-400">出典: Mailchimp / Klaviyo 公開データ</span>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs text-gray-500">開封率</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{openRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
+              <p className="text-xs text-gray-400 mt-1">業界平均 {ORYZAE_BENCHMARK.open_rate}%</p>
+              <p className={`text-xs mt-1 font-medium ${openCmp.status === 'good' ? 'text-green-600' : openCmp.status === 'bad' ? 'text-red-600' : 'text-gray-500'}`}>{openCmp.label}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">クリック率</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{clickRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
+              <p className="text-xs text-gray-400 mt-1">業界平均 {ORYZAE_BENCHMARK.click_rate}%</p>
+              <p className={`text-xs mt-1 font-medium ${clickCmp.status === 'good' ? 'text-green-600' : clickCmp.status === 'bad' ? 'text-red-600' : 'text-gray-500'}`}>{clickCmp.label}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">バウンス率</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{bounceRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
+              <p className="text-xs text-gray-400 mt-1">業界平均 {ORYZAE_BENCHMARK.bounce_rate}%</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* フィルターバー */}
       <div className="flex flex-wrap gap-3 mb-4">
