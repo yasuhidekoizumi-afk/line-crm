@@ -51,7 +51,14 @@ import {
   backfillRoutes,
   formAdminRoutes,
   formPublicRoutes,
+  cartWebhookRoutes,
+  reviewRoutes,
+  reviewAdminRoutes,
+  smsRoutes,
+  recommendRoutes,
+  insightRoutes,
 } from './ferment/routes/index.js';
+import { recomputeAllCustomerInsights } from './ferment/cron-insights.js';
 import { processScheduledEmailCampaigns } from './ferment/cron-campaigns.js';
 import { processFlowDeliveries } from './ferment/cron-flows.js';
 import { recomputeAllSegments } from './ferment/cron-segments.js';
@@ -144,8 +151,14 @@ app.route('/api/segments', segmentRoutes);
 app.route('/api/customers', customerRoutes);
 app.route('/api/ferment/backfill', backfillRoutes);
 app.route('/api/forms', formAdminRoutes);
+app.route('/api/reviews', reviewAdminRoutes);
+app.route('/api/sms', smsRoutes);
+app.route('/api/ferment/recommend', recommendRoutes);
+app.route('/api/ferment/insights', insightRoutes);
 // 認証不要の公開エンドポイント（auth middleware は内部でスキップ済み）
 app.route('/forms', formPublicRoutes);
+app.route('/reviews', reviewRoutes);
+app.route('/webhook/shopify', cartWebhookRoutes);
 app.route('/email', publicEmailRoutes);
 // Webhook（署名検証を使用するため Bearer 認証はスキップ）
 app.route('/webhook', fermentWebhookRoutes);
@@ -246,6 +259,8 @@ async function scheduled(
     jobs.push(recomputeAllSegments(env));
   } else if (cronExpr === '0 0 * * *') {
     jobs.push(sendDailySummary(env));
+    // 日次：顧客インサイト（CLV / 購入確率 / 最適送信時刻）の再計算
+    jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
   } else {
     // デフォルト（5分毎）でもキャンペーン・フロー処理を実行
     jobs.push(processScheduledEmailCampaigns(env));
