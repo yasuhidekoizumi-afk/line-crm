@@ -30,8 +30,8 @@ SHOPIFY_SHOP_DOMAIN = "yasuhide-koizumi.myshopify.com"
 # SHOPIFY_ADMIN_TOKEN は wrangler secret put SHOPIFY_ADMIN_TOKEN で設定すること
 
 # FERMENT: 送信元アドレス設定（秘匿不要）
-FERMENT_FROM_EMAIL_JP = "hello@oryzae.site"
-FERMENT_FROM_EMAIL_US = "hello@oryzae.site"
+FERMENT_FROM_EMAIL_JP = "hello@mail.oryzae.site"
+FERMENT_FROM_EMAIL_US = "hello@mail.oryzae.site"
 FERMENT_FROM_NAME_JP = "オリゼ"
 FERMENT_FROM_NAME_US = "ORYZAE"
 FERMENT_UNSUBSCRIBE_BASE_URL = "https://oryzae-line-crm.oryzae.workers.dev/email/unsubscribe"

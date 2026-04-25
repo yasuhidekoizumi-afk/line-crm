@@ -36,7 +36,7 @@ export type SegmentOperator =
 
 export interface SegmentLeafCondition {
   field: string;
-  op: SegmentOperator;
+  operator: SegmentOperator;
   value?: string | number | string[];
 }
 
@@ -50,6 +50,8 @@ export type SegmentRules = SegmentGroupCondition;
 /** 許可されたフィールド（SQL インジェクション対策） */
 const ALLOWED_FIELDS = new Set([
   'email',
+  'line_user_id',
+  'display_name',
   'region',
   'language',
   'ltv',
@@ -82,7 +84,7 @@ interface QueryPart {
  * 単一の条件式を SQL に変換する
  */
 function leafToSql(cond: SegmentLeafCondition): QueryPart {
-  const { field, op, value } = cond;
+  const { field, operator: op, value } = cond;
 
   // フィールド名の検証（SQL インジェクション対策）
   if (!ALLOWED_FIELDS.has(field)) {
