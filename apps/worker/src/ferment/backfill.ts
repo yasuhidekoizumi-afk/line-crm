@@ -239,9 +239,12 @@ backfillRoutes.post('/shopify-customers', async (c) => {
         'SELECT f.line_user_id, f.display_name FROM loyalty_points lp JOIN friends f ON f.id = lp.friend_id WHERE lp.shopify_customer_id = ? LIMIT 1'
       ).bind(shopifyIdStr).first<{ line_user_id: string; display_name: string | null }>()
 
-      const displayName = sc.first_name || sc.last_name
+      const rawDisplayName = sc.first_name || sc.last_name
         ? `${sc.first_name ?? ''} ${sc.last_name ?? ''}`.trim()
         : lpRow?.display_name ?? null
+      // Shopify 側で姓名未登録の場合に "No Name" 等の無効値が入ることがあるため除外
+      const INVALID_NAMES = new Set(['No Name', 'no name', 'NoName', 'なし', '-'])
+      const displayName = rawDisplayName && !INVALID_NAMES.has(rawDisplayName) ? rawDisplayName : null
 
       const isSubscribed = sc.email
         ? (sc.email_marketing_consent?.state === 'subscribed' || sc.accepts_marketing ? 1 : 0)
