@@ -9,7 +9,7 @@
  */
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'gemini-2.5-flash';
 
 /**
  * メール件名のバリアントを複数生成する（A/B テスト用）
@@ -49,7 +49,12 @@ JSON 形式で返答: ["件名1", "件名2", "件名3"]`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.8, maxOutputTokens: 256 },
+          generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 2048,
+            thinkingConfig: { thinkingBudget: 0 },
+            responseMimeType: 'application/json',
+          },
         }),
       },
     );
@@ -67,16 +72,32 @@ JSON 形式で返答: ["件名1", "件名2", "件名3"]`;
     };
 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!text) return [baseSubject];
+    if (!text) {
+      console.error('[ai-sdk] Gemini empty text. Full response:', JSON.stringify(data).slice(0, 500));
+      return [baseSubject];
+    }
 
-    // JSON 配列をパース
-    const jsonMatch = text.match(/\[.*\]/s);
-    if (!jsonMatch) return [baseSubject];
+    // ```json コードブロックの除去
+    const cleaned = text
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
 
-    const variants = JSON.parse(jsonMatch[0]) as string[];
-    if (!Array.isArray(variants) || variants.length === 0) return [baseSubject];
+    // JSON 配列をパース（最後の ] までを greedy に取得）
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.error('[ai-sdk] Gemini text has no JSON array:', text.slice(0, 300));
+      return [baseSubject];
+    }
 
-    return variants.slice(0, count);
+    try {
+      const variants = JSON.parse(jsonMatch[0]) as string[];
+      if (!Array.isArray(variants) || variants.length === 0) return [baseSubject];
+      return variants.slice(0, count);
+    } catch (parseErr) {
+      console.error('[ai-sdk] Gemini JSON parse failed:', jsonMatch[0].slice(0, 300), parseErr);
+      return [baseSubject];
+    }
   } catch (err) {
     console.error('[ai-sdk] generateSubjectVariants exception:', err);
     return [baseSubject];
