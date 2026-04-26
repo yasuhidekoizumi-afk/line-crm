@@ -55,6 +55,7 @@ function EmailCampaignsPageInner() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(!!passedDraft || !!aiAction)
+  // 即座にスケルトンプレフィル（タイトルだけでも）
   const [form, setForm] = useState({
     name: passedDraft?.name ?? aiAction?.title ?? '',
     template_id: passedDraft?.template_id ?? '',

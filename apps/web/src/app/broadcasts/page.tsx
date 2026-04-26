@@ -78,6 +78,21 @@ function formatDatetime(iso: string | null): string {
   })
 }
 
+// ai_action から即座に組み立てる「最低限のスケルトンドラフト」
+// Gemini が遅い・失敗してもこれが既に入っていればユーザーは作業継続できる。
+function skeletonDraftFromAction(action: AiAction): BroadcastDraft {
+  const lines: string[] = [action.title]
+  if (action.template_hint) lines.push('', action.template_hint)
+  if (action.reasoning) lines.push('', action.reasoning)
+  return {
+    title: action.title,
+    messageType: 'text',
+    messageContent: lines.join('\n'),
+    targetType: 'all',
+    sendNow: true,
+  }
+}
+
 function BroadcastsPageInner() {
   const { selectedAccountId } = useAccount()
   const searchParams = useSearchParams()
@@ -88,18 +103,21 @@ function BroadcastsPageInner() {
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // 即座にスケルトンプレフィル → Gemini 結果が来たら上書き
   const [initialDraft, setInitialDraft] = useState<BroadcastDraft | null>(
-    () => decodeBase64Json<BroadcastDraft>(draftToken),
+    () => decodeBase64Json<BroadcastDraft>(draftToken)
+      ?? (aiAction ? skeletonDraftFromAction(aiAction) : null),
   )
   const [showCreate, setShowCreate] = useState(!!initialDraft || !!aiAction)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [aiDrafting, setAiDrafting] = useState(false)
   const [aiDraftError, setAiDraftError] = useState<string | null>(null)
   const [aiDraftElapsed, setAiDraftElapsed] = useState(0)
+  const [aiDraftDone, setAiDraftDone] = useState(false)
 
-  // ai_action パラメータが付いていれば AI ドラフトを取得してフォームをプレフィル
+  // ai_action パラメータが付いていれば AI ドラフトを取得してフォームを上書き（バックグラウンド）
   useEffect(() => {
-    if (!aiAction || initialDraft) return
+    if (!aiAction || aiDraftDone) return
     let cancelled = false
     const startedAt = Date.now()
     const timer = setInterval(() => {
@@ -134,12 +152,14 @@ function BroadcastsPageInner() {
         if (res.ok && json?.success && json.data?.draft) {
           setInitialDraft(json.data.draft)
           setAiDrafting(false)
+          setAiDraftDone(true)
         } else {
           setAiDraftError(
             json?.error
               ?? (res.status === 401 ? 'ログインセッション切れ。再ログインしてください。' : `HTTP ${res.status}`),
           )
           setAiDrafting(false)
+          setAiDraftDone(true)
         }
       } catch (e) {
         if (cancelled) return
@@ -151,6 +171,7 @@ function BroadcastsPageInner() {
             : `AI ドラフト生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
         )
         setAiDrafting(false)
+        setAiDraftDone(true)
       }
     })()
     return () => {
@@ -238,32 +259,30 @@ function BroadcastsPageInner() {
         <>
           {aiDrafting && (
             <div className="mb-3 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-800 flex items-center gap-3">
-              <div className="animate-spin h-4 w-4 border-2 border-purple-600 border-t-transparent rounded-full" />
+              <div className="animate-spin h-4 w-4 border-2 border-purple-600 border-t-transparent rounded-full shrink-0" />
               <div>
-                ✨ AI が配信内容のドラフトを生成しています...
-                {aiDraftElapsed > 0 && <span className="ml-2 text-purple-600">{aiDraftElapsed}秒</span>}
+                ✨ AI がより質の高い配信内容を生成中です{aiDraftElapsed > 0 ? ` (${aiDraftElapsed}秒)` : ''}...
+                <br /><span className="text-xs text-purple-600">下にスケルトンを既に入れているので、待たずに編集を始めても OK</span>
               </div>
             </div>
           )}
           {aiDraftError && (
-            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-              ⚠️ {aiDraftError}<br />
-              <span className="text-gray-600">下のフォームで手動作成できます。</span>
+            <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-800">
+              ⚠️ AI ドラフトの上書き生成に失敗しました（提案内容のスケルトンは入力済み）: {aiDraftError}
             </div>
           )}
-          {initialDraft && !aiDrafting && (
+          {aiAction && aiDraftDone && !aiDraftError && (
             <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-800">
-              ✨ AI コックピットの提案からドラフトを生成しました。内容を確認し、必要に応じて編集してから送信してください。
+              ✨ AI コックピットの提案から配信内容を生成しました。内容を確認し、必要に応じて編集してから送信してください。
             </div>
           )}
-          {!aiDrafting && (
-            <BroadcastForm
-              tags={tags}
-              initialDraft={initialDraft}
-              onSuccess={() => { setShowCreate(false); load() }}
-              onCancel={() => setShowCreate(false)}
-            />
-          )}
+          <BroadcastForm
+            key={initialDraft?.messageContent ?? 'empty'}
+            tags={tags}
+            initialDraft={initialDraft}
+            onSuccess={() => { setShowCreate(false); load() }}
+            onCancel={() => setShowCreate(false)}
+          />
         </>
       )}
 
