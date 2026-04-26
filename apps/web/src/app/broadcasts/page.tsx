@@ -19,11 +19,20 @@ interface BroadcastDraft {
   sendNow?: boolean
 }
 
-function decodeDraft(token: string | null): BroadcastDraft | null {
+interface AiAction {
+  title: string
+  segment_name?: string
+  template_hint?: string
+  expected_impact?: string
+  reasoning?: string
+  execute_url?: string
+}
+
+function decodeBase64Json<T>(token: string | null): T | null {
   if (!token) return null
   try {
     const json = decodeURIComponent(escape(atob(token)))
-    return JSON.parse(json) as BroadcastDraft
+    return JSON.parse(json) as T
   } catch {
     return null
   }
@@ -73,13 +82,86 @@ function BroadcastsPageInner() {
   const { selectedAccountId } = useAccount()
   const searchParams = useSearchParams()
   const draftToken = searchParams.get('draft')
-  const initialDraft = decodeDraft(draftToken)
+  const aiActionToken = searchParams.get('ai_action')
+  const aiAction = decodeBase64Json<AiAction>(aiActionToken)
   const [broadcasts, setBroadcasts] = useState<ApiBroadcast[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [showCreate, setShowCreate] = useState(!!initialDraft)
+  const [initialDraft, setInitialDraft] = useState<BroadcastDraft | null>(
+    () => decodeBase64Json<BroadcastDraft>(draftToken),
+  )
+  const [showCreate, setShowCreate] = useState(!!initialDraft || !!aiAction)
   const [sendingId, setSendingId] = useState<string | null>(null)
+  const [aiDrafting, setAiDrafting] = useState(false)
+  const [aiDraftError, setAiDraftError] = useState<string | null>(null)
+  const [aiDraftElapsed, setAiDraftElapsed] = useState(0)
+
+  // ai_action パラメータが付いていれば AI ドラフトを取得してフォームをプレフィル
+  useEffect(() => {
+    if (!aiAction || initialDraft) return
+    let cancelled = false
+    const startedAt = Date.now()
+    const timer = setInterval(() => {
+      if (!cancelled) setAiDraftElapsed(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
+    setAiDrafting(true)
+    setAiDraftError(null)
+    setAiDraftElapsed(0)
+    const apiKey = typeof window !== 'undefined' ? localStorage.getItem('lh_api_key') ?? '' : ''
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
+    const fullUrl = `${apiUrl}/api/ferment/cockpit/draft-from-action`
+    console.log('[broadcasts] ai_action draft request:', { url: fullUrl, action: aiAction })
+    ;(async () => {
+      try {
+        const res = await fetch(fullUrl, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({ action: { ...aiAction, execute_url: '/broadcasts' } }),
+        })
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+        const text = await res.text()
+        console.log('[broadcasts] ai_action draft response:', { status: res.status, elapsed, body: text.slice(0, 200) })
+        let json: { success: boolean; data?: { draft: BroadcastDraft }; error?: string } | null = null
+        try { json = JSON.parse(text) } catch { json = null }
+        if (cancelled) return
+        if (res.ok && json?.success && json.data?.draft) {
+          setInitialDraft(json.data.draft)
+          setAiDrafting(false)
+        } else {
+          setAiDraftError(
+            json?.error
+              ?? (res.status === 401 ? 'ログインセッション切れ。再ログインしてください。' : `HTTP ${res.status}`),
+          )
+          setAiDrafting(false)
+        }
+      } catch (e) {
+        if (cancelled) return
+        const errName = e instanceof Error ? e.name : ''
+        console.error('[broadcasts] ai_action draft error:', e)
+        setAiDraftError(
+          errName === 'AbortError'
+            ? '30 秒以内に応答がありませんでした。Worker か Gemini が遅延している可能性があります。'
+            : `AI ドラフト生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        setAiDrafting(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      clearTimeout(timeoutId)
+      controller.abort()
+    }
+    // aiActionToken のみを依存に。aiAction は毎レンダで生成され参照変化するため注意。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiActionToken])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -154,17 +236,34 @@ function BroadcastsPageInner() {
       {/* Create form */}
       {showCreate && (
         <>
-          {initialDraft && (
+          {aiDrafting && (
+            <div className="mb-3 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-800 flex items-center gap-3">
+              <div className="animate-spin h-4 w-4 border-2 border-purple-600 border-t-transparent rounded-full" />
+              <div>
+                ✨ AI が配信内容のドラフトを生成しています...
+                {aiDraftElapsed > 0 && <span className="ml-2 text-purple-600">{aiDraftElapsed}秒</span>}
+              </div>
+            </div>
+          )}
+          {aiDraftError && (
+            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+              ⚠️ {aiDraftError}<br />
+              <span className="text-gray-600">下のフォームで手動作成できます。</span>
+            </div>
+          )}
+          {initialDraft && !aiDrafting && (
             <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-800">
               ✨ AI コックピットの提案からドラフトを生成しました。内容を確認し、必要に応じて編集してから送信してください。
             </div>
           )}
-          <BroadcastForm
-            tags={tags}
-            initialDraft={initialDraft}
-            onSuccess={() => { setShowCreate(false); load() }}
-            onCancel={() => setShowCreate(false)}
-          />
+          {!aiDrafting && (
+            <BroadcastForm
+              tags={tags}
+              initialDraft={initialDraft}
+              onSuccess={() => { setShowCreate(false); load() }}
+              onCancel={() => setShowCreate(false)}
+            />
+          )}
         </>
       )}
 

@@ -28,7 +28,6 @@ function normalizeExecuteUrl(raw: string): string {
   if (!raw || typeof raw !== 'string') return '/broadcasts'
   const trimmed = raw.trim()
   if (!trimmed.startsWith('/')) return '/broadcasts'
-  // クエリ・ハッシュを切り離してパスだけで判定
   const [pathOnly, ...rest] = trimmed.split(/[?#]/)
   const suffix = rest.length > 0 ? trimmed.slice(pathOnly.length) : ''
   if (EXECUTE_URL_ALIASES[pathOnly]) return EXECUTE_URL_ALIASES[pathOnly] + suffix
@@ -38,13 +37,13 @@ function normalizeExecuteUrl(raw: string): string {
   return '/broadcasts'
 }
 
-// ドラフトオブジェクトを URL クエリ用に base64 エンコード（マルチバイト対応）
-function encodeDraft(draft: unknown): string {
-  const json = JSON.stringify(draft)
+// 提案アクションを URL クエリ用に base64 エンコード（マルチバイト対応）
+function encodeAction(action: unknown): string {
+  const json = JSON.stringify(action)
   return btoa(unescape(encodeURIComponent(json)))
 }
 
-// 実行ボタンで draft 生成 + 遷移先プレフィルをサポートするチャネル判定
+// 実行ボタンで AI ドラフト生成をサポートするチャネル判定
 function isDraftableUrl(url: string): boolean {
   return url.startsWith('/broadcasts') || url.startsWith('/email/campaigns')
 }
@@ -100,107 +99,25 @@ export default function AiCockpit() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [draftingRank, setDraftingRank] = useState<number | null>(null)
-  const [draftError, setDraftError] = useState<string | null>(null)
-  const [skipDraftAction, setSkipDraftAction] = useState<Action | null>(null)
-  const [draftElapsed, setDraftElapsed] = useState(0)
 
-  const handleExecute = async (a: Action) => {
+  // 「実行」は即座に遷移先ページへ移動。AI ドラフト生成は遷移先ページで行う。
+  // この設計により、コックピット側のローディングが固まる現象を構造的に排除。
+  const handleExecute = (a: Action) => {
     const dest = normalizeExecuteUrl(a.execute_url)
-    setDraftError(null)
-    setSkipDraftAction(null)
     if (!isDraftableUrl(dest)) {
       router.push(dest)
       return
     }
-    setDraftingRank(a.rank)
-    setDraftElapsed(0)
-
-    // 1秒ごとに経過時間を更新（ユーザーに「動いている」感を与える）
-    const startedAt = Date.now()
-    const timer = setInterval(() => {
-      setDraftElapsed(Math.floor((Date.now() - startedAt) / 1000))
-    }, 1000)
-
-    // 30 秒タイムアウト
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000)
-
-    const finish = () => {
-      clearInterval(timer)
-      clearTimeout(timeoutId)
-      setDraftingRank(null)
-      setDraftElapsed(0)
-    }
-
-    const apiKey = typeof window !== 'undefined' ? localStorage.getItem('lh_api_key') ?? '' : ''
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
-    const fullUrl = `${apiUrl}/api/ferment/cockpit/draft-from-action`
-
-    try {
-      console.log('[AiCockpit] draft-from-action request:', { url: fullUrl, action: a })
-      const res = await fetch(fullUrl, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          action: {
-            title: a.title,
-            segment_name: a.segment_name,
-            template_hint: a.template_hint,
-            expected_impact: a.expected_impact,
-            reasoning: a.reasoning,
-            execute_url: dest,
-          },
-        }),
-      })
-      const elapsed = Math.floor((Date.now() - startedAt) / 1000)
-      console.log('[AiCockpit] draft-from-action response:', { status: res.status, elapsed })
-
-      const text = await res.text()
-      let json: ApiResult<{ channel: 'line' | 'email'; draft: Record<string, unknown> }> | null = null
-      try {
-        json = JSON.parse(text)
-      } catch {
-        json = null
-      }
-
-      if (res.ok && json?.success && json.data) {
-        const token = encodeDraft(json.data.draft)
-        const sep = dest.includes('?') ? '&' : '?'
-        finish()
-        router.push(`${dest}${sep}draft=${token}`)
-        return
-      }
-
-      const errMsg = json?.error
-        ?? (res.status === 401 ? 'ログインセッション切れ。再ログインしてください。' : null)
-        ?? `HTTP ${res.status}: ${text.slice(0, 200)}`
-      setDraftError(errMsg)
-      setSkipDraftAction(a)
-      finish()
-    } catch (e) {
-      console.error('[AiCockpit] draft-from-action error:', e)
-      const errName = e instanceof Error ? e.name : ''
-      const errMsg = errName === 'AbortError'
-        ? '30 秒以内に応答がありませんでした。Worker か Gemini が遅延している可能性があります。'
-        : `AI ドラフト生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`
-      setDraftError(errMsg)
-      setSkipDraftAction(a)
-      finish()
-    }
-  }
-
-  // ドラフト無しでも遷移できるようにする（エラー時のフォールバック）
-  const navigateWithoutDraft = () => {
-    if (!skipDraftAction) return
-    const dest = normalizeExecuteUrl(skipDraftAction.execute_url)
-    setDraftError(null)
-    setSkipDraftAction(null)
-    router.push(dest)
+    const token = encodeAction({
+      title: a.title,
+      segment_name: a.segment_name,
+      template_hint: a.template_hint,
+      expected_impact: a.expected_impact,
+      reasoning: a.reasoning,
+      execute_url: dest,
+    })
+    const sep = dest.includes('?') ? '&' : '?'
+    router.push(`${dest}${sep}ai_action=${token}`)
   }
 
   const loadAll = async () => {
@@ -317,21 +234,6 @@ export default function AiCockpit() {
 
       {/* 戦略提案 TOP 3 */}
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-        {draftError && (
-          <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 whitespace-pre-wrap">⚠️ {draftError}</div>
-              {skipDraftAction && (
-                <button
-                  onClick={navigateWithoutDraft}
-                  className="shrink-0 px-2 py-1 text-xs bg-white border border-red-300 text-red-700 rounded hover:bg-red-100"
-                >
-                  ドラフト無しで遷移
-                </button>
-              )}
-            </div>
-          </div>
-        )}
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-800">🎯 今日やるべきアクション TOP 3</h3>
           <button
@@ -358,13 +260,10 @@ export default function AiCockpit() {
                   </div>
                   <button
                     onClick={() => handleExecute(a)}
-                    disabled={draftingRank !== null}
-                    className="shrink-0 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 disabled:cursor-wait whitespace-nowrap"
+                    className="shrink-0 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap"
                     title={isDraftableUrl(normalizeExecuteUrl(a.execute_url)) ? 'AI が下書きを生成して遷移します' : '画面に遷移します'}
                   >
-                    {draftingRank === a.rank
-                      ? `✨ 生成中... ${draftElapsed > 0 ? `${draftElapsed}秒` : ''}`
-                      : '実行 →'}
+                    実行 →
                   </button>
                 </div>
               </div>
