@@ -113,7 +113,7 @@ export default function EmailTemplatesPage() {
           <p className="text-sm text-gray-500 mt-1">AI パーソナライズ対応のメールテンプレート管理</p>
         </div>
         <div className="flex gap-2">
-          <Link
+          <Link prefetch={false}
             href="/email/templates/library"
             className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700"
           >
@@ -277,7 +277,7 @@ export default function EmailTemplatesPage() {
                 >
                   プレビュー
                 </button>
-                <Link
+                <Link prefetch={false}
                   href={`/email/templates/edit?id=${t.template_id}`}
                   className="px-3 py-1.5 text-xs text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-50"
                   title="ドラッグ&ドロップで編集"

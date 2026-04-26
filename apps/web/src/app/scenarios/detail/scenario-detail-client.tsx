@@ -231,7 +231,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
         <Header title="シナリオ詳細" />
         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
           <p className="text-gray-500">{error || 'シナリオが見つかりません'}</p>
-          <Link href="/scenarios" className="text-sm text-green-600 hover:text-green-700 mt-4 inline-block">
+          <Link prefetch={false} href="/scenarios" className="text-sm text-green-600 hover:text-green-700 mt-4 inline-block">
             ← シナリオ一覧に戻る
           </Link>
         </div>
@@ -244,7 +244,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
       <Header
         title="シナリオ詳細"
         action={
-          <Link
+          <Link prefetch={false}
             href="/scenarios"
             className="px-4 py-2 min-h-[44px] text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors inline-flex items-center"
           >
