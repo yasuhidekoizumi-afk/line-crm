@@ -26,6 +26,8 @@ export * from './loyalty';
 export * from './rewards';
 // FERMENT: メールマーケティング拡張
 export * from './ferment';
+// CS Phase 1: 統合受信箱 + AIトリアージ
+export * from './cs';
 
 /**
  * Thin wrapper around D1Database.
