@@ -130,7 +130,8 @@ chats.get('/api/chats', async (c) => {
       bindings.push(operatorId);
     }
     if (lineAccountId) {
-      conditions.push('f.line_account_id = ?');
+      // メールチャットは LINE アカウントに紐付かないので除外せず通す
+      conditions.push("(f.line_account_id = ? OR c.channel LIKE 'email_%')");
       bindings.push(lineAccountId);
     }
     if (channel === 'email') {
