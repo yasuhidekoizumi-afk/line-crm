@@ -8,6 +8,7 @@ interface CampaignDraft {
   name?: string
   template_id?: string | null
   segment_id?: string | null
+  template_auto_created?: boolean
 }
 
 interface AiAction {
@@ -70,6 +71,7 @@ function EmailCampaignsPageInner() {
   const [aiDraftError, setAiDraftError] = useState<string | null>(null)
   const [aiDraftElapsed, setAiDraftElapsed] = useState(0)
   const [aiDraftDone, setAiDraftDone] = useState(!!passedDraft)
+  const [templateAutoCreated, setTemplateAutoCreated] = useState(false)
 
   // ai_action パラメータ付きで来た時、AI ドラフトを取りに行く
   useEffect(() => {
@@ -112,8 +114,15 @@ function EmailCampaignsPageInner() {
             template_id: d.template_id ?? '',
             segment_id: d.segment_id ?? '',
           })
+          setTemplateAutoCreated(!!d.template_auto_created)
           setAiDraftDone(true)
           setAiDrafting(false)
+          // 新規テンプレが作成された場合は templates を再取得して select に反映
+          if (d.template_auto_created) {
+            fermentApi.templates.list().then((r) => {
+              if (r.success && r.data) setTemplates(r.data)
+            }).catch(() => {/* noop */})
+          }
         } else {
           setAiDraftError(
             json?.error
@@ -245,7 +254,12 @@ function EmailCampaignsPageInner() {
           )}
           {aiDraftDone && !aiDrafting && (
             <div className="mb-3 p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-800">
-              ✨ AI コックピットの提案からドラフトを生成しました。テンプレートとセグメントを確認し、必要に応じて調整してください。
+              ✨ AI コックピットの提案からドラフトを生成しました。
+              {templateAutoCreated && (
+                <span className="block mt-1 text-purple-700">
+                  📝 既存テンプレに合致するものが無かったため、AI が新規テンプレ「AI 提案: {form.name}」を自動作成・選択しました。配信前に「テンプレート」メニューから内容をご確認ください。
+                </span>
+              )}
             </div>
           )}
           <h2 className="text-base font-semibold text-gray-800 mb-4">新規キャンペーン</h2>
