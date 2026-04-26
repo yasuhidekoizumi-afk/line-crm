@@ -31,7 +31,11 @@ interface AiAction {
 function decodeBase64Json<T>(token: string | null): T | null {
   if (!token) return null
   try {
-    const json = decodeURIComponent(escape(atob(token)))
+    // URL-safe base64 を標準 base64 に戻す
+    let b64 = token.replace(/-/g, '+').replace(/_/g, '/')
+    // パディング復元
+    while (b64.length % 4) b64 += '='
+    const json = decodeURIComponent(escape(atob(b64)))
     return JSON.parse(json) as T
   } catch {
     return null
