@@ -111,8 +111,8 @@ export function AiDraftBanner({ chatId, onChange }: Props) {
   }
 
   return (
-    <div className="mx-4 my-3 rounded-lg border-2 border-purple-300 bg-purple-50 overflow-hidden">
-      <div className="px-4 py-2 bg-purple-100 border-b border-purple-200 flex items-center justify-between flex-wrap gap-2">
+    <div className="mx-4 my-3 rounded-lg border-2 border-purple-300 bg-purple-50 overflow-hidden flex flex-col max-h-[40vh]">
+      <div className="px-4 py-2 bg-purple-100 border-b border-purple-200 flex items-center justify-between flex-wrap gap-2 flex-shrink-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-bold text-purple-900">🤖 AI下書き 承認待ち</span>
           {meta?.category && (
@@ -141,7 +141,7 @@ export function AiDraftBanner({ chatId, onChange }: Props) {
         </span>
       </div>
 
-      <div className="p-4">
+      <div className="p-4 overflow-y-auto flex-1 min-h-0">
         {editing ? (
           <textarea
             value={editedText}
@@ -164,8 +164,11 @@ export function AiDraftBanner({ chatId, onChange }: Props) {
         {error && (
           <p className="mt-2 text-xs text-red-600">{error}</p>
         )}
+      </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
+      {/* アクションボタンは常に見える固定エリア */}
+      <div className="px-4 py-3 border-t border-purple-200 bg-purple-50 flex-shrink-0">
+        <div className="flex flex-wrap gap-2">
           {!editing ? (
             <>
               <button
