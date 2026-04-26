@@ -276,20 +276,47 @@ cockpitRoutes.post('/draft-from-action', async (c) => {
       }
     }
 
-    // テンプレ解決（メールのみ）
+    // テンプレ解決（メールのみ）— キーワードを抽出して柔軟マッチ
     let template_id: string | null = null;
     let template_name_resolved: string | null = null;
+    let template_auto_created = false;
     if (isEmail && action.template_hint) {
-      const tmpl = await c.env.DB
-        .prepare(
-          "SELECT template_id, name FROM email_templates WHERE name LIKE ? OR category LIKE ? ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(`%${action.template_hint}%`, `%${action.template_hint}%`)
-        .first<{ template_id: string; name: string }>()
-        .catch(() => null);
-      if (tmpl) {
-        template_id = tmpl.template_id;
-        template_name_resolved = tmpl.name;
+      // 推奨内容からキーワードを抽出（括弧内・記号は除去、2文字以上のトークン）
+      const cleaned = action.template_hint.replace(/[（）()【】\[\]、，,。.「」"]/g, ' ');
+      const keywords = cleaned.split(/\s+/).filter((k) => k.length >= 2).slice(0, 5);
+      // category 推定（名前の中に含まれていれば）
+      const knownCats = ['welcome', 'cart', 'winback', 'newsletter', 'transactional'];
+      const lowerHint = action.template_hint.toLowerCase();
+      const guessedCat = knownCats.find((c) => lowerHint.includes(c))
+        ?? (action.template_hint.includes('ニュースレター') ? 'newsletter'
+          : action.template_hint.includes('カゴ') ? 'cart'
+          : action.template_hint.includes('休眠') ? 'winback'
+          : null);
+      // まず category 一致を試す
+      if (guessedCat) {
+        const tmpl = await c.env.DB
+          .prepare("SELECT template_id, name FROM email_templates WHERE category = ? ORDER BY created_at DESC LIMIT 1")
+          .bind(guessedCat)
+          .first<{ template_id: string; name: string }>()
+          .catch(() => null);
+        if (tmpl) {
+          template_id = tmpl.template_id;
+          template_name_resolved = tmpl.name;
+        }
+      }
+      // 見つからなければキーワードで OR マッチ
+      if (!template_id && keywords.length > 0) {
+        const conds = keywords.map(() => 'name LIKE ?').join(' OR ');
+        const params = keywords.map((k) => `%${k}%`);
+        const tmpl = await c.env.DB
+          .prepare(`SELECT template_id, name FROM email_templates WHERE ${conds} ORDER BY created_at DESC LIMIT 1`)
+          .bind(...params)
+          .first<{ template_id: string; name: string }>()
+          .catch(() => null);
+        if (tmpl) {
+          template_id = tmpl.template_id;
+          template_name_resolved = tmpl.name;
+        }
       }
     }
 
@@ -340,13 +367,72 @@ cockpitRoutes.post('/draft-from-action', async (c) => {
         ai_generated: true,
       };
     } else if (isEmail) {
-      // メールキャンペーンはテンプレートを既存から選ぶ前提なので、
-      // 名前・テンプレ・セグメントの prefill のみ。本文は触らない。
+      // テンプレが既存マッチしなかった場合、AI が新規テンプレを自動生成して登録
+      if (!template_id) {
+        const prompt = `あなたはオリゼ（米麹発酵食品EC）のメールマーケ担当です。
+以下の AI 提案アクションを基に、メールテンプレートのドラフトを作成してください。
+
+# AI 提案
+- タイトル: ${action.title}
+- 対象セグメント: ${action.segment_name ?? '（指定なし）'}
+- 推奨内容: ${action.template_hint ?? '（指定なし）'}
+- 期待効果: ${action.expected_impact ?? '（指定なし）'}
+- 提案理由: ${action.reasoning ?? '（指定なし）'}
+
+# ルール
+- 件名: 開封率を意識した魅力的な日本語件名（30〜50 文字、絵文字 0〜1 個）
+- 本文 HTML: <h1>, <p>, <a> 等の最低限のタグでブランディング、インライン CSS で見出し色 #225533
+  - 段落 3〜5 個程度、商品紹介や CTA を含める
+  - <a> の href は "#" で良い（後で編集前提）
+  - 「{{name}}」「{{first_name}}」のようなパーソナライズタグは使ってよい
+- 本文 text: HTML の代替プレーンテキスト版
+- ブランドトーン: 誠実・温かみ・専門性（米麹）・健康志向
+
+# 出力フォーマット (JSON のみ、説明不要)
+{ "subject": "...", "body_html": "...", "body_text": "..." }`;
+        try {
+          const result = await callGemini(apiKey, prompt, true, MODEL_FLASH);
+          cost += result.cost;
+          const parsed = JSON.parse(result.text) as {
+            subject?: string;
+            body_html?: string;
+            body_text?: string;
+          };
+          if (parsed.subject || parsed.body_html) {
+            const newId = generateFermentId('tpl');
+            const tmplName = `AI 提案: ${action.title}`.slice(0, 80);
+            const guessedCat = action.template_hint?.includes('ニュースレター') ? 'newsletter'
+              : action.template_hint?.includes('カゴ') ? 'cart'
+              : action.template_hint?.includes('休眠') ? 'winback'
+              : 'newsletter';
+            await c.env.DB
+              .prepare(
+                `INSERT INTO email_templates (template_id, name, category, language, subject_base, body_html, body_text, from_name, ai_enabled)
+                 VALUES (?, ?, ?, 'ja', ?, ?, ?, 'オリゼ', 0)`,
+              )
+              .bind(
+                newId,
+                tmplName,
+                guessedCat,
+                parsed.subject ?? action.title,
+                parsed.body_html ?? `<p>${action.template_hint ?? action.title}</p>`,
+                parsed.body_text ?? action.template_hint ?? action.title,
+              )
+              .run();
+            template_id = newId;
+            template_name_resolved = tmplName;
+            template_auto_created = true;
+          }
+        } catch (genErr) {
+          console.error('email template auto-gen failed:', genErr);
+        }
+      }
       draft = {
         name: action.title,
         template_id,
         segment_id,
         ai_generated: true,
+        template_auto_created,
       };
     }
 
