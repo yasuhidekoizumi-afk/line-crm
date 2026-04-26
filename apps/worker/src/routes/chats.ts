@@ -111,6 +111,8 @@ chats.get('/api/chats', async (c) => {
     const status = c.req.query('status') ?? undefined;
     const operatorId = c.req.query('operatorId') ?? undefined;
     const lineAccountId = c.req.query('lineAccountId') ?? undefined;
+    // channel: 'line' | 'email_support' | 'email_customer_support' | 'email' (= 全メール)
+    const channel = c.req.query('channel') ?? undefined;
 
     // JOIN friends to get display_name and picture_url
     let sql = `SELECT c.*, f.display_name, f.picture_url, f.line_user_id
@@ -131,6 +133,12 @@ chats.get('/api/chats', async (c) => {
       conditions.push('f.line_account_id = ?');
       bindings.push(lineAccountId);
     }
+    if (channel === 'email') {
+      conditions.push("c.channel LIKE 'email_%'");
+    } else if (channel) {
+      conditions.push('c.channel = ?');
+      bindings.push(channel);
+    }
 
     if (conditions.length > 0) {
       sql += ' WHERE ' + conditions.join(' AND ');
@@ -144,18 +152,29 @@ chats.get('/api/chats', async (c) => {
 
     return c.json({
       success: true,
-      data: result.results.map((ch: Record<string, unknown>) => ({
-        id: ch.id,
-        friendId: ch.friend_id,
-        friendName: ch.display_name || '名前なし',
-        friendPictureUrl: ch.picture_url || null,
-        operatorId: ch.operator_id,
-        status: ch.status,
-        notes: ch.notes,
-        lastMessageAt: ch.last_message_at,
-        createdAt: ch.created_at,
-        updatedAt: ch.updated_at,
-      })),
+      data: result.results.map((ch: Record<string, unknown>) => {
+        const isEmail = typeof ch.channel === 'string' && (ch.channel as string).startsWith('email_');
+        const name = isEmail
+          ? (ch.customer_email as string | null) || (ch.display_name as string | null) || '不明'
+          : (ch.display_name as string | null) || '名前なし';
+        return {
+          id: ch.id,
+          friendId: ch.friend_id,
+          friendName: name,
+          friendPictureUrl: isEmail ? null : (ch.picture_url || null),
+          operatorId: ch.operator_id,
+          status: ch.status,
+          notes: ch.notes,
+          lastMessageAt: ch.last_message_at,
+          createdAt: ch.created_at,
+          updatedAt: ch.updated_at,
+          channel: ch.channel ?? 'line',
+          customerEmail: ch.customer_email ?? null,
+          aiStatus: ch.ai_status ?? null,
+          aiCategory: ch.ai_category ?? null,
+          aiMoneyFlag: !!ch.ai_money_flag,
+        };
+      }),
     });
   } catch (err) {
     console.error('GET /api/chats error:', err);
@@ -174,31 +193,80 @@ chats.get('/api/chats/:id', async (c) => {
       .bind(item.friend_id)
       .first<{ display_name: string | null; picture_url: string | null; line_user_id: string }>();
 
-    // チャットに関連するメッセージログも取得
-    const messages = await c.env.DB
-      .prepare(`SELECT id, friend_id, direction, message_type, content, created_at FROM messages_log WHERE friend_id = ? ORDER BY created_at ASC LIMIT 200`)
-      .bind(item.friend_id)
-      .all();
+    // LINE側メッセージ（messages_log）+ メール側メッセージ（cs_messages）をマージ
+    const [lineMessages, csMessages, chatExt] = await Promise.all([
+      c.env.DB
+        .prepare(`SELECT id, direction, message_type, content, created_at FROM messages_log WHERE friend_id = ? ORDER BY created_at ASC LIMIT 200`)
+        .bind(item.friend_id)
+        .all(),
+      c.env.DB
+        .prepare(`SELECT id, direction, subject, body_text, from_address, to_address, created_at FROM cs_messages WHERE chat_id = ? ORDER BY created_at ASC LIMIT 200`)
+        .bind(item.id)
+        .all(),
+      c.env.DB
+        .prepare(`SELECT channel, customer_email, ai_status, ai_category, ai_confidence, ai_money_flag FROM chats WHERE id = ?`)
+        .bind(item.id)
+        .first<{ channel: string | null; customer_email: string | null; ai_status: string | null; ai_category: string | null; ai_confidence: number | null; ai_money_flag: number | null }>(),
+    ]);
+
+    interface UnifiedMessage {
+      id: string;
+      direction: string;
+      messageType: string;
+      content: string;
+      createdAt: string;
+      meta?: { subject?: string | null; from?: string | null; to?: string | null };
+    }
+    const unified: UnifiedMessage[] = [];
+    for (const m of lineMessages.results as Record<string, unknown>[]) {
+      unified.push({
+        id: m.id as string,
+        direction: m.direction as string,
+        messageType: m.message_type as string,
+        content: m.content as string,
+        createdAt: m.created_at as string,
+      });
+    }
+    for (const m of csMessages.results as Record<string, unknown>[]) {
+      unified.push({
+        id: m.id as string,
+        direction: m.direction as string,
+        messageType: 'email',
+        content: (m.body_text as string) ?? '',
+        createdAt: m.created_at as string,
+        meta: {
+          subject: (m.subject as string | null) ?? null,
+          from: (m.from_address as string | null) ?? null,
+          to: (m.to_address as string | null) ?? null,
+        },
+      });
+    }
+    unified.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+    const isEmail = typeof chatExt?.channel === 'string' && chatExt.channel.startsWith('email_');
+    const displayName = isEmail
+      ? (chatExt?.customer_email ?? friend?.display_name ?? '不明')
+      : (friend?.display_name ?? '名前なし');
 
     return c.json({
       success: true,
       data: {
         id: item.id,
         friendId: item.friend_id,
-        friendName: friend?.display_name || '名前なし',
-        friendPictureUrl: friend?.picture_url || null,
+        friendName: displayName,
+        friendPictureUrl: isEmail ? null : (friend?.picture_url || null),
         operatorId: item.operator_id,
         status: item.status,
         notes: item.notes,
         lastMessageAt: item.last_message_at,
         createdAt: item.created_at,
-        messages: (messages.results as Record<string, unknown>[]).map((m) => ({
-          id: m.id,
-          direction: m.direction,
-          messageType: m.message_type,
-          content: m.content,
-          createdAt: m.created_at,
-        })),
+        channel: chatExt?.channel ?? 'line',
+        customerEmail: chatExt?.customer_email ?? null,
+        aiStatus: chatExt?.ai_status ?? null,
+        aiCategory: chatExt?.ai_category ?? null,
+        aiConfidence: chatExt?.ai_confidence ?? null,
+        aiMoneyFlag: !!chatExt?.ai_money_flag,
+        messages: unified,
       },
     });
   } catch (err) {

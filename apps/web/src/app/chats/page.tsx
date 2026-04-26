@@ -19,6 +19,11 @@ interface Chat {
   lastMessageAt: string | null
   createdAt: string
   updatedAt: string
+  channel?: string
+  customerEmail?: string | null
+  aiStatus?: string | null
+  aiCategory?: string | null
+  aiMoneyFlag?: boolean
 }
 
 interface ChatMessage {
@@ -27,6 +32,7 @@ interface ChatMessage {
   messageType: string
   content: string
   createdAt: string
+  meta?: { subject?: string | null; from?: string | null; to?: string | null }
 }
 
 interface ChatDetail extends Chat {
@@ -36,6 +42,7 @@ interface ChatDetail extends Chat {
 }
 
 type StatusFilter = 'all' | 'unread' | 'in_progress' | 'resolved'
+type ChannelFilter = 'all' | 'line' | 'email'
 
 const statusConfig: Record<Chat['status'], { label: string; className: string }> = {
   unread: { label: '未読', className: 'bg-red-100 text-red-700' },
@@ -48,6 +55,12 @@ const statusFilters: { key: StatusFilter; label: string }[] = [
   { key: 'unread', label: '未読' },
   { key: 'in_progress', label: '対応中' },
   { key: 'resolved', label: '解決済' },
+]
+
+const channelFilters: { key: ChannelFilter; label: string }[] = [
+  { key: 'all', label: '全チャネル' },
+  { key: 'line', label: 'LINE' },
+  { key: 'email', label: '✉️ メール' },
 ]
 
 const SHOW_LOADING_PREF_KEY = 'lh_chat_show_loading_indicator'
@@ -245,6 +258,7 @@ export default function ChatsPage() {
   const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null)
   const [chatDetail, setChatDetail] = useState<ChatDetail | null>(null)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all')
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState('')
@@ -284,9 +298,10 @@ export default function ChatsPage() {
     setLoading(true)
     setError('')
     try {
-      const params: { status?: string; accountId?: string } = {}
+      const params: { status?: string; accountId?: string; channel?: string } = {}
       if (statusFilter !== 'all') params.status = statusFilter
       if (selectedAccountId) params.accountId = selectedAccountId
+      if (channelFilter !== 'all') params.channel = channelFilter
       const [chatRes, friendRes] = await Promise.allSettled([
         api.chats.list(params),
         api.friends.list({ accountId: selectedAccountId || undefined, limit: '800' }),
@@ -302,7 +317,7 @@ export default function ChatsPage() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, selectedAccountId])
+  }, [statusFilter, channelFilter, selectedAccountId])
 
   const loadChatDetail = useCallback(async (chatId: string) => {
     setDetailLoading(true)
@@ -417,6 +432,23 @@ export default function ChatsPage() {
       <div className="flex gap-4 h-[calc(100vh-120px)] lg:h-[calc(100vh-180px)]">
         {/* Left Panel: Chat List */}
         <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
+          {/* Channel Filter Tabs (LINE / メール) */}
+          <div className="flex border-b border-gray-200 bg-gray-50">
+            {channelFilters.map((filter) => (
+              <button
+                key={filter.key}
+                onClick={() => { setChannelFilter(filter.key); setSelectedChatId(null) }}
+                className={`flex-1 px-3 py-2 min-h-[40px] text-xs font-medium transition-colors ${
+                  channelFilter === filter.key
+                    ? 'bg-white text-gray-900 border-b-2 border-purple-600'
+                    : 'text-gray-500 hover:bg-white'
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+
           {/* Status Filter Tabs */}
           <div className="flex border-b border-gray-200">
             {statusFilters.map((filter) => (
@@ -589,6 +621,17 @@ export default function ChatsPage() {
                       } catch {
                         bubbleContent = <span>🖼️ [画像]</span>
                       }
+                    } else if (msg.messageType === 'email') {
+                      bubbleContent = (
+                        <div className="max-w-[420px]">
+                          {msg.meta?.subject && (
+                            <div className="text-xs font-bold mb-1 opacity-80">
+                              ✉️ {msg.meta.subject}
+                            </div>
+                          )}
+                          <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
+                        </div>
+                      )
                     } else {
                       bubbleContent = <span>{msg.content}</span>
                     }
