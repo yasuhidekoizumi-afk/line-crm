@@ -6,6 +6,7 @@ import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 import FlexPreviewComponent from '@/components/flex-preview'
+import { AiDraftBanner } from '@/components/cs/ai-draft-banner'
 
 interface Chat {
   id: string
@@ -628,6 +629,14 @@ export default function ChatsPage() {
                   })
                 )}
               </div>
+
+              {/* AI下書き承認バナー（CS Phase 1） */}
+              {selectedChatId && (
+                <AiDraftBanner
+                  chatId={selectedChatId}
+                  onChange={() => loadChatDetail(selectedChatId)}
+                />
+              )}
 
               {/* Notes */}
               <div className="px-4 py-2 border-t border-gray-200 bg-gray-50">
