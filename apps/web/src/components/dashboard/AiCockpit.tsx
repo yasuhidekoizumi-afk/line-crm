@@ -133,17 +133,30 @@ export default function AiCockpit() {
         const token = encodeDraft(r.data.draft)
         const sep = dest.includes('?') ? '&' : '?'
         router.push(`${dest}${sep}draft=${token}`)
-      } else {
-        // 失敗時はドラフト無しで遷移（ユーザーが手動で作れる状態にはなる）
-        setDraftError(r.error ?? 'AI ドラフト生成に失敗しました。手動で作成してください。')
-        router.push(dest)
+        return
       }
+      // 失敗時は遷移せず、エラー表示してユーザーが再試行できるようにする
+      setDraftError(r.error ?? 'AI ドラフト生成に失敗しました。')
+      setSkipDraftAction(a)
+      setDraftingRank(null)
     } catch (e) {
-      setDraftError(e instanceof Error ? e.message : String(e))
-      router.push(dest)
-    } finally {
+      setDraftError(
+        `AI ドラフト生成に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+      )
+      setSkipDraftAction(a)
       setDraftingRank(null)
     }
+  }
+
+  const [skipDraftAction, setSkipDraftAction] = useState<Action | null>(null)
+  // ドラフト無しでも遷移できるようにする（エラー時のフォールバック）
+  const navigateWithoutDraft = () => {
+    if (!skipDraftAction) return
+    const dest = normalizeExecuteUrl(skipDraftAction.execute_url)
+    setDraftError(null)
+    setDraftingRank(null)
+    setSkipDraftAction(null)
+    router.push(dest)
   }
 
   const loadAll = async () => {
@@ -262,7 +275,17 @@ export default function AiCockpit() {
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
         {draftError && (
           <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-            ⚠️ {draftError}
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 whitespace-pre-wrap">⚠️ {draftError}</div>
+              {skipDraftAction && (
+                <button
+                  onClick={navigateWithoutDraft}
+                  className="shrink-0 px-2 py-1 text-xs bg-white border border-red-300 text-red-700 rounded hover:bg-red-100"
+                >
+                  ドラフト無しで遷移
+                </button>
+              )}
+            </div>
           </div>
         )}
         <div className="flex items-center justify-between mb-4">
