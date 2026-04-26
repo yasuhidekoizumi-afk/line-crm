@@ -37,10 +37,14 @@ function normalizeExecuteUrl(raw: string): string {
   return '/broadcasts'
 }
 
-// 提案アクションを URL クエリ用に base64 エンコード（マルチバイト対応）
+// 提案アクションを URL クエリ用に URL-safe base64 エンコード（マルチバイト対応）
+// '+' '/' '=' は URL クエリで問題（特に '+' は空白として解釈される）ため URL-safe 変換が必須
 function encodeAction(action: unknown): string {
   const json = JSON.stringify(action)
   return btoa(unescape(encodeURIComponent(json)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
 }
 
 // 実行ボタンで AI ドラフト生成をサポートするチャネル判定
