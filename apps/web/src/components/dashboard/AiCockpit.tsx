@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { fetchApi } from '@/lib/api'
 
 // AI が返す可能性のある execute_url を実在ルートにマッピング
@@ -88,8 +88,23 @@ interface KillSwitch {
   reason: string | null
 }
 
+// 提案アクションを実行先 URL（クエリパラメータ付き）に変換する純粋関数
+function buildExecuteHref(a: Action): string {
+  const dest = normalizeExecuteUrl(a.execute_url)
+  if (!isDraftableUrl(dest)) return dest
+  const token = encodeAction({
+    title: a.title,
+    segment_name: a.segment_name,
+    template_hint: a.template_hint,
+    expected_impact: a.expected_impact,
+    reasoning: a.reasoning,
+    execute_url: dest,
+  })
+  const sep = dest.includes('?') ? '&' : '?'
+  return `${dest}${sep}ai_action=${token}`
+}
+
 export default function AiCockpit() {
-  const router = useRouter()
   const [strategy, setStrategy] = useState<StrategyResp | null>(null)
   const [anomalies, setAnomalies] = useState<Anomaly[]>([])
   const [weekly, setWeekly] = useState<WeeklyReport | null>(null)
@@ -99,26 +114,6 @@ export default function AiCockpit() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
-
-  // 「実行」は即座に遷移先ページへ移動。AI ドラフト生成は遷移先ページで行う。
-  // この設計により、コックピット側のローディングが固まる現象を構造的に排除。
-  const handleExecute = (a: Action) => {
-    const dest = normalizeExecuteUrl(a.execute_url)
-    if (!isDraftableUrl(dest)) {
-      router.push(dest)
-      return
-    }
-    const token = encodeAction({
-      title: a.title,
-      segment_name: a.segment_name,
-      template_hint: a.template_hint,
-      expected_impact: a.expected_impact,
-      reasoning: a.reasoning,
-      execute_url: dest,
-    })
-    const sep = dest.includes('?') ? '&' : '?'
-    router.push(`${dest}${sep}ai_action=${token}`)
-  }
 
   const loadAll = async () => {
     const [s, a, w, k] = await Promise.allSettled([
@@ -258,13 +253,14 @@ export default function AiCockpit() {
                     <p className="text-xs text-green-700 mt-1 font-medium">期待効果: {a.expected_impact}</p>
                     <p className="text-xs text-gray-600 mt-2">{a.reasoning}</p>
                   </div>
-                  <button
-                    onClick={() => handleExecute(a)}
+                  <Link
+                    href={buildExecuteHref(a)}
+                    prefetch={false}
                     className="shrink-0 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 whitespace-nowrap"
                     title={isDraftableUrl(normalizeExecuteUrl(a.execute_url)) ? 'AI が下書きを生成して遷移します' : '画面に遷移します'}
                   >
                     実行 →
-                  </button>
+                  </Link>
                 </div>
               </div>
             ))}
