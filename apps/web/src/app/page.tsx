@@ -74,7 +74,7 @@ interface StatCardProps {
 
 function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }: StatCardProps) {
   return (
-    <Link href={href} className="block bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow group">
+    <Link prefetch={false} href={href} className="block bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow group">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm font-medium text-gray-500 mb-2">{title}</p>
@@ -392,7 +392,7 @@ export default function DashboardPage() {
             💎 <span>ロイヤルティ会員</span>
             <span className="text-xs font-normal text-gray-400">今月実績</span>
           </h2>
-          <Link href="/loyalty" className="text-xs text-yellow-600 hover:underline">詳細管理 →</Link>
+          <Link prefetch={false} href="/loyalty" className="text-xs text-yellow-600 hover:underline">詳細管理 →</Link>
         </div>
 
         {/* KPI 4枚 */}
@@ -446,13 +446,13 @@ export default function DashboardPage() {
 
         {/* ロイヤルティ クイックアクション */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          <Link href="/loyalty" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-yellow-50 hover:border-yellow-300">
+          <Link prefetch={false} href="/loyalty" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-yellow-50 hover:border-yellow-300">
             💎 会員一覧
           </Link>
-          <Link href="/loyalty?tab=campaigns" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300">
+          <Link prefetch={false} href="/loyalty?tab=campaigns" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300">
             🎉 キャンペーン
           </Link>
-          <Link href="/loyalty?tab=transactions" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300">
+          <Link prefetch={false} href="/loyalty?tab=transactions" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300">
             📊 取引履歴
           </Link>
         </div>
@@ -465,7 +465,7 @@ export default function DashboardPage() {
             🌾 <span>FERMENT メール</span>
             <span className="text-xs font-normal text-gray-400">過去30日</span>
           </h2>
-          <Link href="/email/analytics" className="text-xs text-green-600 hover:underline">分析詳細 →</Link>
+          <Link prefetch={false} href="/email/analytics" className="text-xs text-green-600 hover:underline">分析詳細 →</Link>
         </div>
 
         {/* KPI 4枚 */}
@@ -549,16 +549,16 @@ export default function DashboardPage() {
 
         {/* メール用クイックアクション */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
-          <Link href="/email/campaigns" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-green-50 hover:border-green-300">
+          <Link prefetch={false} href="/email/campaigns" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-green-50 hover:border-green-300">
             ✉️ 新規キャンペーン
           </Link>
-          <Link href="/email/templates" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300">
+          <Link prefetch={false} href="/email/templates" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300">
             📝 テンプレ編集
           </Link>
-          <Link href="/email/insights" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300">
+          <Link prefetch={false} href="/email/insights" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300">
             🎯 顧客インサイト
           </Link>
-          <Link href="/email/forms" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-yellow-50 hover:border-yellow-300">
+          <Link prefetch={false} href="/email/forms" className="text-xs text-center py-2 px-3 bg-white border border-gray-200 rounded-lg hover:bg-yellow-50 hover:border-yellow-300">
             📋 フォーム管理
           </Link>
         </div>
@@ -571,7 +571,7 @@ export default function DashboardPage() {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-gray-800 mb-4">クイックアクション</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Link
+          <Link prefetch={false}
             href="/friends"
             className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors group"
           >
@@ -587,7 +587,7 @@ export default function DashboardPage() {
             </div>
           </Link>
 
-          <Link
+          <Link prefetch={false}
             href="/scenarios"
             className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors group"
           >
@@ -603,7 +603,7 @@ export default function DashboardPage() {
             </div>
           </Link>
 
-          <Link
+          <Link prefetch={false}
             href="/broadcasts"
             className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-purple-300 hover:bg-purple-50 transition-colors group"
           >
@@ -619,7 +619,7 @@ export default function DashboardPage() {
             </div>
           </Link>
 
-          <Link
+          <Link prefetch={false}
             href="/chats"
             className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors group"
           >
@@ -635,7 +635,7 @@ export default function DashboardPage() {
             </div>
           </Link>
 
-          <Link
+          <Link prefetch={false}
             href="/health"
             className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-red-300 hover:bg-red-50 transition-colors group"
           >
