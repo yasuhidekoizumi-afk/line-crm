@@ -151,7 +151,7 @@ async function sendMilestoneAlert(
         {
           type: 'button',
           text: { type: 'plain_text', text: 'RMS 管理画面' },
-          url: 'https://mms.rakuten.co.jp/',
+          url: 'https://glogin.rms.rakuten.co.jp/',
         },
       ],
     },
@@ -187,7 +187,7 @@ export async function notifyRakutenLicenseExpiredNow(
         {
           type: 'button',
           text: { type: 'plain_text', text: 'RMS 管理画面' },
-          url: 'https://mms.rakuten.co.jp/',
+          url: 'https://glogin.rms.rakuten.co.jp/',
         },
       ],
     },
