@@ -493,11 +493,83 @@ cockpitRoutes.post('/generate-image', async (c) => {
       size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
       quality?: 'low' | 'medium' | 'high' | 'auto';
       reference_image_urls?: string[];
+      product_ids?: string[];           // Shopify 商品 ID（複数可）→ 画像URLに展開
+      auto_detect_product?: boolean;     // プロンプトから AI が商品名を抽出して Shopify を検索
     }>();
     const prompt = (body.prompt ?? '').trim();
     if (!prompt) return c.json({ success: false, error: 'prompt is required' }, 400);
     const size = body.size ?? '1024x1024';
     const quality = body.quality ?? 'medium';
+
+    // 参照画像 URL を構築: 明示的 URL + 商品 ID 解決 + AI 自動検出
+    const refUrls: string[] = [...(body.reference_image_urls ?? [])];
+
+    // (B) 明示的に指定された商品 ID から画像 URL を取得
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    if (body.product_ids && body.product_ids.length > 0 && shopDomain && adminToken) {
+      try {
+        const url = `https://${shopDomain}/admin/api/2024-10/products.json?ids=${body.product_ids.join(',')}&fields=id,image`;
+        const res = await fetch(url, {
+          headers: { 'X-Shopify-Access-Token': adminToken, 'Accept': 'application/json' },
+        });
+        if (res.ok) {
+          const data = await res.json<{ products: Array<{ image?: { src?: string } }> }>();
+          for (const p of data.products) {
+            if (p.image?.src) refUrls.push(p.image.src);
+          }
+        }
+      } catch (e) {
+        console.error('product_ids resolve failed:', e);
+      }
+    }
+
+    // (C) プロンプトから商品名を AI 抽出して Shopify を検索
+    if (body.auto_detect_product && shopDomain && adminToken) {
+      try {
+        // 既存商品を取得
+        const listUrl = `https://${shopDomain}/admin/api/2024-10/products.json?status=active&limit=100&fields=id,title,handle,image`;
+        const listRes = await fetch(listUrl, {
+          headers: { 'X-Shopify-Access-Token': adminToken, 'Accept': 'application/json' },
+        });
+        if (listRes.ok) {
+          const listData = await listRes.json<{
+            products: Array<{ id: number; title: string; handle: string; image?: { src?: string } }>;
+          }>();
+          // Gemini に商品リストとプロンプトを渡して、最も合致する商品を選択させる
+          const matchPrompt = `以下のメール画像生成プロンプトと商品リストから、プロンプト中で言及されている商品を最大 3 つまで選んでください。
+言及されていない場合は空配列を返してください。
+
+# プロンプト
+${prompt}
+
+# 商品リスト (id: タイトル)
+${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
+
+# 出力フォーマット (JSON のみ)
+{ "product_ids": ["id1", "id2"] }`;
+          const geminiKey = c.env.GEMINI_API_KEY;
+          if (geminiKey) {
+            const r = await callGemini(geminiKey, matchPrompt, true, MODEL_FLASH);
+            try {
+              const parsed = JSON.parse(r.text) as { product_ids?: string[] };
+              const matchedIds = parsed.product_ids ?? [];
+              for (const id of matchedIds.slice(0, 3)) {
+                const matched = listData.products.find((p) => String(p.id) === String(id));
+                if (matched?.image?.src) refUrls.push(matched.image.src);
+              }
+            } catch {
+              /* JSON 崩れは無視 */
+            }
+          }
+        }
+      } catch (e) {
+        console.error('auto_detect_product failed:', e);
+      }
+    }
+
+    // 重複削除 + 上限 4 枚
+    const finalRefUrls = Array.from(new Set(refUrls)).slice(0, 4);
 
     // ブランドトーン強化のため、プロンプトにオリゼ向け前置きを追加
     const fullPrompt = `${prompt}
@@ -509,7 +581,7 @@ cockpitRoutes.post('/generate-image', async (c) => {
 - 文字や日本語の挿入は最小限、清潔感のある構図`;
 
     let resp: Response;
-    if (body.reference_image_urls && body.reference_image_urls.length > 0) {
+    if (finalRefUrls.length > 0) {
       // I2I: gpt-image-2 の編集エンドポイントを使用（multipart）
       const form = new FormData();
       form.append('model', 'gpt-image-2');
@@ -517,8 +589,8 @@ cockpitRoutes.post('/generate-image', async (c) => {
       form.append('size', size);
       form.append('quality', quality);
       form.append('n', '1');
-      // 参照画像をフェッチして multipart に追加（最大 4 枚まで）
-      for (const url of body.reference_image_urls.slice(0, 4)) {
+      // 参照画像をフェッチして multipart に追加
+      for (const url of finalRefUrls) {
         try {
           const imgRes = await fetch(url);
           if (imgRes.ok) {
@@ -606,7 +678,8 @@ cockpitRoutes.post('/generate-image', async (c) => {
         size,
         quality,
         cost_usd: cost,
-        used_reference: !!(body.reference_image_urls && body.reference_image_urls.length > 0),
+        used_reference: finalRefUrls.length > 0,
+        reference_count: finalRefUrls.length,
       },
     });
   } catch (err) {

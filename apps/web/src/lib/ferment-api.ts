@@ -158,11 +158,32 @@ export const fermentApi = {
       size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto'
       quality?: 'low' | 'medium' | 'high' | 'auto'
       reference_image_urls?: string[]
+      product_ids?: string[]
+      auto_detect_product?: boolean
     }) =>
-      fetchApi<ApiResult<{ url: string; key: string; size: string; quality: string; cost_usd: number; used_reference: boolean }>>(
+      fetchApi<ApiResult<{
+        url: string
+        key: string
+        size: string
+        quality: string
+        cost_usd: number
+        used_reference: boolean
+        reference_count: number
+      }>>(
         '/api/ferment/cockpit/generate-image',
         { method: 'POST', body: JSON.stringify(params) },
       ),
+  },
+
+  // ---- Shopify 商品 ----
+  shopifyProducts: {
+    list: (search?: string) => {
+      const q = new URLSearchParams()
+      if (search) q.set('q', search)
+      return fetchApi<ApiResult<Array<{ id: string; title: string; handle: string; image_url: string | null }>>>(
+        `/api/shopify/products${q.toString() ? '?' + q.toString() : ''}`,
+      )
+    },
   },
 
   // ---- キャンペーン ----
