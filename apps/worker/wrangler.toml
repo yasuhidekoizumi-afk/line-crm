@@ -16,9 +16,9 @@ database_id = "e47571b1-cd3f-4791-9040-2c2e55034ed8"
 
 # R2: AI 生成画像・既存画像アップロード用
 # 事前に Cloudflare ダッシュボードか `wrangler r2 bucket create oryzae-line-crm-images` で作成必要
-[[r2_buckets]]
-binding = "IMAGES"
-bucket_name = "oryzae-line-crm-images"
+# [[r2_buckets]]
+# binding = "IMAGES"
+# bucket_name = "oryzae-line-crm-images"
 
 [triggers]
 # 5分毎: LINE ステップ配信・ブロードキャスト + FERMENT キャンペーン/フロー処理
