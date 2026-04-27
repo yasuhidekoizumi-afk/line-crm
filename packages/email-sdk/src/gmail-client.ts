@@ -306,6 +306,7 @@ export function buildRfc822(input: {
   text: string;
   inReplyTo?: string;
   references?: string;
+  replyTo?: string;
 }): string {
   const lines = [
     `From: ${input.from}`,
@@ -315,6 +316,7 @@ export function buildRfc822(input: {
     `Content-Type: text/plain; charset=utf-8`,
     `Content-Transfer-Encoding: base64`,
   ];
+  if (input.replyTo) lines.push(`Reply-To: ${input.replyTo}`);
   if (input.inReplyTo) lines.push(`In-Reply-To: ${input.inReplyTo}`);
   if (input.references) lines.push(`References: ${input.references}`);
   lines.push('');
