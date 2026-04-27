@@ -49,7 +49,11 @@ export default function MailEditor({ initialHtml = '', onChange, onSave }: MailE
         canvas: {
           styles: [
             'data:text/css;base64,' + btoa(
-              'body{margin:16px auto;max-width:600px;background:#fff;color:#222;line-height:1.7;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI",sans-serif;padding:8px;}'
+              'body{margin:24px auto;max-width:600px;background:#fff;color:#222;line-height:1.8;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI",sans-serif;padding:24px 20px;}'
+              + 'h1,h2,h3{margin:24px 0 12px;line-height:1.4;}'
+              + 'p{margin:0 0 16px;}'
+              + 'a{color:#225533;}'
+              + 'img{max-width:100%;height:auto;}'
             ),
           ],
         },
