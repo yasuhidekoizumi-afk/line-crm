@@ -45,14 +45,6 @@ export default function MailEditor({ initialHtml = '', onChange, onSave }: MailE
           },
         },
         storageManager: false,
-        // モバイル / タブレットのプレビュー幅を明示。スマホは iPhone 系の標準幅 375px
-        deviceManager: {
-          devices: [
-            { name: 'デスクトップ', width: '' },
-            { name: 'タブレット', width: '768px', widthMedia: '992px' },
-            { name: 'スマホ', width: '375px', widthMedia: '768px' },
-          ],
-        },
         // iframe 内（メール本文）のスタイル: 余白を確保してプレビューの読みやすさ向上
         canvas: {
           styles: [
