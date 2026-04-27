@@ -144,6 +144,11 @@ export const fermentApi = {
         method: 'POST',
         body: JSON.stringify({ customer_id: customerId }),
       }),
+    aiEdit: (id: string, instruction: string) =>
+      fetchApi<ApiResult<{ subject: string; body_html: string; body_text: string; diff_summary: string }>>(
+        `/api/email/templates/${id}/ai-edit`,
+        { method: 'POST', body: JSON.stringify({ instruction }) },
+      ),
   },
 
   // ---- キャンペーン ----
