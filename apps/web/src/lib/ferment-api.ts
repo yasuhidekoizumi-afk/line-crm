@@ -151,6 +151,20 @@ export const fermentApi = {
       ),
   },
 
+  // ---- AI 画像生成（cockpit 配下）----
+  cockpit: {
+    generateImage: (params: {
+      prompt: string
+      size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto'
+      quality?: 'low' | 'medium' | 'high' | 'auto'
+      reference_image_urls?: string[]
+    }) =>
+      fetchApi<ApiResult<{ url: string; key: string; size: string; quality: string; cost_usd: number; used_reference: boolean }>>(
+        '/api/ferment/cockpit/generate-image',
+        { method: 'POST', body: JSON.stringify(params) },
+      ),
+  },
+
   // ---- キャンペーン ----
   campaigns: {
     list: (params?: { status?: string; limit?: number; offset?: number }) => {

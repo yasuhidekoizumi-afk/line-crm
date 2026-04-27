@@ -29,6 +29,13 @@ function EditPageInner() {
   const [aiInstruction, setAiInstruction] = useState('')
   const [aiEditing, setAiEditing] = useState(false)
   const [aiEditDiff, setAiEditDiff] = useState<string | null>(null)
+  // AI 画像生成
+  const [imgPrompt, setImgPrompt] = useState('')
+  const [imgGenerating, setImgGenerating] = useState(false)
+  const [imgResult, setImgResult] = useState<{ url: string; cost: number } | null>(null)
+  const [imgError, setImgError] = useState<string | null>(null)
+  const [imgQuality, setImgQuality] = useState<'low' | 'medium' | 'high'>('medium')
+  const [imgSize, setImgSize] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024')
 
   useEffect(() => {
     if (!id) {
@@ -220,6 +227,100 @@ function EditPageInner() {
           {aiEditDiff && (
             <div className="mt-2 p-2 bg-white border border-purple-200 rounded text-xs text-purple-700">
               ✏️ {aiEditDiff}（保存済み）
+            </div>
+          )}
+        </div>
+
+        {/* AI 画像生成 */}
+        <div className="mt-3 pt-3 border-t border-purple-100">
+          <p className="text-xs font-semibold text-pink-800 mb-1">🎨 AI で画像を生成（GPT-Image-2）</p>
+          <p className="text-xs text-pink-600 mb-2">「春の食卓に並ぶ KOJIPOP」「米麹のテクスチャ背景」など、シーンを指示すると画像が生成されてエディタに挿入されます</p>
+          <div className="flex gap-2 items-start flex-wrap">
+            <input
+              type="text"
+              value={imgPrompt}
+              onChange={(e) => setImgPrompt(e.target.value)}
+              placeholder="例: 木のテーブルに置かれた KOJIPOP、朝の自然光、爽やかな雰囲気"
+              disabled={imgGenerating}
+              className="flex-1 min-w-[200px] border border-pink-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-pink-400 disabled:bg-gray-100"
+            />
+            <select
+              value={imgSize}
+              onChange={(e) => setImgSize(e.target.value as typeof imgSize)}
+              disabled={imgGenerating}
+              className="border border-pink-300 rounded-lg px-2 py-2 text-sm bg-white"
+              title="画像サイズ"
+            >
+              <option value="1024x1024">正方形</option>
+              <option value="1536x1024">横長</option>
+              <option value="1024x1536">縦長</option>
+            </select>
+            <select
+              value={imgQuality}
+              onChange={(e) => setImgQuality(e.target.value as typeof imgQuality)}
+              disabled={imgGenerating}
+              className="border border-pink-300 rounded-lg px-2 py-2 text-sm bg-white"
+              title="品質（コストと速度に影響）"
+            >
+              <option value="low">低品質 ($0.011)</option>
+              <option value="medium">標準 ($0.04)</option>
+              <option value="high">高品質 ($0.17)</option>
+            </select>
+            <button
+              onClick={async () => {
+                if (!imgPrompt.trim()) return
+                setImgGenerating(true)
+                setImgError(null)
+                setImgResult(null)
+                try {
+                  const r = await fermentApi.cockpit.generateImage({
+                    prompt: imgPrompt.trim(),
+                    size: imgSize,
+                    quality: imgQuality,
+                  })
+                  if (r.success && r.data) {
+                    setImgResult({ url: r.data.url, cost: r.data.cost_usd })
+                    // 既存 HTML の最後に <img> を追加
+                    const newImgTag = `<p style="text-align:center;margin:24px 0;"><img src="${r.data.url}" alt="" style="max-width:100%;height:auto;border-radius:8px;" /></p>`
+                    setHtml((prev) => prev + newImgTag)
+                    // テンプレも即時保存
+                    if (template) {
+                      await fermentApi.templates.update(template.template_id, {
+                        body_html: html + newImgTag,
+                      })
+                      setSavedAt(new Date())
+                    }
+                    setImgPrompt('')
+                  } else {
+                    setImgError(r.error ?? '画像生成に失敗しました')
+                  }
+                } catch (e) {
+                  setImgError(e instanceof Error ? e.message : String(e))
+                } finally {
+                  setImgGenerating(false)
+                }
+              }}
+              disabled={imgGenerating || !imgPrompt.trim()}
+              className="px-4 py-2 text-sm bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:opacity-50 whitespace-nowrap"
+            >
+              {imgGenerating ? '🎨 生成中（10〜15秒）...' : '🎨 画像生成'}
+            </button>
+          </div>
+          {imgError && (
+            <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+              ⚠️ {imgError}
+            </div>
+          )}
+          {imgResult && (
+            <div className="mt-2 p-2 bg-white border border-pink-200 rounded">
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imgResult.url} alt="生成画像" className="w-24 h-24 object-cover rounded border" />
+                <div className="text-xs text-pink-700">
+                  ✅ 画像を生成してエディタの末尾に挿入しました（コスト: ${imgResult.cost.toFixed(3)}）<br />
+                  位置はビジュアルエディタでドラッグ調整できます。
+                </div>
+              </div>
             </div>
           )}
         </div>
