@@ -45,6 +45,22 @@ export default function MailEditor({ initialHtml = '', onChange, onSave }: MailE
           },
         },
         storageManager: false,
+        // モバイル / タブレットのプレビュー幅を明示。スマホは iPhone 系の標準幅 375px
+        deviceManager: {
+          devices: [
+            { name: 'デスクトップ', width: '' },
+            { name: 'タブレット', width: '768px', widthMedia: '992px' },
+            { name: 'スマホ', width: '375px', widthMedia: '768px' },
+          ],
+        },
+        // iframe 内（メール本文）のスタイル: 余白を確保してプレビューの読みやすさ向上
+        canvas: {
+          styles: [
+            'data:text/css;base64,' + btoa(
+              'body{margin:16px auto;max-width:600px;background:#fff;color:#222;line-height:1.7;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI",sans-serif;padding:8px;}'
+            ),
+          ],
+        },
         components: initialHtml || '<p>{{name}}さん、こんにちは。</p>',
       })
 

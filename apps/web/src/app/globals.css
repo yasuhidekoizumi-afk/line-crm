@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+/* ============================================================
+ * GrapesJS（メールテンプレート ビジュアルエディタ）の見やすさ調整
+ * - デフォルトの暗いキャンバス背景を明るくし、プレビューが読みやすいように
+ * - モバイルプレビュー時にキャンバスを中央寄せして空白の暗部を減らす
+ * ========================================================== */
+.gjs-cv-canvas {
+  background-color: #f5f6f8 !important;
+}
+.gjs-cv-canvas__frames {
+  display: flex !important;
+  justify-content: center !important;
+  padding: 16px 0 !important;
+}
+.gjs-frame-wrapper {
+  margin: 0 auto !important;
+}
+.gjs-cv-canvas iframe {
+  background-color: #ffffff;
+  box-shadow: 0 0 0 1px #e5e7eb, 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+}
