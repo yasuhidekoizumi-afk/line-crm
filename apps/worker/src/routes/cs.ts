@@ -48,6 +48,7 @@ import {
   notifyL3Escalation,
   notifyL2DraftReady,
 } from '../services/cs-slack-notify.js';
+import { fetchShopifyCustomerContext } from '../services/shopify-customer-context.js';
 import type { Env } from '../index.js';
 
 export const cs = new Hono<Env>();
@@ -269,14 +270,35 @@ async function runTriageForMessage(
     return;
   }
 
-  // 顧客カルテ取得
+  // 顧客カルテ取得（LINE harness DB + Shopify Admin API）
   const link = await findCustomerLink(env.DB, { email: customerEmail });
+  const shopifyCtx = await fetchShopifyCustomerContext(
+    env.SHOPIFY_SHOP_DOMAIN,
+    env.SHOPIFY_ADMIN_TOKEN,
+    customerEmail,
+  );
+  // Shopify顧客IDが取れたら customer_links を更新（次回以降の名寄せ高速化）
+  if (shopifyCtx?.customer && (!link?.shopify_customer_id || link.display_name !== shopifyCtx.customer.name)) {
+    await upsertCustomerLink(env.DB, {
+      email: customerEmail,
+      display_name: shopifyCtx.customer.name,
+    });
+  }
+
+  const recentOrdersForPrompt = (shopifyCtx?.recent_orders ?? []).map((o) => ({
+    name: `${o.name} (${o.ordered_at}, ¥${o.total}, ${o.payment_status ?? '?'}/${o.fulfillment_status ?? '?'}): ${o.items.join(', ')}`,
+    ordered_at: o.ordered_at,
+    status: `${o.payment_status ?? '?'} / ${o.fulfillment_status ?? '?'}`,
+  }));
+
   const customer: CsCustomerContext = {
-    name: link?.display_name ?? null,
+    name: shopifyCtx?.customer?.name ?? link?.display_name ?? null,
     email: customerEmail,
-    ltv: null, // TODO: Phase1.5でShopify連携
-    recent_orders: [],
-    past_chats_summary: null,
+    ltv: shopifyCtx?.customer?.ltv_jpy ?? null,
+    recent_orders: recentOrdersForPrompt,
+    past_chats_summary: shopifyCtx?.customer
+      ? `Shopify顧客: 累計${shopifyCtx.customer.orders_count}回購入 / 登録${shopifyCtx.customer.customer_since}${shopifyCtx.customer.tags.length ? ` / タグ: ${shopifyCtx.customer.tags.join(', ')}` : ''}`
+      : null,
   };
 
   const faqRows = await getActiveFaqs(env.DB);
