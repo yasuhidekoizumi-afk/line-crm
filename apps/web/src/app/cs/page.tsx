@@ -82,16 +82,24 @@ export default function CsDashboardPage() {
         title="CSダッシュボード"
         description="LINE/メール統合受信箱のAIトリアージ運用状況"
         action={
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white"
-          >
-            <option value={1}>過去24時間</option>
-            <option value={7}>過去7日間</option>
-            <option value={30}>過去30日間</option>
-            <option value={90}>過去90日間</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white"
+            >
+              <option value={1}>過去24時間</option>
+              <option value={7}>過去7日間</option>
+              <option value={30}>過去30日間</option>
+              <option value={90}>過去90日間</option>
+            </select>
+            <a
+              href="/cs/settings"
+              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+            >
+              ⚙️ 設定
+            </a>
+          </div>
         }
       />
 

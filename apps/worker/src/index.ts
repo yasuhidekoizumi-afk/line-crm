@@ -46,6 +46,9 @@ import { help } from './routes/help.js';
 import { cs } from './routes/cs.js';
 import { syncFaqFromSheets } from './services/cs-faq-sync.js';
 import { notifyDraftBacklog } from './services/cs-slack-notify.js';
+// CS Phase 2: 楽天 RMS WEB SERVICE 統合
+import { rakuten } from './routes/rakuten.js';
+import { checkRakutenLicenseExpiry } from './services/rakuten-license-monitor.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
 // FERMENT: メールマーケティング拡張
 import {
@@ -110,6 +113,7 @@ export type Env = {
     RESEND_WEBHOOK_SECRET?: string;
     ANTHROPIC_API_KEY?: string;
     GEMINI_API_KEY?: string;
+    OPENAI_API_KEY?: string;
     SLACK_WEBHOOK_URL?: string;
     FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
     FERMENT_HMAC_SECRET?: string;
@@ -126,6 +130,9 @@ export type Env = {
     CS_SLACK_CHANNEL_ID?: string;
     CS_FAQ_SHEET_ID?: string;
     CS_FAQ_SHEET_RANGE?: string;
+    // CS Phase 2: 楽天 RMS
+    RAKUTEN_SERVICE_SECRET?: string;
+    RAKUTEN_LICENSE_KEY?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -180,6 +187,8 @@ app.route('/', shopifyOrders);
 app.route('/', help);
 // CS Phase 1: Gmail webhook + AI下書き承認API
 app.route('/', cs);
+// CS Phase 2: 楽天 RMS 管理API
+app.route('/', rakuten);
 
 // FERMENT ルート登録
 // 認証が必要な API エンドポイント
@@ -307,6 +316,8 @@ async function scheduled(
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
     // 注: Gemini 新モデル検知は全社版 Watcher に寄せたため、FERMENT 内 cron は無効化
     // 手動チェック API は残してある: POST /api/ferment/cockpit/models/check-now
+    // CS Phase 2: 楽天 licenseKey 期限チェック（30/14/7/1/0日前にSlack通知）
+    jobs.push(checkRakutenLicenseExpiry(env).then(() => undefined).catch(() => undefined));
   } else {
     // デフォルト（5分毎）でもキャンペーン・フロー処理を実行
     jobs.push(processScheduledEmailCampaigns(env));
