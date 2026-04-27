@@ -318,6 +318,8 @@ async function scheduled(
 }
 
 // CS Phase 1: 30分以上滞留している下書きをSlack通知
+// クールダウン: 件数が増えない限り60分に1回まで（cs_notify_state テーブルで管理）
+const CS_BACKLOG_COOLDOWN_MS = 60 * 60 * 1000;
 async function checkCsDraftBacklog(env: Env['Bindings']): Promise<void> {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const result = await env.DB.prepare(
@@ -326,8 +328,23 @@ async function checkCsDraftBacklog(env: Env['Bindings']): Promise<void> {
     .bind(cutoff)
     .first<{ cnt: number; oldest: string | null }>();
   if (!result || result.cnt === 0) return;
+
+  const state = await env.DB.prepare(
+    `SELECT last_notified_at, last_count FROM cs_notify_state WHERE id = 1`,
+  ).first<{ last_notified_at: string; last_count: number } | null>();
+  if (state) {
+    const elapsed = Date.now() - new Date(state.last_notified_at).getTime();
+    if (elapsed < CS_BACKLOG_COOLDOWN_MS && result.cnt <= state.last_count) return;
+  }
+
   const oldestMs = result.oldest ? Date.now() - new Date(result.oldest).getTime() : 0;
   await notifyDraftBacklog(env, result.cnt, Math.floor(oldestMs / 60000));
+  await env.DB.prepare(
+    `INSERT INTO cs_notify_state (id, last_notified_at, last_count) VALUES (1, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET last_notified_at = excluded.last_notified_at, last_count = excluded.last_count`,
+  )
+    .bind(new Date().toISOString(), result.cnt)
+    .run();
 }
 
 export default {
