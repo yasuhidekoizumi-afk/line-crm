@@ -28,6 +28,8 @@ export * from './rewards';
 export * from './ferment';
 // CS Phase 1: 統合受信箱 + AIトリアージ
 export * from './cs';
+// CS Phase 2: 楽天 RMS WEB SERVICE 統合
+export * from './rakuten';
 
 /**
  * Thin wrapper around D1Database.
