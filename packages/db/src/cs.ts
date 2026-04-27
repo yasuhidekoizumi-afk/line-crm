@@ -146,6 +146,11 @@ export async function findCsMessageByExternalId(
 
 // ===== ai_drafts =====
 
+/**
+ * AI下書きを作成 or 上書き。同一チャットに pending 下書きが既に存在する場合は
+ * 新規 INSERT せず既存行を UPDATE し、最新の triage 結果で上書きする。
+ * これにより同じチャットで再 triage が走っても下書きが無限増殖しない。
+ */
 export async function createAiDraft(
   db: D1Database,
   input: {
@@ -155,9 +160,26 @@ export async function createAiDraft(
     draft_metadata?: Record<string, unknown>;
   },
 ): Promise<AiDraftRow> {
-  const id = crypto.randomUUID();
   const now = jstNow();
   const metaJson = input.draft_metadata ? JSON.stringify(input.draft_metadata) : null;
+
+  // 既存 pending 下書きを探す
+  const existing = await db
+    .prepare(`SELECT id FROM ai_drafts WHERE chat_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1`)
+    .bind(input.chat_id)
+    .first<{ id: string }>();
+
+  if (existing) {
+    await db
+      .prepare(
+        `UPDATE ai_drafts SET message_id = ?, draft_text = ?, draft_metadata = ?, created_at = ? WHERE id = ?`,
+      )
+      .bind(input.message_id, input.draft_text, metaJson, now, existing.id)
+      .run();
+    return (await getAiDraftById(db, existing.id))!;
+  }
+
+  const id = crypto.randomUUID();
   await db
     .prepare(
       `INSERT INTO ai_drafts (id, chat_id, message_id, draft_text, draft_metadata, status, created_at)
