@@ -306,11 +306,13 @@ export function buildRfc822(input: {
   text: string;
   inReplyTo?: string;
   references?: string;
+  replyTo?: string;
 }): string {
   const lines = [
     `From: ${input.from}`,
     `To: ${input.to}`,
     `Subject: =?utf-8?B?${b64Utf8(input.subject)}?=`,
+    ...(input.replyTo ? [`Reply-To: ${input.replyTo}`] : []),
     `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset=utf-8`,
     `Content-Transfer-Encoding: base64`,

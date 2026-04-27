@@ -389,17 +389,18 @@ async function sendReply(
     console.error('[cs/sendReply] service account not configured');
     return;
   }
-  const fromAddr =
-    channel === 'email_support'
-      ? 'support@oryzae.site'
-      : 'support@oryzae.site'; // customer-support@oryzae.shop は転送設定で site側に集約
+  // support@oryzae.site / customer-support@oryzae.shop はエイリアス（実体無し）。
+  // ドメイン委任で impersonate できないため、実ユーザー受信箱から送信する。
+  const senderUser = 'yasuhide.koizumi@oryzae.site';
+  const visibleAlias = channel === 'email_support' ? 'support@oryzae.site' : 'support@oryzae.site';
   const subject = origSubject?.startsWith('Re: ') ? origSubject : `Re: ${origSubject ?? 'お問い合わせ'}`;
-  const client = new GmailClient(sa, fromAddr);
+  const client = new GmailClient(sa, senderUser);
   const raw = buildRfc822({
-    from: `オリゼ カスタマーサポート <${fromAddr}>`,
+    from: `オリゼ カスタマーサポート <${senderUser}>`,
     to: customerEmail,
     subject,
     text: replyText,
+    replyTo: visibleAlias,
   });
 
   // threadIdを取得
@@ -425,7 +426,7 @@ async function sendReply(
     channel: 'email',
     direction: 'outgoing',
     external_id: sent.id,
-    from_address: fromAddr,
+    from_address: senderUser,
     to_address: customerEmail,
     subject,
     body_text: replyText,
@@ -453,7 +454,7 @@ cs.get('/api/cs/drafts', async (c) => {
     });
   } catch (e) {
     console.error('GET /api/cs/drafts error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -477,7 +478,7 @@ cs.get('/api/cs/chats/:id/draft', async (c) => {
     });
   } catch (e) {
     console.error('GET /api/cs/chats/:id/draft error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -531,7 +532,7 @@ cs.post('/api/cs/drafts/:id/approve', async (c) => {
     return c.json({ success: true, data: { id, sent: true } });
   } catch (e) {
     console.error('POST /api/cs/drafts/:id/approve error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -551,7 +552,7 @@ cs.post('/api/cs/drafts/:id/reject', async (c) => {
     return c.json({ success: true });
   } catch (e) {
     console.error('POST /api/cs/drafts/:id/reject error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -593,7 +594,7 @@ cs.get('/api/cs/dashboard', async (c) => {
     });
   } catch (e) {
     console.error('GET /api/cs/dashboard error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -603,7 +604,7 @@ cs.get('/api/cs/faqs', async (c) => {
     return c.json({ success: true, data: faqs });
   } catch (e) {
     console.error('GET /api/cs/faqs error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -642,7 +643,7 @@ cs.post('/api/cs/gmail/watch', async (c) => {
     return c.json({ success: true, data: results });
   } catch (e) {
     console.error('POST /api/cs/gmail/watch error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -681,6 +682,6 @@ cs.post('/api/cs/triage/:chatId', async (c) => {
     return c.json({ success: true });
   } catch (e) {
     console.error('POST /api/cs/triage/:chatId error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
