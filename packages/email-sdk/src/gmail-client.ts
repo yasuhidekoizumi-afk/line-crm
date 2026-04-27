@@ -299,6 +299,22 @@ export function extractEmailAddress(fromHeader: string | null): string | null {
 
 // ===== RFC 822 メール送信用ヘルパー =====
 
+/**
+ * "Display Name <addr@example.com>" 形式の表示名部分のみ RFC 2047 で base64 エンコードする。
+ * 非ASCII文字を含むヘッダー値（From, To 等）の文字化けを防ぐ。
+ */
+function encodeDisplayName(addressHeader: string): string {
+  const m = addressHeader.match(/^(.+?)\s*<([^>]+)>\s*$/);
+  if (!m) return addressHeader; // "addr@example.com" のみ → そのまま
+  const displayName = m[1].trim().replace(/^"(.*)"$/, '$1');
+  const email = m[2].trim();
+  // ASCIIのみなら quote でOK / 非ASCIIなら RFC 2047 base64
+  if (/^[\x20-\x7E]+$/.test(displayName)) {
+    return `"${displayName}" <${email}>`;
+  }
+  return `=?utf-8?B?${b64Utf8(displayName)}?= <${email}>`;
+}
+
 export function buildRfc822(input: {
   from: string;
   to: string;
@@ -309,10 +325,10 @@ export function buildRfc822(input: {
   replyTo?: string;
 }): string {
   const lines = [
-    `From: ${input.from}`,
-    `To: ${input.to}`,
+    `From: ${encodeDisplayName(input.from)}`,
+    `To: ${encodeDisplayName(input.to)}`,
     `Subject: =?utf-8?B?${b64Utf8(input.subject)}?=`,
-    ...(input.replyTo ? [`Reply-To: ${input.replyTo}`] : []),
+    ...(input.replyTo ? [`Reply-To: ${encodeDisplayName(input.replyTo)}`] : []),
     `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset=utf-8`,
     `Content-Transfer-Encoding: base64`,
