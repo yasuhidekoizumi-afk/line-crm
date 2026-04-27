@@ -41,6 +41,7 @@ import { loyalty } from './routes/loyalty.js';
 import { rewards } from './routes/rewards.js';
 import { shopifyWebhooks } from './routes/shopify-webhooks.js';
 import { shopifyOrders } from './routes/shopify-orders.js';
+import { shopifyProducts } from './routes/shopify-products.js';
 import { help } from './routes/help.js';
 // CS Phase 1: 統合受信箱 + AIトリアージ
 import { cs } from './routes/cs.js';
@@ -184,6 +185,7 @@ app.route('/', loyalty);
 app.route('/', rewards);
 app.route('/', shopifyWebhooks);
 app.route('/', shopifyOrders);
+app.route('/', shopifyProducts);
 app.route('/', help);
 // CS Phase 1: Gmail webhook + AI下書き承認API
 app.route('/', cs);

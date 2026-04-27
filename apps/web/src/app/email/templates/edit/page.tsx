@@ -32,10 +32,24 @@ function EditPageInner() {
   // AI 画像生成
   const [imgPrompt, setImgPrompt] = useState('')
   const [imgGenerating, setImgGenerating] = useState(false)
-  const [imgResult, setImgResult] = useState<{ url: string; cost: number } | null>(null)
+  const [imgResult, setImgResult] = useState<{ url: string; cost: number; refCount: number } | null>(null)
   const [imgError, setImgError] = useState<string | null>(null)
   const [imgQuality, setImgQuality] = useState<'low' | 'medium' | 'high'>('medium')
   const [imgSize, setImgSize] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024')
+  // Shopify 商品参照
+  const [shopifyProducts, setShopifyProducts] = useState<Array<{ id: string; title: string; image_url: string | null }>>([])
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [autoDetectProduct, setAutoDetectProduct] = useState(true)
+  const [productsLoading, setProductsLoading] = useState(false)
+
+  // 商品一覧を初回ロード
+  useEffect(() => {
+    setProductsLoading(true)
+    fermentApi.shopifyProducts.list().then((r) => {
+      if (r.success && r.data) setShopifyProducts(r.data)
+    }).catch(() => { /* Shopify 未接続時は空のまま */ })
+      .finally(() => setProductsLoading(false))
+  }, [])
 
   useEffect(() => {
     if (!id) {
@@ -235,6 +249,45 @@ function EditPageInner() {
         <div className="mt-3 pt-3 border-t border-purple-100">
           <p className="text-xs font-semibold text-pink-800 mb-1">🎨 AI で画像を生成（GPT-Image-2）</p>
           <p className="text-xs text-pink-600 mb-2">「春の食卓に並ぶ KOJIPOP」「米麹のテクスチャ背景」など、シーンを指示すると画像が生成されてエディタに挿入されます</p>
+
+          {/* Shopify 商品参照 */}
+          <div className="mb-2 p-2 bg-white border border-pink-200 rounded-lg">
+            <p className="text-xs font-medium text-pink-700 mb-1">📦 商品画像をベースに生成（オプション）</p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <select
+                multiple
+                value={selectedProductIds}
+                onChange={(e) => {
+                  const opts = Array.from(e.target.selectedOptions).map((o) => o.value)
+                  setSelectedProductIds(opts)
+                }}
+                disabled={imgGenerating || productsLoading}
+                size={Math.min(5, Math.max(2, shopifyProducts.length))}
+                className="flex-1 min-w-[260px] border border-pink-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-pink-400"
+              >
+                {productsLoading && <option disabled>商品読み込み中...</option>}
+                {!productsLoading && shopifyProducts.length === 0 && <option disabled>Shopify 未接続 or 商品なし</option>}
+                {shopifyProducts.map((p) => (
+                  <option key={p.id} value={p.id}>{p.title}</option>
+                ))}
+              </select>
+              <label className="flex items-center gap-2 text-xs text-pink-700 cursor-pointer whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  checked={autoDetectProduct}
+                  onChange={(e) => setAutoDetectProduct(e.target.checked)}
+                  disabled={imgGenerating}
+                />
+                プロンプトから AI が商品を自動検出
+              </label>
+            </div>
+            {selectedProductIds.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                選択中: {selectedProductIds.length} 商品 × Cmd/Ctrl+クリックで複数選択 / 解除
+              </p>
+            )}
+          </div>
+
           <div className="flex gap-2 items-start flex-wrap">
             <input
               type="text"
@@ -277,9 +330,11 @@ function EditPageInner() {
                     prompt: imgPrompt.trim(),
                     size: imgSize,
                     quality: imgQuality,
+                    product_ids: selectedProductIds.length > 0 ? selectedProductIds : undefined,
+                    auto_detect_product: autoDetectProduct,
                   })
                   if (r.success && r.data) {
-                    setImgResult({ url: r.data.url, cost: r.data.cost_usd })
+                    setImgResult({ url: r.data.url, cost: r.data.cost_usd, refCount: r.data.reference_count })
                     // 既存 HTML の最後に <img> を追加
                     const newImgTag = `<p style="text-align:center;margin:24px 0;"><img src="${r.data.url}" alt="" style="max-width:100%;height:auto;border-radius:8px;" /></p>`
                     setHtml((prev) => prev + newImgTag)
@@ -318,6 +373,9 @@ function EditPageInner() {
                 <img src={imgResult.url} alt="生成画像" className="w-24 h-24 object-cover rounded border" />
                 <div className="text-xs text-pink-700">
                   ✅ 画像を生成してエディタの末尾に挿入しました（コスト: ${imgResult.cost.toFixed(3)}）<br />
+                  {imgResult.refCount > 0
+                    ? <>📦 オリゼ実商品 {imgResult.refCount} 枚をベースに合成しました</>
+                    : <>📝 テキストプロンプトのみで生成（商品参照なし）</>}<br />
                   位置はビジュアルエディタでドラッグ調整できます。
                 </div>
               </div>
