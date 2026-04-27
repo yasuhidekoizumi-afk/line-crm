@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { fermentApi, type EmailCampaign, type EmailTemplate, type Segment } from '@/lib/ferment-api'
 
 interface CampaignDraft {
@@ -72,6 +73,31 @@ function EmailCampaignsPageInner() {
   const [aiDraftElapsed, setAiDraftElapsed] = useState(0)
   const [aiDraftDone, setAiDraftDone] = useState(!!passedDraft)
   const [templateAutoCreated, setTemplateAutoCreated] = useState(false)
+  // テンプレ プレビュー モーダル用 state
+  const [previewing, setPreviewing] = useState(false)
+  const [previewData, setPreviewData] = useState<{ subject: string; html: string; campaignName: string } | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+
+  const handlePreviewCampaign = async (c: EmailCampaign) => {
+    if (!c.template_id) {
+      setPreviewError('このキャンペーンにはテンプレートが設定されていません')
+      return
+    }
+    setPreviewing(true)
+    setPreviewError(null)
+    try {
+      const r = await fermentApi.templates.preview(c.template_id)
+      if (r.success && r.data) {
+        setPreviewData({ subject: r.data.subject, html: r.data.html, campaignName: c.name })
+      } else {
+        setPreviewError(r.error ?? 'プレビュー生成に失敗しました')
+      }
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPreviewing(false)
+    }
+  }
 
   // ai_action パラメータ付きで来た時、AI ドラフトを取りに行く
   useEffect(() => {
@@ -359,7 +385,25 @@ function EmailCampaignsPageInner() {
                     </td>
                     <td className="px-4 py-3 text-gray-500">{fmt(c.created_at)}</td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-1 justify-end">
+                      <div className="flex gap-1 justify-end items-center">
+                        {c.template_id && (
+                          <button
+                            onClick={() => handlePreviewCampaign(c)}
+                            disabled={previewing}
+                            className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 disabled:opacity-50"
+                          >
+                            👁 プレビュー
+                          </button>
+                        )}
+                        {c.template_id && ['draft', 'scheduled'].includes(c.status) && (
+                          <Link
+                            href={`/email/templates/edit?id=${c.template_id}`}
+                            prefetch={false}
+                            className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100"
+                          >
+                            ✏️ 編集
+                          </Link>
+                        )}
                         {c.status === 'draft' && (
                           <button
                             onClick={() => handleSend(c.campaign_id)}
@@ -384,6 +428,48 @@ function EmailCampaignsPageInner() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* プレビュー モーダル */}
+      {previewError && (
+        <div className="fixed top-4 right-4 z-50 max-w-sm p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 shadow-lg">
+          ⚠️ {previewError}
+          <button onClick={() => setPreviewError(null)} className="ml-2 text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
+      {previewData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setPreviewData(null)}
+        >
+          <div
+            className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-start px-5 py-3 border-b">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-gray-500">キャンペーン: {previewData.campaignName}</p>
+                <h3 className="font-semibold text-gray-900 truncate">件名: {previewData.subject || '(件名なし)'}</h3>
+              </div>
+              <button
+                onClick={() => setPreviewData(null)}
+                className="text-gray-400 hover:text-gray-600 px-2 shrink-0"
+                aria-label="閉じる"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 bg-gray-50">
+              <iframe
+                srcDoc={previewData.html}
+                className="w-full bg-white border rounded-lg"
+                style={{ minHeight: '500px', height: '70vh' }}
+                sandbox="allow-same-origin"
+                title="メールプレビュー"
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>
