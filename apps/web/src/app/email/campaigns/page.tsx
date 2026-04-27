@@ -75,8 +75,24 @@ function EmailCampaignsPageInner() {
   const [templateAutoCreated, setTemplateAutoCreated] = useState(false)
   // テンプレ プレビュー モーダル用 state
   const [previewing, setPreviewing] = useState(false)
-  const [previewData, setPreviewData] = useState<{ subject: string; html: string; campaignName: string } | null>(null)
+  const [previewData, setPreviewData] = useState<{
+    subject: string
+    html: string
+    campaignName: string
+    templateId: string
+  } | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  // AI 編集 用 state
+  const [aiInstruction, setAiInstruction] = useState('')
+  const [aiEditing, setAiEditing] = useState(false)
+  const [aiEditResult, setAiEditResult] = useState<{
+    subject: string
+    body_html: string
+    body_text: string
+    diff_summary: string
+  } | null>(null)
+  const [aiEditError, setAiEditError] = useState<string | null>(null)
+  const [aiSaving, setAiSaving] = useState(false)
 
   const handlePreviewCampaign = async (c: EmailCampaign) => {
     if (!c.template_id) {
@@ -85,10 +101,18 @@ function EmailCampaignsPageInner() {
     }
     setPreviewing(true)
     setPreviewError(null)
+    setAiEditResult(null)
+    setAiEditError(null)
+    setAiInstruction('')
     try {
       const r = await fermentApi.templates.preview(c.template_id)
       if (r.success && r.data) {
-        setPreviewData({ subject: r.data.subject, html: r.data.html, campaignName: c.name })
+        setPreviewData({
+          subject: r.data.subject,
+          html: r.data.html,
+          campaignName: c.name,
+          templateId: c.template_id,
+        })
       } else {
         setPreviewError(r.error ?? 'プレビュー生成に失敗しました')
       }
@@ -96,6 +120,67 @@ function EmailCampaignsPageInner() {
       setPreviewError(e instanceof Error ? e.message : String(e))
     } finally {
       setPreviewing(false)
+    }
+  }
+
+  // AI 編集: 自然言語の指示でテンプレを書き換え（保存はせずプレビューだけ更新）
+  const handleAiEdit = async () => {
+    if (!previewData || !aiInstruction.trim()) return
+    setAiEditing(true)
+    setAiEditError(null)
+    try {
+      const r = await fermentApi.templates.aiEdit(previewData.templateId, aiInstruction.trim())
+      if (r.success && r.data) {
+        setAiEditResult(r.data)
+        // プレビューも更新（簡易: HTML を直接差し替え。プレースホルダ未解決だが大筋確認用）
+        setPreviewData({ ...previewData, subject: r.data.subject, html: r.data.body_html })
+      } else {
+        setAiEditError(r.error ?? 'AI 編集に失敗しました')
+      }
+    } catch (e) {
+      setAiEditError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiEditing(false)
+    }
+  }
+
+  // AI 編集結果を実際に保存
+  const handleAiSave = async () => {
+    if (!previewData || !aiEditResult) return
+    setAiSaving(true)
+    try {
+      const r = await fermentApi.templates.update(previewData.templateId, {
+        subject_base: aiEditResult.subject,
+        body_html: aiEditResult.body_html,
+        body_text: aiEditResult.body_text,
+      })
+      if (r.success) {
+        // 保存後、プレビューを再取得して最新の placeholder 解決済み HTML を表示
+        const p = await fermentApi.templates.preview(previewData.templateId)
+        if (p.success && p.data) {
+          setPreviewData({ ...previewData, subject: p.data.subject, html: p.data.html })
+        }
+        setAiEditResult(null)
+        setAiInstruction('')
+      } else {
+        setAiEditError(r.error ?? '保存に失敗しました')
+      }
+    } catch (e) {
+      setAiEditError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAiSaving(false)
+    }
+  }
+
+  const handleAiRevert = async () => {
+    if (!previewData) return
+    setAiEditResult(null)
+    setAiInstruction('')
+    setAiEditError(null)
+    // プレビュー再取得
+    const p = await fermentApi.templates.preview(previewData.templateId)
+    if (p.success && p.data) {
+      setPreviewData({ ...previewData, subject: p.data.subject, html: p.data.html })
     }
   }
 
@@ -444,7 +529,7 @@ function EmailCampaignsPageInner() {
           onClick={() => setPreviewData(null)}
         >
           <div
-            className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] flex flex-col"
+            className="bg-white rounded-xl max-w-4xl w-full max-h-[92vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-start px-5 py-3 border-b">
@@ -460,11 +545,66 @@ function EmailCampaignsPageInner() {
                 ✕
               </button>
             </div>
+
+            {/* AI 編集パネル */}
+            <div className="px-5 py-3 border-b bg-purple-50">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold text-purple-800">✨ AI に修正を依頼</span>
+                <span className="text-xs text-purple-600">自然言語で「もう少しカジュアルに」「絵文字を増やして」など</span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={aiInstruction}
+                  onChange={(e) => setAiInstruction(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim() && !aiEditing) handleAiEdit() }}
+                  placeholder="例: もう少しカジュアルな文体にして、CTA ボタンを目立たせて"
+                  disabled={aiEditing || aiSaving}
+                  className="flex-1 border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 disabled:bg-gray-100"
+                />
+                <button
+                  onClick={handleAiEdit}
+                  disabled={aiEditing || aiSaving || !aiInstruction.trim()}
+                  className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap"
+                >
+                  {aiEditing ? '✨ 書き換え中...' : '✨ AI で書き換え'}
+                </button>
+              </div>
+              {aiEditError && (
+                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                  ⚠️ {aiEditError}
+                </div>
+              )}
+              {aiEditResult && (
+                <div className="mt-3 p-3 bg-white border border-purple-200 rounded-lg">
+                  <p className="text-xs text-purple-700 mb-2">
+                    ✏️ {aiEditResult.diff_summary || '本文を更新しました'}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAiSave}
+                      disabled={aiSaving}
+                      className="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {aiSaving ? '保存中...' : '✓ この内容で保存'}
+                    </button>
+                    <button
+                      onClick={handleAiRevert}
+                      disabled={aiSaving}
+                      className="px-3 py-1.5 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      ↩️ 元に戻す
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex-1 overflow-auto p-4 bg-gray-50">
               <iframe
                 srcDoc={previewData.html}
                 className="w-full bg-white border rounded-lg"
-                style={{ minHeight: '500px', height: '70vh' }}
+                style={{ minHeight: '500px', height: '60vh' }}
                 sandbox="allow-same-origin"
                 title="メールプレビュー"
               />
