@@ -11,6 +11,7 @@ import {
   calculatePoints,
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
+import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js';
 import type { Env } from '../index.js';
 
 const shopifyWebhooks = new Hono<Env>();
@@ -54,6 +55,13 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   } catch {
     return c.json({ success: false, error: 'Invalid JSON' }, 400);
   }
+
+  // BI 永続化: shopify_orders / shopify_order_items に UPSERT（独立処理、失敗握りつぶし）
+  c.executionCtx?.waitUntil(
+    persistShopifyOrder(c.env.DB, order as ShopifyOrderPayload, 'webhook').catch((err) => {
+      console.error('[shopify-webhooks] persistShopifyOrder failed:', err);
+    }),
+  );
 
   if (order.cancelled_at) {
     return c.json({ success: true, data: { skipped: true, reason: 'cancelled' } });
