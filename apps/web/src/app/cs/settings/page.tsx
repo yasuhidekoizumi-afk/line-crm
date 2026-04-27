@@ -197,7 +197,7 @@ npx wrangler secret put RAKUTEN_LICENSE_KEY`}
 
           <div className="mt-6 pt-4 border-t border-gray-200 flex gap-2">
             <a
-              href="https://mms.rakuten.co.jp/"
+              href="https://glogin.rms.rakuten.co.jp/"
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
