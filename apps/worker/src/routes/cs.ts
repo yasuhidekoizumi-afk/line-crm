@@ -387,19 +387,24 @@ async function sendReply(
   const sa = getServiceAccount(env);
   if (!sa) {
     console.error('[cs/sendReply] service account not configured');
-    return;
+    throw new Error('service account not configured');
   }
-  const fromAddr =
+  // support@oryzae.site / customer-support@oryzae.shop はエイリアスで実体が無いため
+  // ドメイン委任で「なりすまし」できない。実ユーザーの受信箱から送る。
+  // From ヘッダの表示名で「オリゼ カスタマーサポート」を装う。
+  const senderUser = 'yasuhide.koizumi@oryzae.site';
+  const visibleFromAddr =
     channel === 'email_support'
       ? 'support@oryzae.site'
-      : 'support@oryzae.site'; // customer-support@oryzae.shop は転送設定で site側に集約
+      : 'support@oryzae.site';
   const subject = origSubject?.startsWith('Re: ') ? origSubject : `Re: ${origSubject ?? 'お問い合わせ'}`;
-  const client = new GmailClient(sa, fromAddr);
+  const client = new GmailClient(sa, senderUser);
   const raw = buildRfc822({
-    from: `オリゼ カスタマーサポート <${fromAddr}>`,
+    from: `オリゼ カスタマーサポート <${senderUser}>`,
     to: customerEmail,
     subject,
     text: replyText,
+    replyTo: visibleFromAddr,
   });
 
   // threadIdを取得
@@ -531,7 +536,7 @@ cs.post('/api/cs/drafts/:id/approve', async (c) => {
     return c.json({ success: true, data: { id, sent: true } });
   } catch (e) {
     console.error('POST /api/cs/drafts/:id/approve error:', e);
-    return c.json({ success: false, error: 'Internal server error' }, 500);
+    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 300)}` }, 500);
   }
 });
 
