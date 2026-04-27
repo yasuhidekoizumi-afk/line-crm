@@ -25,6 +25,8 @@ export type FermentEnv = {
     RESEND_WEBHOOK_SECRET?: string;
     ANTHROPIC_API_KEY?: string;
     GEMINI_API_KEY?: string;
+    OPENAI_API_KEY?: string;
+    IMAGES?: R2Bucket;
     SLACK_WEBHOOK_URL?: string;
     FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
     FERMENT_HMAC_SECRET?: string;

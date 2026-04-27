@@ -473,6 +473,148 @@ cockpitRoutes.post('/draft-from-action', async (c) => {
   }
 });
 
+// ─── 1.6. AI 画像生成（OpenAI gpt-image-2） ──────
+//
+// 自然言語プロンプトから画像を生成し R2 に保存して URL を返す。
+// テンプレ編集時に <img> タグとして本文に挿入する用途。
+// 入力に reference_image_url を渡せば I2I（商品画像をベースにシーン展開）も可能。
+
+cockpitRoutes.post('/generate-image', async (c) => {
+  try {
+    if (await isKilled(c.env, 'image')) {
+      return c.json({ success: false, error: 'Image generation is paused' }, 503);
+    }
+    const apiKey = c.env.OPENAI_API_KEY;
+    if (!apiKey) return c.json({ success: false, error: 'OPENAI_API_KEY not configured' }, 503);
+    if (!c.env.IMAGES) return c.json({ success: false, error: 'IMAGES R2 bucket not bound' }, 503);
+
+    const body = await c.req.json<{
+      prompt: string;
+      size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
+      quality?: 'low' | 'medium' | 'high' | 'auto';
+      reference_image_urls?: string[];
+    }>();
+    const prompt = (body.prompt ?? '').trim();
+    if (!prompt) return c.json({ success: false, error: 'prompt is required' }, 400);
+    const size = body.size ?? '1024x1024';
+    const quality = body.quality ?? 'medium';
+
+    // ブランドトーン強化のため、プロンプトにオリゼ向け前置きを追加
+    const fullPrompt = `${prompt}
+
+# スタイル指定
+- 自然光、温かみのある色調
+- 米麹発酵食品ブランド「ORYZAE（オリゼ）」のメール画像
+- 健康志向・誠実・上品な雰囲気
+- 文字や日本語の挿入は最小限、清潔感のある構図`;
+
+    let resp: Response;
+    if (body.reference_image_urls && body.reference_image_urls.length > 0) {
+      // I2I: gpt-image-2 の編集エンドポイントを使用（multipart）
+      const form = new FormData();
+      form.append('model', 'gpt-image-2');
+      form.append('prompt', fullPrompt);
+      form.append('size', size);
+      form.append('quality', quality);
+      form.append('n', '1');
+      // 参照画像をフェッチして multipart に追加（最大 4 枚まで）
+      for (const url of body.reference_image_urls.slice(0, 4)) {
+        try {
+          const imgRes = await fetch(url);
+          if (imgRes.ok) {
+            const blob = await imgRes.blob();
+            form.append('image[]', blob, 'reference.png');
+          }
+        } catch {
+          /* 1 枚読めなくても続行 */
+        }
+      }
+      resp = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: form,
+      });
+    } else {
+      // T2I: シンプルな JSON ボディ
+      resp = await fetch('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-image-2',
+          prompt: fullPrompt,
+          size,
+          quality,
+          n: 1,
+        }),
+      });
+    }
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      return c.json({ success: false, error: `OpenAI ${resp.status}: ${text.slice(0, 300)}` }, 500);
+    }
+    const data = await resp.json<{ data?: Array<{ b64_json?: string; url?: string }> }>();
+    const item = data.data?.[0];
+    if (!item) return c.json({ success: false, error: 'OpenAI response had no image' }, 500);
+
+    // gpt-image-2 は b64_json を返す
+    let bytes: Uint8Array;
+    if (item.b64_json) {
+      const bin = atob(item.b64_json);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } else if (item.url) {
+      const r = await fetch(item.url);
+      bytes = new Uint8Array(await r.arrayBuffer());
+    } else {
+      return c.json({ success: false, error: 'OpenAI response had no b64_json or url' }, 500);
+    }
+
+    // R2 に保存
+    const id = crypto.randomUUID();
+    const key = `ai/${id}.png`;
+    await c.env.IMAGES.put(key, bytes, {
+      httpMetadata: { contentType: 'image/png' },
+      customMetadata: { source: 'gpt-image-2', prompt: prompt.slice(0, 500) },
+    });
+
+    const workerUrl = c.env.WORKER_URL || new URL(c.req.url).origin;
+    const imageUrl = `${workerUrl}/images/${key}`;
+
+    // コスト概算: gpt-image-2 medium 1024x1024 ≈ $0.04
+    const cost = quality === 'high' ? 0.17 : quality === 'low' ? 0.011 : 0.04;
+    const today = new Date().toISOString().slice(0, 10);
+    await c.env.DB
+      .prepare(
+        `INSERT INTO ai_usage_stats (date, image_calls, total_cost_usd) VALUES (?, 1, ?)
+         ON CONFLICT(date) DO UPDATE SET
+           image_calls = COALESCE(image_calls, 0) + 1,
+           total_cost_usd = total_cost_usd + ?`,
+      )
+      .bind(today, cost, cost)
+      .run()
+      .catch(() => {/* image_calls カラム無くても続行 */});
+
+    return c.json({
+      success: true,
+      data: {
+        url: imageUrl,
+        key,
+        size,
+        quality,
+        cost_usd: cost,
+        used_reference: !!(body.reference_image_urls && body.reference_image_urls.length > 0),
+      },
+    });
+  } catch (err) {
+    console.error('[FERMENT] POST /generate-image error:', err);
+    return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
 cockpitRoutes.post('/strategy/action/:actionId/decide', async (c) => {
   const actionId = c.req.param('actionId');
   const body = await c.req.json<{ status: 'approved' | 'rejected' | 'edited' | 'executed'; campaign_id?: string; user?: string }>();
