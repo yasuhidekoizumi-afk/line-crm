@@ -25,6 +25,10 @@ function EditPageInner() {
   const [aiLoading, setAiLoading] = useState(false)
   const [spam, setSpam] = useState<{ score: number; warnings: string[]; suggestions: string[] } | null>(null)
   const [spamLoading, setSpamLoading] = useState(false)
+  // AI 自然言語編集
+  const [aiInstruction, setAiInstruction] = useState('')
+  const [aiEditing, setAiEditing] = useState(false)
+  const [aiEditDiff, setAiEditDiff] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) {
@@ -158,6 +162,66 @@ function EditPageInner() {
           >
             {spamLoading ? 'チェック中...' : '🛡️ スパムチェック'}
           </button>
+        </div>
+
+        {/* AI 自然言語編集 */}
+        <div className="mt-3 pt-3 border-t border-purple-100">
+          <p className="text-xs font-semibold text-purple-800 mb-1">✨ AI に修正を依頼（自然言語）</p>
+          <p className="text-xs text-purple-600 mb-2">「もう少しカジュアルに」「絵文字を増やして」「冒頭に感謝の挨拶を入れて」など、思いついた指示を投げてください</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={aiInstruction}
+              onChange={(e) => setAiInstruction(e.target.value)}
+              placeholder="例: もう少しカジュアルな文体にして、CTA を目立たせて"
+              disabled={aiEditing}
+              className="flex-1 border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 disabled:bg-gray-100"
+            />
+            <button
+              onClick={async () => {
+                if (!template || !aiInstruction.trim()) return
+                setAiEditing(true)
+                setAiEditDiff(null)
+                setError('')
+                try {
+                  const r = await fermentApi.templates.aiEdit(template.template_id, aiInstruction.trim())
+                  if (r.success && r.data) {
+                    setHtml(r.data.body_html)
+                    setTemplate({
+                      ...template,
+                      subject_base: r.data.subject,
+                      body_html: r.data.body_html,
+                      body_text: r.data.body_text,
+                    })
+                    setAiEditDiff(r.data.diff_summary || '更新しました')
+                    // 即時に保存（ユーザーは「保存する」を再度押す必要なし）
+                    await fermentApi.templates.update(template.template_id, {
+                      subject_base: r.data.subject,
+                      body_html: r.data.body_html,
+                      body_text: r.data.body_text,
+                    })
+                    setSavedAt(new Date())
+                    setAiInstruction('')
+                  } else {
+                    setError(r.error ?? 'AI 編集に失敗しました')
+                  }
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e))
+                } finally {
+                  setAiEditing(false)
+                }
+              }}
+              disabled={aiEditing || !aiInstruction.trim()}
+              className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap"
+            >
+              {aiEditing ? '✨ 書き換え中...' : '✨ AI で書き換える'}
+            </button>
+          </div>
+          {aiEditDiff && (
+            <div className="mt-2 p-2 bg-white border border-purple-200 rounded text-xs text-purple-700">
+              ✏️ {aiEditDiff}（保存済み）
+            </div>
+          )}
         </div>
         {aiSubjects.length > 0 && (
           <div className="mt-3 space-y-1">
