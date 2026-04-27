@@ -7,17 +7,21 @@
  * ========================================================== */
 .gjs-cv-canvas {
   background-color: #f5f6f8 !important;
+  padding: 24px !important;
 }
 .gjs-cv-canvas__frames {
   display: flex !important;
   justify-content: center !important;
-  padding: 16px 0 !important;
+  align-items: flex-start !important;
+  padding: 24px 0 !important;
+  gap: 24px;
 }
 .gjs-frame-wrapper {
   margin: 0 auto !important;
+  padding: 12px;
 }
 .gjs-cv-canvas iframe {
   background-color: #ffffff;
-  box-shadow: 0 0 0 1px #e5e7eb, 0 4px 12px rgba(0, 0, 0, 0.06);
-  border-radius: 6px;
+  box-shadow: 0 0 0 1px #e5e7eb, 0 8px 24px rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
 }
