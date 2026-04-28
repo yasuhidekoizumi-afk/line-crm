@@ -203,33 +203,47 @@ export default function CohortPage() {
               <p className="text-xs text-gray-500 mb-4">
                 40%以上を緑、20%未満を赤で表示。新規200人以上&15%未満は異常値。
               </p>
-              <div className="flex items-end gap-1 sm:gap-2 h-48 overflow-x-auto pb-2">
-                {cohort.map((c) => {
-                  const h = Math.max(2, Math.min(100, c.line_link_rate_pct))
-                  const color =
-                    c.line_link_rate_pct >= 40
-                      ? 'bg-green-500'
-                      : c.line_link_rate_pct >= 20
-                      ? 'bg-yellow-500'
-                      : 'bg-red-500'
-                  return (
-                    <div key={c.cohort_month} className="flex flex-col items-center gap-1 min-w-[36px]">
-                      <div className="text-[10px] text-gray-700 tabular-nums">
-                        {c.line_link_rate_pct}%
-                      </div>
+              <div className="overflow-x-auto pb-2">
+                <div className="flex items-end gap-1 sm:gap-2" style={{ height: '180px' }}>
+                  {cohort.map((c) => {
+                    const BAR_AREA_PX = 160
+                    const barHpx = Math.max(4, (Math.min(100, c.line_link_rate_pct) / 100) * BAR_AREA_PX)
+                    const color =
+                      c.line_link_rate_pct >= 40
+                        ? 'bg-green-500'
+                        : c.line_link_rate_pct >= 20
+                        ? 'bg-yellow-500'
+                        : 'bg-red-500'
+                    return (
                       <div
-                        className={`w-6 sm:w-8 ${color} rounded-t`}
-                        style={{ height: `${h}%` }}
-                        title={`${c.cohort_month}: ${c.line_link_rate_pct}% (${num(
-                          c.first_order_customers,
-                        )}人)`}
-                      />
-                      <div className="text-[10px] text-gray-500 transform -rotate-45 origin-top-left mt-2 whitespace-nowrap">
-                        {c.cohort_month.slice(2)}
+                        key={c.cohort_month}
+                        className="flex flex-col items-center justify-end min-w-[36px] flex-shrink-0"
+                        style={{ height: '180px' }}
+                      >
+                        <div className="text-[10px] text-gray-700 tabular-nums mb-1">
+                          {c.line_link_rate_pct}%
+                        </div>
+                        <div
+                          className={`w-6 sm:w-8 ${color} rounded-t`}
+                          style={{ height: `${barHpx}px` }}
+                          title={`${c.cohort_month}: ${c.line_link_rate_pct}% (${num(
+                            c.first_order_customers,
+                          )}人)`}
+                        />
                       </div>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-1 sm:gap-2 mt-1">
+                  {cohort.map((c) => (
+                    <div
+                      key={c.cohort_month}
+                      className="min-w-[36px] flex-shrink-0 text-[10px] text-gray-500 text-center"
+                    >
+                      {c.cohort_month.slice(2)}
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
               </div>
             </div>
           </>

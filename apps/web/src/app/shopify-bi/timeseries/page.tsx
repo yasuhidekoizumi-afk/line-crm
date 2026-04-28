@@ -160,37 +160,45 @@ export default function TimeseriesPage() {
               </div>
             </div>
 
-            {/* 折れ線グラフ風（縦棒） */}
+            {/* 縦棒グラフ（pixel高さで描画） */}
             <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
               <div className="font-bold text-gray-900 mb-1">
                 売上推移（{data.granularity === 'day' ? '日次' : data.granularity === 'week' ? '週次' : '月次'}）
               </div>
-              <p className="text-xs text-gray-500 mb-4">青：全体売上 / 緑：LINE経由</p>
-              <div className="flex items-end gap-1 h-48 overflow-x-auto pb-2">
-                {filteredSeries.map((s) => {
-                  const totalH = (s.revenue / maxRevenue) * 100
-                  const lineH = s.revenue > 0 ? (s.line_revenue / s.revenue) * totalH : 0
-                  return (
-                    <div
-                      key={s.period}
-                      className="relative flex flex-col justify-end items-center min-w-[20px] sm:min-w-[28px] group"
-                      title={`${s.period}: ${yen(s.revenue)} (LINE ${yen(s.line_revenue)})`}
-                    >
+              <p className="text-xs text-gray-500 mb-4">
+                青：全体売上 / 緑：LINE経由（最大値 {yen(maxRevenue)}）
+              </p>
+              <div className="overflow-x-auto pb-2">
+                <div className="flex items-end gap-1" style={{ height: '180px' }}>
+                  {filteredSeries.map((s) => {
+                    const BAR_AREA_PX = 180
+                    const barH = Math.max(2, (s.revenue / maxRevenue) * BAR_AREA_PX)
+                    const lineRatio = s.revenue > 0 ? (s.line_revenue / s.revenue) * 100 : 0
+                    return (
                       <div
-                        className="w-3 sm:w-4 bg-blue-300 rounded-t-sm relative"
-                        style={{ height: `${Math.max(2, totalH)}%` }}
+                        key={s.period}
+                        className="relative w-4 sm:w-5 bg-blue-300 rounded-t-sm flex-shrink-0"
+                        style={{ height: `${barH}px` }}
+                        title={`${s.period}: ${yen(s.revenue)} (LINE ${yen(s.line_revenue)} / ${lineRatio.toFixed(1)}%)`}
                       >
                         <div
                           className="absolute bottom-0 left-0 w-full bg-green-500 rounded-t-sm"
-                          style={{ height: `${(lineH / totalH) * 100}%` }}
+                          style={{ height: `${lineRatio}%` }}
                         />
                       </div>
-                      <div className="text-[9px] text-gray-500 mt-1 transform -rotate-45 origin-top-left whitespace-nowrap">
-                        {data.granularity === 'month' ? s.period.slice(2) : s.period.slice(5)}
-                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-1 mt-1">
+                  {filteredSeries.map((s) => (
+                    <div
+                      key={s.period}
+                      className="w-4 sm:w-5 text-[9px] text-gray-500 text-center flex-shrink-0 transform -rotate-45 origin-top-left whitespace-nowrap"
+                    >
+                      {data.granularity === 'month' ? s.period.slice(2) : s.period.slice(5)}
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
               </div>
             </div>
 
