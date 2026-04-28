@@ -157,6 +157,7 @@ export const fermentApi = {
       prompt: string
       size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto'
       quality?: 'low' | 'medium' | 'high' | 'auto'
+      model?: 'flash' | 'pro'
       reference_image_urls?: string[]
       product_ids?: string[]
       auto_detect_product?: boolean
@@ -167,6 +168,8 @@ export const fermentApi = {
         size: string
         quality: string
         cost_usd: number
+        model: 'flash' | 'pro'
+        model_id: string
         used_reference: boolean
         reference_count: number
       }>>(
