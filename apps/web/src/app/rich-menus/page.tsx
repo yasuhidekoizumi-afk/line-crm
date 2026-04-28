@@ -12,45 +12,163 @@ import Header from '@/components/layout/header'
 
 const SIZE_LARGE = { width: 2500, height: 1686 }
 
-type LayoutKey = '3x2' | '2x2' | '2x1' | '3x1' | '1x1'
+type LayoutGroup = 'official-large' | 'official-compact' | 'extended'
 
-interface LayoutDef {
+interface ProportionalBounds {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+interface LayoutTemplate {
+  key: string
   label: string
-  rows: number
-  cols: number
+  group: LayoutGroup
+  bounds: ProportionalBounds[]
 }
 
-const LAYOUTS: Record<LayoutKey, LayoutDef> = {
-  '3x2': { label: '6分割（3列×2行）', rows: 2, cols: 3 },
-  '2x2': { label: '4分割（2列×2行）', rows: 2, cols: 2 },
-  '3x1': { label: '3分割（横並び）', rows: 1, cols: 3 },
-  '2x1': { label: '2分割（左右）', rows: 1, cols: 2 },
-  '1x1': { label: '1分割（全面）', rows: 1, cols: 1 },
-}
+/**
+ * LINE 公式アカウントマネージャーの 12 プリセット（大7・小5）に加え、
+ * Messaging API が許す範囲の拡張パターンも提供する。
+ * ref: https://developers.line.biz/en/docs/messaging-api/using-rich-menus/
+ *      https://www.lycbiz.com/jp/manual/OfficialAccountManager/rich-menus/
+ */
+const LAYOUT_TEMPLATES: LayoutTemplate[] = [
+  // ── LINE 公式・大サイズ（推奨 2500×1686）7種 ──────────────
+  { key: 'L1', label: '1分割（全面）', group: 'official-large',
+    bounds: [{ x: 0, y: 0, w: 1, h: 1 }] },
+  { key: 'L2-H', label: '2分割（上下）', group: 'official-large',
+    bounds: [
+      { x: 0, y: 0, w: 1, h: 1 / 2 },
+      { x: 0, y: 1 / 2, w: 1, h: 1 / 2 },
+    ] },
+  { key: 'L2-V', label: '2分割（左右）', group: 'official-large',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 2, h: 1 },
+      { x: 1 / 2, y: 0, w: 1 / 2, h: 1 },
+    ] },
+  { key: 'L3-T1B2', label: '3分割（上1＋下2）', group: 'official-large',
+    bounds: [
+      { x: 0, y: 0, w: 1, h: 1 / 2 },
+      { x: 0, y: 1 / 2, w: 1 / 2, h: 1 / 2 },
+      { x: 1 / 2, y: 1 / 2, w: 1 / 2, h: 1 / 2 },
+    ] },
+  { key: 'L4-Grid', label: '4分割（2列×2行）', group: 'official-large',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 2, h: 1 / 2 },
+      { x: 1 / 2, y: 0, w: 1 / 2, h: 1 / 2 },
+      { x: 0, y: 1 / 2, w: 1 / 2, h: 1 / 2 },
+      { x: 1 / 2, y: 1 / 2, w: 1 / 2, h: 1 / 2 },
+    ] },
+  { key: 'L4-L1R3', label: '4分割（左1＋右3）', group: 'official-large',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 2, h: 1 },
+      { x: 1 / 2, y: 0, w: 1 / 2, h: 1 / 3 },
+      { x: 1 / 2, y: 1 / 3, w: 1 / 2, h: 1 / 3 },
+      { x: 1 / 2, y: 2 / 3, w: 1 / 2, h: 1 / 3 },
+    ] },
+  { key: 'L6', label: '6分割（3列×2行）', group: 'official-large',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 3, h: 1 / 2 },
+      { x: 1 / 3, y: 0, w: 1 / 3, h: 1 / 2 },
+      { x: 2 / 3, y: 0, w: 1 / 3, h: 1 / 2 },
+      { x: 0, y: 1 / 2, w: 1 / 3, h: 1 / 2 },
+      { x: 1 / 3, y: 1 / 2, w: 1 / 3, h: 1 / 2 },
+      { x: 2 / 3, y: 1 / 2, w: 1 / 3, h: 1 / 2 },
+    ] },
+  // ── LINE 公式・小サイズ（推奨 2500×843）5種 ────────────────
+  { key: 'C1', label: '1分割（全面）', group: 'official-compact',
+    bounds: [{ x: 0, y: 0, w: 1, h: 1 }] },
+  { key: 'C2', label: '2分割（左右半々）', group: 'official-compact',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 2, h: 1 },
+      { x: 1 / 2, y: 0, w: 1 / 2, h: 1 },
+    ] },
+  { key: 'C2-L', label: '2分割（左大2:右小1）', group: 'official-compact',
+    bounds: [
+      { x: 0, y: 0, w: 2 / 3, h: 1 },
+      { x: 2 / 3, y: 0, w: 1 / 3, h: 1 },
+    ] },
+  { key: 'C2-R', label: '2分割（左小1:右大2）', group: 'official-compact',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 3, h: 1 },
+      { x: 1 / 3, y: 0, w: 2 / 3, h: 1 },
+    ] },
+  { key: 'C3', label: '3分割（横3列）', group: 'official-compact',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 3, h: 1 },
+      { x: 1 / 3, y: 0, w: 1 / 3, h: 1 },
+      { x: 2 / 3, y: 0, w: 1 / 3, h: 1 },
+    ] },
+  // ── 拡張（LINE Manager UIには無いが API は許容） ────────────
+  { key: 'EX-3-V', label: '3分割（横3列）', group: 'extended',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 3, h: 1 },
+      { x: 1 / 3, y: 0, w: 1 / 3, h: 1 },
+      { x: 2 / 3, y: 0, w: 1 / 3, h: 1 },
+    ] },
+  { key: 'EX-5-V', label: '5分割（横5列）', group: 'extended',
+    bounds: Array.from({ length: 5 }, (_, i) => ({
+      x: i / 5, y: 0, w: 1 / 5, h: 1,
+    })) },
+  { key: 'EX-5-L1R4', label: '5分割（左1＋右4）', group: 'extended',
+    bounds: [
+      { x: 0, y: 0, w: 1 / 2, h: 1 },
+      { x: 1 / 2, y: 0, w: 1 / 2, h: 1 / 4 },
+      { x: 1 / 2, y: 1 / 4, w: 1 / 2, h: 1 / 4 },
+      { x: 1 / 2, y: 2 / 4, w: 1 / 2, h: 1 / 4 },
+      { x: 1 / 2, y: 3 / 4, w: 1 / 2, h: 1 / 4 },
+    ] },
+  { key: 'EX-5-T1B4', label: '5分割（上1＋下4）', group: 'extended',
+    bounds: [
+      { x: 0, y: 0, w: 1, h: 1 / 2 },
+      { x: 0, y: 1 / 2, w: 1 / 4, h: 1 / 2 },
+      { x: 1 / 4, y: 1 / 2, w: 1 / 4, h: 1 / 2 },
+      { x: 2 / 4, y: 1 / 2, w: 1 / 4, h: 1 / 2 },
+      { x: 3 / 4, y: 1 / 2, w: 1 / 4, h: 1 / 2 },
+    ] },
+  { key: 'EX-8', label: '8分割（4列×2行）', group: 'extended',
+    bounds: Array.from({ length: 8 }, (_, i) => ({
+      x: (i % 4) / 4,
+      y: Math.floor(i / 4) / 2,
+      w: 1 / 4,
+      h: 1 / 2,
+    })) },
+  { key: 'EX-9', label: '9分割（3列×3行）', group: 'extended',
+    bounds: Array.from({ length: 9 }, (_, i) => ({
+      x: (i % 3) / 3,
+      y: Math.floor(i / 3) / 3,
+      w: 1 / 3,
+      h: 1 / 3,
+    })) },
+]
+
+const LAYOUT_BY_KEY: Record<string, LayoutTemplate> = Object.fromEntries(
+  LAYOUT_TEMPLATES.map((l) => [l.key, l]),
+)
 
 function buildAreas(
-  layout: LayoutKey,
+  layoutKey: string,
   size: { width: number; height: number },
 ): RichMenuAreaPayload[] {
-  const def = LAYOUTS[layout]
-  const cellW = Math.floor(size.width / def.cols)
-  const cellH = Math.floor(size.height / def.rows)
-  const areas: RichMenuAreaPayload[] = []
-  for (let r = 0; r < def.rows; r++) {
-    for (let c = 0; c < def.cols; c++) {
-      areas.push({
-        bounds: { x: c * cellW, y: r * cellH, width: cellW, height: cellH },
-        action: { type: 'uri', uri: 'https://example.com', label: `エリア${areas.length + 1}` },
-      })
-    }
-  }
-  return areas
+  const layout = LAYOUT_BY_KEY[layoutKey]
+  if (!layout) return []
+  return layout.bounds.map((b, i) => ({
+    bounds: {
+      x: Math.round(b.x * size.width),
+      y: Math.round(b.y * size.height),
+      width: Math.round(b.w * size.width),
+      height: Math.round(b.h * size.height),
+    },
+    action: { type: 'uri', uri: 'https://example.com', label: `エリア${i + 1}` },
+  }))
 }
 
 /** Pick a sensible default layout from an uploaded image's dimensions. */
-function suggestLayout(width: number, height: number): LayoutKey {
-  // wide+short images suggest a single-row layout; taller images suggest a grid.
-  return width / height > 2.2 ? '3x1' : '3x2'
+function suggestLayout(width: number, height: number): string {
+  // wide+short images → compact 3-split; otherwise → large 6-split
+  return width / height > 2.2 ? 'C3' : 'L6'
 }
 
 /** Validate against LINE rich menu image constraints. */
@@ -358,7 +476,7 @@ function ChatBarPreview({ text }: { text: string }) {
 interface CreateForm {
   name: string
   chatBarText: string
-  layout: LayoutKey
+  layout: string
   selected: boolean
   areas: RichMenuAreaPayload[]
   imageBase64: string | null
@@ -371,9 +489,9 @@ interface CreateForm {
 const initialForm: CreateForm = {
   name: '',
   chatBarText: 'メニュー',
-  layout: '3x2',
+  layout: 'L6',
   selected: true,
-  areas: buildAreas('3x2', SIZE_LARGE),
+  areas: buildAreas('L6', SIZE_LARGE),
   imageBase64: null,
   imageContentType: 'image/png',
   imageWidth: null,
@@ -414,7 +532,7 @@ export default function RichMenusPage() {
     load()
   }, [load])
 
-  const updateLayout = (layout: LayoutKey) => {
+  const updateLayout = (layout: string) => {
     setForm((f) => {
       const size =
         f.imageWidth && f.imageHeight
@@ -624,7 +742,11 @@ export default function RichMenusPage() {
     form.imageWidth && form.imageHeight
       ? { width: form.imageWidth, height: form.imageHeight }
       : SIZE_LARGE
-  const allLayouts = Object.entries(LAYOUTS) as [LayoutKey, LayoutDef][]
+  const layoutGroups: Array<{ label: string; group: LayoutGroup }> = [
+    { label: 'LINE公式・大サイズ（最大6エリア）', group: 'official-large' },
+    { label: 'LINE公式・小サイズ（最大3エリア）', group: 'official-compact' },
+    { label: '拡張（API互換・5分割など）', group: 'extended' },
+  ]
 
   return (
     <div>
@@ -763,12 +885,16 @@ export default function RichMenusPage() {
                   <select
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
                     value={form.layout}
-                    onChange={(e) => updateLayout(e.target.value as LayoutKey)}
+                    onChange={(e) => updateLayout(e.target.value)}
                   >
-                    {allLayouts.map(([key, def]) => (
-                      <option key={key} value={key}>
-                        {def.label}
-                      </option>
+                    {layoutGroups.map((g) => (
+                      <optgroup key={g.group} label={g.label}>
+                        {LAYOUT_TEMPLATES.filter((l) => l.group === g.group).map((l) => (
+                          <option key={l.key} value={l.key}>
+                            {l.label}（{l.bounds.length}エリア）
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </div>
@@ -908,14 +1034,21 @@ export default function RichMenusPage() {
  * Try to infer which layout preset best matches an existing rich menu's areas.
  * Used by the duplicate flow to pre-select the right layout dropdown value.
  */
-function inferLayoutFromAreas(menu: RichMenuPayload): LayoutKey {
+function inferLayoutFromAreas(menu: RichMenuPayload): string {
   const isCompact = menu.size.width / menu.size.height > 2.2
   const count = menu.areas.length
   if (isCompact) {
-    if (count === 1) return '1x1'
-    if (count === 2) return '2x1'
-    return '3x1'
+    if (count === 1) return 'C1'
+    if (count === 3) return 'C3'
+    return 'C2'
   }
-  if (count === 4) return '2x2'
-  return '3x2'
+  if (count === 1) return 'L1'
+  if (count === 2) return 'L2-H'
+  if (count === 3) return 'L3-T1B2'
+  if (count === 4) return 'L4-Grid'
+  if (count === 6) return 'L6'
+  if (count === 5) return 'EX-5-V'
+  if (count === 8) return 'EX-8'
+  if (count === 9) return 'EX-9'
+  return 'L6'
 }
