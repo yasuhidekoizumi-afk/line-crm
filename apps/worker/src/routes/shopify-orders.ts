@@ -27,7 +27,7 @@ const shopifyOrders = new Hono<Env>();
 
 shopifyOrders.use('/api/shopify/orders/*', authMiddleware);
 
-const BACKFILL_LIMIT = 50;
+const BACKFILL_LIMIT = 20;
 const SHOPIFY_API_VERSION = '2024-10';
 
 shopifyOrders.post('/api/shopify/orders/backfill', async (c) => {
