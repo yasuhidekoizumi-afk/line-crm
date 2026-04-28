@@ -679,7 +679,8 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
     // R2 に保存
     const ext = imageMime.includes('jpeg') ? 'jpg' : imageMime.includes('webp') ? 'webp' : 'png';
     const id = crypto.randomUUID();
-    const key = `ai/${id}.${ext}`;
+    // 注: '/' を含むキーは GET /images/:key ルートにマッチしないため、'-' で区切る
+    const key = `ai-${id}.${ext}`;
     await c.env.IMAGES.put(key, bytes, {
       httpMetadata: { contentType: imageMime },
       customMetadata: { source: 'gemini-3-flash-image', prompt: prompt.slice(0, 500) },
