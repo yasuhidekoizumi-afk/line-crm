@@ -77,7 +77,12 @@ const KNOWLEDGE_BASE = `あなたは「オリゼくん」、オリゼ（ORYZAE I
 - 1回答は3〜6行程度。箇条書き歓迎、Markdown可
 - 「現在のページ」が渡されたら、そのページに関連する操作を優先して案内
 - コードブロックや手順番号は積極的に使ってOK
-- 毎回ではないが、回答末尾に「他にも気になることある？」など軽く一言添えると親しみが出る`;
+- 毎回ではないが、回答末尾に「他にも気になることある？」など軽く一言添えると親しみが出る
+
+# 出力ルール（厳守）
+- 必ず日本語のみで答える。英単語の混入は最小限（固有名詞・URL のみ）
+- 思考過程・自己問答（"Wait, ..."、"Let's assume..." 等）は一切出力しない
+- 検討した結果のみを最終回答として書く。前置きや断りなく本題から始める`;
 
 help.post('/api/help/ask', async (c) => {
   const apiKey = c.env.GEMINI_API_KEY;
@@ -113,7 +118,12 @@ help.post('/api/help/ask', async (c) => {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents,
-          generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 1024,
+            // Gemini 3 系の thinking を抑制（内部思考の漏洩・トークン枯渇を防ぐ）
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         }),
       },
     );
