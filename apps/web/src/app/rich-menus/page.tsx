@@ -477,7 +477,7 @@ function AreaActionPanel({ index, area, aliases, onChange, onClose }: AreaAction
       {action.type === 'richmenuswitch' && (
         <div className="space-y-2">
           <div>
-            <label className="block text-[11px] text-gray-500 mb-0.5">切替先メニューのエイリアス</label>
+            <label className="block text-[11px] text-gray-500 mb-0.5">タップ時に切り替わるメニュー</label>
             {aliases.length > 0 ? (
               <select
                 className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
@@ -486,10 +486,10 @@ function AreaActionPanel({ index, area, aliases, onChange, onClose }: AreaAction
                   onChange({ ...area, action: { ...action, richMenuAliasId: e.target.value } })
                 }
               >
-                <option value="">— エイリアスを選択 —</option>
+                <option value="">— 切替先を選択 —</option>
                 {aliases.map((a) => (
                   <option key={a.richMenuAliasId} value={a.richMenuAliasId}>
-                    {a.richMenuAliasId}（→ {a.richMenuId.slice(0, 16)}…）
+                    {a.richMenuAliasId}
                   </option>
                 ))}
               </select>
@@ -505,7 +505,7 @@ function AreaActionPanel({ index, area, aliases, onChange, onClose }: AreaAction
                   }
                 />
                 <p className="mt-0.5 text-[10px] text-amber-600">
-                  ⚠ エイリアスがまだ登録されていません。下の「リッチメニューのエイリアス管理」から先に登録してください。
+                  ⚠ 切替先がまだ登録されていません。ページ下の「タブ切替先の登録」から先に作成してください。
                 </p>
               </>
             )}
@@ -662,11 +662,11 @@ export default function RichMenusPage() {
   }, [])
 
   const handleCreateAlias = async () => {
-    if (!aliasForm.richMenuAliasId.trim()) return setAliasError('エイリアスIDを入力してください')
+    if (!aliasForm.richMenuAliasId.trim()) return setAliasError('呼び名を入力してください')
     if (!/^[A-Za-z0-9_-]+$/.test(aliasForm.richMenuAliasId)) {
-      return setAliasError('エイリアスIDは半角英数字・ハイフン・アンダースコアのみ使用できます')
+      return setAliasError('呼び名は半角英数字・ハイフン・アンダースコアのみ使用できます')
     }
-    if (!aliasForm.richMenuId) return setAliasError('紐付けるリッチメニューを選択してください')
+    if (!aliasForm.richMenuId) return setAliasError('飛び先のメニューを選択してください')
     setAliasSaving(true)
     setAliasError('')
     try {
@@ -692,18 +692,18 @@ export default function RichMenusPage() {
       if (!res.success) setError(res.error)
       else await load()
     } catch {
-      setError('エイリアス更新に失敗しました')
+      setError('切替先の更新に失敗しました')
     }
   }
 
   const handleDeleteAlias = async (aliasId: string) => {
-    if (!confirm(`エイリアス "${aliasId}" を削除しますか？`)) return
+    if (!confirm(`切替先 "${aliasId}" を削除しますか？\n（このIDを使っているタブのアクションは動作しなくなります）`)) return
     try {
       const res = await api.richMenuAliases.delete(aliasId)
       if (!res.success) setError(res.error)
       else await load()
     } catch {
-      setError('エイリアス削除に失敗しました')
+      setError('切替先の削除に失敗しました')
     }
   }
 
@@ -786,7 +786,7 @@ export default function RichMenusPage() {
         return `エリア${i + 1}: postback data を入力してください`
       }
       if (a.type === 'richmenuswitch' && !a.richMenuAliasId.trim()) {
-        return `エリア${i + 1}: メニュー切替先のエイリアスIDを入力してください`
+        return `エリア${i + 1}: タップ時に切り替わるメニューを選択してください`
       }
     }
     return null
@@ -980,9 +980,10 @@ export default function RichMenusPage() {
         <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-start justify-between gap-2 mb-3">
             <div>
-              <h2 className="text-sm font-semibold text-gray-800">リッチメニューのエイリアス</h2>
+              <h2 className="text-sm font-semibold text-gray-800">タブ切替先の登録</h2>
               <p className="text-[11px] text-gray-500 mt-0.5">
-                タブ切替式メニュー（メニュー切替アクション）で参照する識別子。同じエイリアスIDの参照先メニューを後から差し替えられます。
+                タブをタップしたときの飛び先メニューに「呼び名」を付けて登録します。<br />
+                呼び名はそのままで中身（実際のメニュー）を後から差し替えられるので、デザインを変えても他の設定を直す必要がありません。
               </p>
             </div>
             <button
@@ -994,7 +995,7 @@ export default function RichMenusPage() {
               className="shrink-0 px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90"
               style={{ backgroundColor: '#06C755' }}
             >
-              + エイリアス追加
+              + 切替先を追加
             </button>
           </div>
 
@@ -1002,7 +1003,7 @@ export default function RichMenusPage() {
             <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-md space-y-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-gray-600 mb-0.5">エイリアスID（半角英数字）</label>
+                  <label className="block text-[11px] text-gray-600 mb-0.5">呼び名（半角英数字）</label>
                   <input
                     type="text"
                     placeholder="例: tab-news"
@@ -1014,7 +1015,7 @@ export default function RichMenusPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-gray-600 mb-0.5">紐付けるリッチメニュー</label>
+                  <label className="block text-[11px] text-gray-600 mb-0.5">飛び先のメニュー</label>
                   <select
                     className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
                     value={aliasForm.richMenuId}
@@ -1054,9 +1055,9 @@ export default function RichMenusPage() {
 
           {aliases.length === 0 ? (
             <p className="text-xs text-gray-400 py-2">
-              エイリアスは登録されていません。
+              切替先はまだ登録されていません。
               {menus.length > 0
-                ? 'タブ切替式リッチメニューを使う場合は、まずタブごとに切替先メニューを作成してから、そのメニューにエイリアスIDを割り当ててください。'
+                ? 'タブ切替式メニューを使う場合は、タブで切り替えたいメニューを作成してから、上の「+ 切替先を追加」で呼び名（例: tab-news）を付けてください。'
                 : ''}
             </p>
           ) : (
