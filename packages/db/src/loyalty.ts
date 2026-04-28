@@ -313,8 +313,9 @@ export async function getLoyaltyPoints(
   const offset = opts.offset ?? 0;
 
   // friends 起点の LEFT JOIN: ロイヤルティ未作成の LINE 友だちも一覧に出す（balance=0 表示）
-  // display_name IS NULL（プロフィール未取得）は除外
-  let where = 'f.display_name IS NOT NULL';
+  // customers JOIN で Shopify 由来の購入者名を優先表示
+  // 表示名は customers.display_name → friends.display_name の順で COALESCE
+  let where = "(c.display_name IS NOT NULL OR f.display_name IS NOT NULL)";
   const bindings: unknown[] = [];
 
   if (opts.rank) {
@@ -322,13 +323,19 @@ export async function getLoyaltyPoints(
     bindings.push(opts.rank);
   }
   if (opts.search) {
-    // 表示名 LIKE OR LINE UID 完全一致
-    where += ' AND (f.display_name LIKE ? OR f.line_user_id = ?)';
-    bindings.push(`%${opts.search}%`, opts.search);
+    // 表示名 (customers 優先, friends フォールバック) LIKE OR LINE UID 完全一致
+    where += ' AND (c.display_name LIKE ? OR f.display_name LIKE ? OR f.line_user_id = ?)';
+    bindings.push(`%${opts.search}%`, `%${opts.search}%`, opts.search);
   }
 
   const countRow = await db
-    .prepare(`SELECT COUNT(*) as n FROM friends f LEFT JOIN loyalty_points lp ON lp.friend_id = f.id WHERE ${where}`)
+    .prepare(
+      `SELECT COUNT(*) as n
+       FROM friends f
+       LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
+       LEFT JOIN customers c ON c.line_user_id = f.line_user_id
+       WHERE ${where}`,
+    )
     .bind(...bindings)
     .first<{ n: number }>();
 
@@ -343,12 +350,13 @@ export async function getLoyaltyPoints(
          lp.shopify_customer_id,
          COALESCE(lp.created_at, f.created_at) as created_at,
          COALESCE(lp.updated_at, f.created_at) as updated_at,
-         f.display_name,
+         COALESCE(c.display_name, f.display_name) as display_name,
          f.picture_url
        FROM friends f
        LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
+       LEFT JOIN customers c ON c.line_user_id = f.line_user_id
        WHERE ${where}
-       ORDER BY COALESCE(lp.balance, 0) DESC, f.display_name ASC
+       ORDER BY COALESCE(lp.balance, 0) DESC, COALESCE(c.display_name, f.display_name) ASC
        LIMIT ? OFFSET ?`,
     )
     .bind(...bindings, limit, offset)
