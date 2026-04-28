@@ -294,15 +294,24 @@ export default function ShopifyBiTopPage() {
                       {trafficSource.map((s) => {
                         const sourceMeta: Record<string, { label: string; emoji: string; color: string }> = {
                           email: { label: 'Email (Shopify Flow等)', emoji: '✉️', color: 'text-purple-700' },
-                          line: { label: 'LINE', emoji: '🟢', color: 'text-green-700' },
-                          tiktok: { label: 'TikTok広告', emoji: '🎵', color: 'text-pink-700' },
-                          meta: { label: 'Meta (Instagram/Facebook)', emoji: '📘', color: 'text-blue-700' },
+                          gmail: { label: 'Gmail (referrer経由)', emoji: '📧', color: 'text-purple-600' },
+                          line: { label: 'LINE (UTM)', emoji: '🟢', color: 'text-green-700' },
+                          line_organic: { label: 'LINEアプリ内ブラウザ', emoji: '🟢', color: 'text-green-600' },
+                          tiktok: { label: 'TikTok広告 (UTM)', emoji: '🎵', color: 'text-pink-700' },
+                          tiktok_shop: { label: 'TikTok Shop', emoji: '🎵', color: 'text-pink-700' },
+                          meta: { label: 'Meta広告 (IG/FB)', emoji: '📘', color: 'text-blue-700' },
+                          meta_organic: { label: 'Meta オーガニック', emoji: '📘', color: 'text-blue-600' },
                           google: { label: 'Google広告', emoji: '🔍', color: 'text-red-700' },
+                          google_organic: { label: 'Google検索 (オーガニック)', emoji: '🔎', color: 'text-red-600' },
+                          search_organic: { label: 'Yahoo/Bing検索', emoji: '🔎', color: 'text-red-500' },
+                          subscription: { label: '定期便（継続）', emoji: '🔄', color: 'text-cyan-700' },
+                          shop_pay: { label: 'Shop Pay', emoji: '💳', color: 'text-indigo-600' },
                           yotpo: { label: 'Yotpo (レビュー)', emoji: '⭐', color: 'text-yellow-700' },
                           offline: { label: 'オフライン (チラシ等)', emoji: '📄', color: 'text-amber-700' },
+                          direct_self: { label: '直接 (oryzae.shop)', emoji: '🔗', color: 'text-gray-700' },
+                          direct: { label: '直接 (ブックマーク等)', emoji: '🔗', color: 'text-gray-600' },
                           other_utm: { label: 'その他UTM', emoji: '🏷️', color: 'text-gray-700' },
-                          direct: { label: '直接 (UTMなし)', emoji: '🔗', color: 'text-gray-600' },
-                          none: { label: '不明 (TikTok Shop等)', emoji: '❓', color: 'text-orange-700' },
+                          unknown: { label: '不明', emoji: '❓', color: 'text-orange-700' },
                         }
                         const meta = sourceMeta[s.source] ?? { label: s.source, emoji: '', color: 'text-gray-700' }
                         const newRate = s.orders > 0 ? (s.new_customer_orders / s.orders) * 100 : 0

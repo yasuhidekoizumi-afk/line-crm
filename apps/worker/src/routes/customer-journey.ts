@@ -115,6 +115,7 @@ customerJourney.get('/api/customer-journey/traffic-source', async (c) => {
     .prepare(
       `SELECT
          CASE
+           -- 1) UTMが明示されている場合
            WHEN LOWER(landing_site) LIKE '%utm_source=email%'
              OR LOWER(landing_site) LIKE '%utm_source=shopify_email%'
              OR LOWER(landing_site) LIKE '%utm_medium=email%' THEN 'email'
@@ -141,8 +142,35 @@ customerJourney.get('/api/customer-journey/traffic-source', async (c) => {
            WHEN LOWER(landing_site) LIKE '%utm_source=flyer%'
              OR LOWER(landing_site) LIKE '%utm_source=pamphlet%' THEN 'offline'
            WHEN landing_site LIKE '%utm%' THEN 'other_utm'
-           WHEN landing_site IS NULL OR landing_site = '' THEN 'none'
-           ELSE 'direct'
+
+           -- 2) source_name で TikTok Shop / 定期便を判定（landing_site が無い時の主要ソース）
+           WHEN LOWER(source_name) = 'tiktok' THEN 'tiktok_shop'
+           WHEN LOWER(source_name) LIKE 'subscription%' THEN 'subscription'
+
+           -- 3) referring_site フォールバック（UTM無し・直接アクセス系）
+           WHEN LOWER(referring_site) LIKE '%instagram.com%'
+             OR LOWER(referring_site) LIKE '%facebook.com%'
+             OR LOWER(referring_site) LIKE '%fbcdn%' THEN 'meta_organic'
+           WHEN LOWER(referring_site) LIKE '%line.naver%'
+             OR LOWER(referring_site) LIKE '%line.android%'
+             OR LOWER(referring_site) LIKE '%line.me%' THEN 'line_organic'
+           WHEN LOWER(referring_site) LIKE '%mail.google.com%'
+             OR LOWER(referring_site) LIKE '%android.gm%' THEN 'gmail'
+           WHEN LOWER(referring_site) LIKE '%google.com%'
+             OR LOWER(referring_site) LIKE '%google.co.jp%' THEN 'google_organic'
+           WHEN LOWER(referring_site) LIKE '%yahoo.co.jp%'
+             OR LOWER(referring_site) LIKE '%bing.com%'
+             OR LOWER(referring_site) LIKE '%duckduckgo%' THEN 'search_organic'
+           WHEN LOWER(referring_site) LIKE '%shop.app%'
+             OR LOWER(referring_site) LIKE '%pay.shopify%' THEN 'shop_pay'
+           WHEN LOWER(referring_site) LIKE '%oryzae.shop%'
+             OR LOWER(referring_site) LIKE '%oryzae.site%' THEN 'direct_self'
+
+           -- 4) landing_site があるが referrer も無い → 直接アクセス（ブックマーク等）
+           WHEN landing_site IS NOT NULL AND landing_site != '' THEN 'direct'
+
+           -- 5) 全て不明
+           ELSE 'unknown'
          END AS source,
          COUNT(*) AS orders,
          COUNT(DISTINCT shopify_customer_id) AS unique_customers,
