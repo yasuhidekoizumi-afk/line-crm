@@ -18,6 +18,60 @@ richMenus.get('/api/rich-menus', async (c) => {
   }
 });
 
+// GET /api/rich-menus/default — get the default rich menu id (or null)
+richMenus.get('/api/rich-menus/default', async (c) => {
+  try {
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    try {
+      const result = await lineClient.getDefaultRichMenuId();
+      return c.json({ success: true, data: result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('404')) {
+        return c.json({ success: true, data: { richMenuId: null } });
+      }
+      throw err;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('GET /api/rich-menus/default error:', message);
+    return c.json({ success: false, error: `Failed to fetch default rich menu: ${message}` }, 500);
+  }
+});
+
+// DELETE /api/rich-menus/default — clear the default rich menu
+richMenus.delete('/api/rich-menus/default', async (c) => {
+  try {
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    await lineClient.cancelDefaultRichMenu();
+    return c.json({ success: true, data: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('DELETE /api/rich-menus/default error:', message);
+    return c.json({ success: false, error: `Failed to clear default rich menu: ${message}` }, 500);
+  }
+});
+
+// GET /api/rich-menus/:id/image — proxy the rich menu image binary so the web app can preview
+richMenus.get('/api/rich-menus/:id/image', async (c) => {
+  try {
+    const richMenuId = c.req.param('id');
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    const { body, contentType } = await lineClient.getRichMenuImage(richMenuId);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'private, max-age=300',
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('GET /api/rich-menus/:id/image error:', message);
+    return c.json({ success: false, error: `Failed to fetch rich menu image: ${message}` }, 500);
+  }
+});
+
 // POST /api/rich-menus — create a rich menu via LINE API
 richMenus.post('/api/rich-menus', async (c) => {
   try {
@@ -57,6 +111,46 @@ richMenus.post('/api/rich-menus/:id/default', async (c) => {
     const message = err instanceof Error ? err.message : String(err);
     console.error('POST /api/rich-menus/:id/default error:', message);
     return c.json({ success: false, error: `Failed to set default rich menu: ${message}` }, 500);
+  }
+});
+
+// POST /api/rich-menus/:id/image — upload rich menu image (accepts base64 body or binary)
+richMenus.post('/api/rich-menus/:id/image', async (c) => {
+  try {
+    const richMenuId = c.req.param('id');
+    const contentType = c.req.header('content-type') ?? '';
+
+    let imageData: ArrayBuffer;
+    let imageContentType: 'image/png' | 'image/jpeg' = 'image/png';
+
+    if (contentType.includes('application/json')) {
+      const body = await c.req.json<{ image: string; contentType?: string }>();
+      if (!body.image) {
+        return c.json({ success: false, error: 'image (base64) is required' }, 400);
+      }
+      const base64 = body.image.replace(/^data:image\/\w+;base64,/, '');
+      const binaryString = atob(base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      imageData = bytes.buffer;
+      if (body.contentType === 'image/jpeg') imageContentType = 'image/jpeg';
+    } else if (contentType.includes('image/')) {
+      imageData = await c.req.arrayBuffer();
+      imageContentType = contentType.includes('jpeg') || contentType.includes('jpg') ? 'image/jpeg' : 'image/png';
+    } else {
+      return c.json({ success: false, error: 'Content-Type must be application/json (with base64) or image/png or image/jpeg' }, 400);
+    }
+
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    await lineClient.uploadRichMenuImage(richMenuId, imageData, imageContentType);
+
+    return c.json({ success: true, data: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('POST /api/rich-menus/:id/image error:', message);
+    return c.json({ success: false, error: `Failed to upload rich menu image: ${message}` }, 500);
   }
 });
 
@@ -110,46 +204,3 @@ richMenus.delete('/api/friends/:friendId/rich-menu', async (c) => {
 });
 
 export { richMenus };
-
-// POST /api/rich-menus/:id/image — upload rich menu image (accepts base64 body or binary)
-richMenus.post('/api/rich-menus/:id/image', async (c) => {
-  try {
-    const richMenuId = c.req.param('id');
-    const contentType = c.req.header('content-type') ?? '';
-
-    let imageData: ArrayBuffer;
-    let imageContentType: 'image/png' | 'image/jpeg' = 'image/png';
-
-    if (contentType.includes('application/json')) {
-      // Accept base64 encoded image in JSON body
-      const body = await c.req.json<{ image: string; contentType?: string }>();
-      if (!body.image) {
-        return c.json({ success: false, error: 'image (base64) is required' }, 400);
-      }
-      // Strip data URI prefix if present
-      const base64 = body.image.replace(/^data:image\/\w+;base64,/, '');
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      imageData = bytes.buffer;
-      if (body.contentType === 'image/jpeg') imageContentType = 'image/jpeg';
-    } else if (contentType.includes('image/')) {
-      // Accept raw binary upload
-      imageData = await c.req.arrayBuffer();
-      imageContentType = contentType.includes('jpeg') || contentType.includes('jpg') ? 'image/jpeg' : 'image/png';
-    } else {
-      return c.json({ success: false, error: 'Content-Type must be application/json (with base64) or image/png or image/jpeg' }, 400);
-    }
-
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
-    await lineClient.uploadRichMenuImage(richMenuId, imageData, imageContentType);
-
-    return c.json({ success: true, data: null });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('POST /api/rich-menus/:id/image error:', message);
-    return c.json({ success: false, error: `Failed to upload rich menu image: ${message}` }, 500);
-  }
-});

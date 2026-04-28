@@ -140,6 +140,40 @@ export class LineClient {
     );
   }
 
+  async getDefaultRichMenuId(): Promise<{ richMenuId: string }> {
+    return this.request<{ richMenuId: string }>(
+      '/user/all/richmenu',
+      {},
+      'GET',
+    );
+  }
+
+  async cancelDefaultRichMenu(): Promise<void> {
+    await this.request(
+      '/user/all/richmenu',
+      {},
+      'DELETE',
+    );
+  }
+
+  /** Fetch a rich menu image as binary. Returns the body and content-type. */
+  async getRichMenuImage(
+    richMenuId: string,
+  ): Promise<{ body: ArrayBuffer; contentType: string }> {
+    const url = `https://api-data.line.me/v2/bot/richmenu/${encodeURIComponent(richMenuId)}/content`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.channelAccessToken}` },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`LINE API error: ${res.status} ${res.statusText} — ${text}`);
+    }
+    const contentType = res.headers.get('content-type') ?? 'image/png';
+    const body = await res.arrayBuffer();
+    return { body, contentType };
+  }
+
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   async pushTextMessage(to: string, text: string): Promise<void> {

@@ -62,6 +62,20 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
   return res.json() as Promise<T>
 }
 
+/**
+ * Fetch an authenticated binary endpoint and convert to an object URL
+ * (suitable for <img src=...>). The caller should revoke the URL via
+ * URL.revokeObjectURL() when no longer needed.
+ */
+export async function fetchApiObjectUrl(path: string): Promise<string> {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: { Authorization: `Bearer ${getApiKey()}` },
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
 export type FriendListParams = {
   offset?: string
   limit?: string
@@ -510,4 +524,51 @@ export const api = {
     regenerateKey: (id: string) =>
       fetchApi<ApiResponse<{ apiKey: string }>>(`/api/staff/${id}/regenerate-key`, { method: 'POST' }),
   },
+  richMenus: {
+    list: () =>
+      fetchApi<ApiResponse<RichMenuPayload[]>>('/api/rich-menus'),
+    getDefault: () =>
+      fetchApi<ApiResponse<{ richMenuId: string | null }>>('/api/rich-menus/default'),
+    create: (data: RichMenuPayload) =>
+      fetchApi<ApiResponse<{ richMenuId: string }>>('/api/rich-menus', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/rich-menus/${id}`, { method: 'DELETE' }),
+    setDefault: (id: string) =>
+      fetchApi<ApiResponse<null>>(`/api/rich-menus/${id}/default`, { method: 'POST' }),
+    clearDefault: () =>
+      fetchApi<ApiResponse<null>>('/api/rich-menus/default', { method: 'DELETE' }),
+    uploadImage: (id: string, image: string, contentType: 'image/png' | 'image/jpeg') =>
+      fetchApi<ApiResponse<null>>(`/api/rich-menus/${id}/image`, {
+        method: 'POST',
+        body: JSON.stringify({ image, contentType }),
+      }),
+    imageObjectUrl: (id: string) => fetchApiObjectUrl(`/api/rich-menus/${id}/image`),
+  },
+}
+
+// ─── Rich Menu types ──────────────────────────────────────────────────────────
+// Matches LINE API spec: https://developers.line.biz/en/reference/messaging-api/#rich-menu-object
+
+export type RichMenuActionPayload =
+  | { type: 'postback'; data: string; displayText?: string; label?: string }
+  | { type: 'message'; text: string; label?: string }
+  | { type: 'uri'; uri: string; label?: string }
+  | { type: 'datetimepicker'; data: string; mode: 'date' | 'time' | 'datetime'; label?: string }
+  | { type: 'richmenuswitch'; richMenuAliasId: string; data: string; label?: string }
+
+export interface RichMenuAreaPayload {
+  bounds: { x: number; y: number; width: number; height: number }
+  action: RichMenuActionPayload
+}
+
+export interface RichMenuPayload {
+  richMenuId?: string
+  size: { width: number; height: number }
+  selected: boolean
+  name: string
+  chatBarText: string
+  areas: RichMenuAreaPayload[]
 }
