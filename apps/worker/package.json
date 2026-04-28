@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:help-kb": "node scripts/build-help-kb.mjs"
   },
   "dependencies": {
     "@line-crm/ai-sdk": "workspace:*",

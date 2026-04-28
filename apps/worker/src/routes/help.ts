@@ -10,6 +10,7 @@
 
 import { Hono } from 'hono';
 import type { Env } from '../index.js';
+import { WIKI_KNOWLEDGE } from './help-knowledge.generated.js';
 
 export const help = new Hono<Env>();
 
@@ -71,18 +72,31 @@ const KNOWLEDGE_BASE = `あなたは「オリゼくん」、オリゼ（ORYZAE I
 - スタッフ (/staff) — APIキー発行、role: owner/admin/staff
 
 # 回答ルール
-- 質問が機能の使い方なら「どの画面（パス）」「何をクリック」「結果どうなる」を簡潔に
+- 質問が機能の使い方なら「どの画面（パス）」「何ができる」「次の一歩」を簡潔に
 - 機能名のゆらぎ（例:「ステップ配信」=シナリオ配信）を許容して解釈
-- 該当機能がカタログに無ければ「ぼくの知ってる範囲だと、まだ管理画面には無さそうだよ」と返す
+- 該当機能が下記カタログ／知識ベースに無ければ「ぼくの知ってる範囲だと、まだ管理画面には無さそうだよ」と返す
 - 1回答は3〜6行程度。箇条書き歓迎、Markdown可
 - 「現在のページ」が渡されたら、そのページに関連する操作を優先して案内
 - コードブロックや手順番号は積極的に使ってOK
 - 毎回ではないが、回答末尾に「他にも気になることある？」など軽く一言添えると親しみが出る
 
+# ハルシネーション防止（最重要）
+- ボタン位置・パネル配置・特定UIラベル等、下記知識ベースに**書いていない具体的UI操作は推測しない**
+- 推測してしまいそうな時は「具体的な操作は実画面で確認してみてね」「画面右上の？マーク（あれば）も活用してね」と素直に答える
+- 「右側のパネル」「左上のボタン」のような位置情報は、知識ベースに明記されていない限り書かない
+- 機能の存在自体に確信が持てなければ「該当機能はカタログに無さそう」と返す
+
 # 出力ルール（厳守）
 - 必ず日本語のみで答える。英単語の混入は最小限（固有名詞・URL のみ）
 - 思考過程・自己問答（"Wait, ..."、"Let's assume..." 等）は一切出力しない
 - 検討した結果のみを最終回答として書く。前置きや断りなく本題から始める`;
+
+// wiki から自動生成された詳細知識ベース
+const FULL_KNOWLEDGE_BASE = `${KNOWLEDGE_BASE}
+
+# 詳細知識ベース（docs/wiki から自動抽出した各機能の概要）
+
+${WIKI_KNOWLEDGE}`;
 
 help.post('/api/help/ask', async (c) => {
   const apiKey = c.env.GEMINI_API_KEY;
@@ -100,8 +114,8 @@ help.post('/api/help/ask', async (c) => {
   }
 
   const systemInstruction = body.current_page
-    ? `${KNOWLEDGE_BASE}\n\n# 現在のページ\n${body.current_page}`
-    : KNOWLEDGE_BASE;
+    ? `${FULL_KNOWLEDGE_BASE}\n\n# 現在のページ\n${body.current_page}`
+    : FULL_KNOWLEDGE_BASE;
 
   // Gemini は role を 'user' / 'model' で扱う
   const contents = body.messages.slice(-10).map((m) => ({
