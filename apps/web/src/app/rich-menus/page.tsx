@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, type DragEvent } from 'react'
 import {
   api,
   type RichMenuPayload,
@@ -13,13 +13,15 @@ import Header from '@/components/layout/header'
 const SIZE_LARGE = { width: 2500, height: 1686 }
 const SIZE_COMPACT = { width: 2500, height: 843 }
 
+type SizeKind = 'large' | 'compact'
+
 type LayoutKey = '3x2' | '2x2' | '2x1' | '3x1' | '1x1'
 
 interface LayoutDef {
   label: string
   rows: number
   cols: number
-  size: 'large' | 'compact'
+  size: SizeKind
 }
 
 const LAYOUTS: Record<LayoutKey, LayoutDef> = {
@@ -45,6 +47,29 @@ function buildAreas(layout: LayoutKey): RichMenuAreaPayload[] {
     }
   }
   return areas
+}
+
+/** Pick a sensible default layout from an uploaded image's dimensions. */
+function detectLayoutFromAspect(width: number, height: number): {
+  layout: LayoutKey
+  size: SizeKind
+  warning: string | null
+} {
+  const ratio = width / height
+  // compact ratio ≈ 2.97, large ratio ≈ 1.48
+  const isCompact = ratio > 2.2
+  const expected = isCompact ? SIZE_COMPACT : SIZE_LARGE
+  const expectedRatio = expected.width / expected.height
+  const drift = Math.abs(ratio - expectedRatio) / expectedRatio
+  const warning =
+    drift > 0.05
+      ? `画像の縦横比が ${expected.width}×${expected.height} と少し異なります（${width}×${height}）。タップ位置がズレる場合があります。`
+      : null
+  return {
+    layout: isCompact ? '3x1' : '3x2',
+    size: isCompact ? 'compact' : 'large',
+    warning,
+  }
 }
 
 // ─── Components ───────────────────────────────────────────────────────────────
@@ -86,13 +111,77 @@ function RichMenuImage({ id }: { id: string }) {
   return <img src={src} alt="rich menu" className="w-full rounded border border-gray-200 bg-gray-50" />
 }
 
-interface AreaFormRowProps {
+interface VisualAreaEditorProps {
+  imageDataUrl: string
+  imageContentType: 'image/png' | 'image/jpeg'
+  size: { width: number; height: number }
+  areas: RichMenuAreaPayload[]
+  selectedIndex: number | null
+  onSelect: (index: number) => void
+}
+
+/**
+ * Renders the uploaded image with each area drawn as a numbered, clickable
+ * rectangle overlay. Coordinates are in LINE's logical pixel space (e.g. 2500×1686);
+ * we render them as percentages of the displayed image size.
+ */
+function VisualAreaEditor({ imageDataUrl, imageContentType, size, areas, selectedIndex, onSelect }: VisualAreaEditorProps) {
+  return (
+    <div className="relative w-full select-none" style={{ aspectRatio: `${size.width} / ${size.height}` }}>
+      <img
+        src={`data:${imageContentType};base64,${imageDataUrl}`}
+        alt="rich menu"
+        className="absolute inset-0 w-full h-full object-cover rounded border border-gray-200"
+      />
+      {areas.map((area, i) => {
+        const left = (area.bounds.x / size.width) * 100
+        const top = (area.bounds.y / size.height) * 100
+        const w = (area.bounds.width / size.width) * 100
+        const h = (area.bounds.height / size.height) * 100
+        const selected = i === selectedIndex
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onSelect(i)}
+            className={`absolute flex items-center justify-center text-white font-bold transition-all ${
+              selected ? 'ring-2 ring-white' : 'hover:bg-black/10'
+            }`}
+            style={{
+              left: `${left}%`,
+              top: `${top}%`,
+              width: `${w}%`,
+              height: `${h}%`,
+              backgroundColor: selected ? 'rgba(6, 199, 85, 0.45)' : 'rgba(6, 199, 85, 0.18)',
+              border: '2px solid rgba(6, 199, 85, 0.95)',
+              boxShadow: selected ? '0 0 0 2px rgba(255,255,255,0.6) inset' : 'none',
+            }}
+            aria-label={`エリア${i + 1}を編集`}
+          >
+            <span
+              className="px-2 py-0.5 rounded-full text-xs"
+              style={{
+                backgroundColor: selected ? '#06C755' : 'rgba(255,255,255,0.85)',
+                color: selected ? '#FFFFFF' : '#06C755',
+              }}
+            >
+              {i + 1}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+interface AreaActionPanelProps {
   index: number
   area: RichMenuAreaPayload
   onChange: (next: RichMenuAreaPayload) => void
+  onClose: () => void
 }
 
-function AreaFormRow({ index, area, onChange }: AreaFormRowProps) {
+function AreaActionPanel({ index, area, onChange, onClose }: AreaActionPanelProps) {
   const action = area.action
   const setActionType = (type: 'uri' | 'message' | 'postback') => {
     if (type === 'uri') onChange({ ...area, action: { type: 'uri', uri: '', label: action.label } })
@@ -101,79 +190,153 @@ function AreaFormRow({ index, area, onChange }: AreaFormRowProps) {
   }
 
   return (
-    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-      <p className="text-xs font-semibold text-gray-700 mb-2">エリア {index + 1}</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-800">エリア {index + 1} の動作</p>
+        <button
+          onClick={onClose}
+          className="text-gray-400 hover:text-gray-600 transition-colors"
+          aria-label="閉じる"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div>
+        <label className="block text-[11px] text-gray-500 mb-0.5">ラベル（管理用）</label>
+        <input
+          type="text"
+          className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+          value={action.label ?? ''}
+          onChange={(e) => onChange({ ...area, action: { ...action, label: e.target.value } })}
+        />
+      </div>
+
+      <div>
+        <label className="block text-[11px] text-gray-500 mb-1">タップ時の動作</label>
+        <div className="grid grid-cols-3 gap-1">
+          {([
+            { value: 'uri', label: 'リンクを開く' },
+            { value: 'message', label: 'メッセージ送信' },
+            { value: 'postback', label: 'ポストバック' },
+          ] as const).map((opt) => {
+            const active =
+              action.type === opt.value ||
+              (opt.value === 'uri' && !['uri', 'message', 'postback'].includes(action.type))
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setActionType(opt.value)}
+                className={`px-2 py-1.5 text-[11px] rounded border transition-colors ${
+                  active
+                    ? 'text-white border-green-600'
+                    : 'text-gray-700 bg-white border-gray-200 hover:bg-gray-50'
+                }`}
+                style={active ? { backgroundColor: '#06C755' } : {}}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {action.type === 'uri' && (
         <div>
-          <label className="block text-[11px] text-gray-500 mb-0.5">ラベル</label>
+          <label className="block text-[11px] text-gray-500 mb-0.5">URL</label>
+          <input
+            type="url"
+            placeholder="https://example.com"
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+            value={action.uri}
+            onChange={(e) => onChange({ ...area, action: { ...action, uri: e.target.value } })}
+          />
+        </div>
+      )}
+      {action.type === 'message' && (
+        <div>
+          <label className="block text-[11px] text-gray-500 mb-0.5">送信メッセージ</label>
           <input
             type="text"
             className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
-            value={action.label ?? ''}
-            onChange={(e) => onChange({ ...area, action: { ...action, label: e.target.value } })}
+            value={action.text}
+            onChange={(e) => onChange({ ...area, action: { ...action, text: e.target.value } })}
           />
         </div>
-        <div>
-          <label className="block text-[11px] text-gray-500 mb-0.5">アクション種別</label>
-          <select
-            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
-            value={action.type === 'uri' || action.type === 'message' || action.type === 'postback' ? action.type : 'uri'}
-            onChange={(e) => setActionType(e.target.value as 'uri' | 'message' | 'postback')}
-          >
-            <option value="uri">リンク (URL)</option>
-            <option value="message">メッセージ送信</option>
-            <option value="postback">ポストバック</option>
-          </select>
-        </div>
-        {action.type === 'uri' && (
-          <div className="sm:col-span-2">
-            <label className="block text-[11px] text-gray-500 mb-0.5">URL</label>
-            <input
-              type="url"
-              placeholder="https://example.com"
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
-              value={action.uri}
-              onChange={(e) => onChange({ ...area, action: { ...action, uri: e.target.value } })}
-            />
-          </div>
-        )}
-        {action.type === 'message' && (
-          <div className="sm:col-span-2">
-            <label className="block text-[11px] text-gray-500 mb-0.5">送信メッセージ</label>
+      )}
+      {action.type === 'postback' && (
+        <div className="space-y-2">
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">data</label>
             <input
               type="text"
               className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
-              value={action.text}
-              onChange={(e) => onChange({ ...area, action: { ...action, text: e.target.value } })}
+              value={action.data}
+              onChange={(e) => onChange({ ...area, action: { ...action, data: e.target.value } })}
             />
           </div>
-        )}
-        {action.type === 'postback' && (
-          <>
-            <div>
-              <label className="block text-[11px] text-gray-500 mb-0.5">data</label>
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
-                value={action.data}
-                onChange={(e) => onChange({ ...area, action: { ...action, data: e.target.value } })}
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-gray-500 mb-0.5">表示テキスト</label>
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
-                value={action.displayText ?? ''}
-                onChange={(e) => onChange({ ...area, action: { ...action, displayText: e.target.value } })}
-              />
-            </div>
-          </>
-        )}
-      </div>
-      <p className="mt-2 text-[10px] text-gray-400">
-        範囲: x={area.bounds.x}, y={area.bounds.y}, w={area.bounds.width}, h={area.bounds.height}
-      </p>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">表示テキスト</label>
+            <input
+              type="text"
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+              value={action.displayText ?? ''}
+              onChange={(e) => onChange({ ...area, action: { ...action, displayText: e.target.value } })}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface DropZoneProps {
+  onFile: (file: File) => void
+}
+
+function DropZone({ onFile }: DropZoneProps) {
+  const [hover, setHover] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setHover(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) onFile(file)
+  }
+
+  return (
+    <div
+      onClick={() => inputRef.current?.click()}
+      onDragOver={(e) => {
+        e.preventDefault()
+        setHover(true)
+      }}
+      onDragLeave={() => setHover(false)}
+      onDrop={handleDrop}
+      className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors ${
+        hover ? 'border-green-500 bg-green-50' : 'border-gray-300 hover:border-gray-400 bg-gray-50'
+      }`}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) onFile(f)
+        }}
+      />
+      <svg className="w-10 h-10 mx-auto text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+      <p className="text-sm font-medium text-gray-700">画像をここにドロップ</p>
+      <p className="text-xs text-gray-400 mt-1">またはクリックしてファイルを選択（PNG / JPEG）</p>
+      <p className="text-[11px] text-gray-400 mt-3">推奨: 2500×1686（大）または 2500×843（小）</p>
     </div>
   )
 }
@@ -188,6 +351,9 @@ interface CreateForm {
   areas: RichMenuAreaPayload[]
   imageBase64: string | null
   imageContentType: 'image/png' | 'image/jpeg'
+  imageWidth: number | null
+  imageHeight: number | null
+  imageWarning: string | null
 }
 
 const initialForm: CreateForm = {
@@ -198,6 +364,9 @@ const initialForm: CreateForm = {
   areas: buildAreas('3x2'),
   imageBase64: null,
   imageContentType: 'image/png',
+  imageWidth: null,
+  imageHeight: null,
+  imageWarning: null,
 }
 
 export default function RichMenusPage() {
@@ -208,9 +377,11 @@ export default function RichMenusPage() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState<CreateForm>(initialForm)
+  const [selectedAreaIndex, setSelectedAreaIndex] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   const [busyMenuId, setBusyMenuId] = useState<string | null>(null)
+  const [duplicating, setDuplicating] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -233,33 +404,52 @@ export default function RichMenusPage() {
 
   const updateLayout = (layout: LayoutKey) => {
     setForm((f) => ({ ...f, layout, areas: buildAreas(layout) }))
+    setSelectedAreaIndex(null)
   }
 
   const updateArea = (index: number, next: RichMenuAreaPayload) => {
     setForm((f) => ({ ...f, areas: f.areas.map((a, i) => (i === index ? next : a)) }))
   }
 
-  const handleImageChange = async (file: File | null) => {
-    if (!file) {
-      setForm((f) => ({ ...f, imageBase64: null }))
-      return
-    }
+  const handleImageFile = (file: File) => {
     if (!['image/png', 'image/jpeg'].includes(file.type)) {
       setFormError('画像はPNGまたはJPEGのみ使用できます')
       return
     }
+    setFormError('')
     const reader = new FileReader()
     reader.onload = () => {
       const result = reader.result as string
       const base64 = result.replace(/^data:image\/\w+;base64,/, '')
-      setForm((f) => ({
-        ...f,
-        imageBase64: base64,
-        imageContentType: file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png',
-      }))
-      setFormError('')
+      const img = new Image()
+      img.onload = () => {
+        const detected = detectLayoutFromAspect(img.width, img.height)
+        setForm((f) => ({
+          ...f,
+          imageBase64: base64,
+          imageContentType: file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png',
+          imageWidth: img.width,
+          imageHeight: img.height,
+          imageWarning: detected.warning,
+          layout: detected.layout,
+          areas: buildAreas(detected.layout),
+        }))
+        setSelectedAreaIndex(null)
+      }
+      img.src = result
     }
     reader.readAsDataURL(file)
+  }
+
+  const removeImage = () => {
+    setForm((f) => ({
+      ...f,
+      imageBase64: null,
+      imageWidth: null,
+      imageHeight: null,
+      imageWarning: null,
+    }))
+    setSelectedAreaIndex(null)
   }
 
   const validateAreas = (areas: RichMenuAreaPayload[]): string | null => {
@@ -276,6 +466,43 @@ export default function RichMenusPage() {
       }
     }
     return null
+  }
+
+  const openCreate = () => {
+    setForm(initialForm)
+    setSelectedAreaIndex(null)
+    setFormError('')
+    setShowCreate(true)
+  }
+
+  const handleDuplicate = async (menu: RichMenuPayload) => {
+    const id = menu.richMenuId
+    if (!id) return
+    setDuplicating(id)
+    setError('')
+    try {
+      const { base64, contentType } = await api.richMenus.imageBase64(id)
+      const layoutKey = inferLayoutFromAreas(menu)
+      setForm({
+        name: `${menu.name} のコピー`,
+        chatBarText: menu.chatBarText,
+        layout: layoutKey,
+        selected: false,
+        areas: menu.areas.map((a) => ({ ...a, action: { ...a.action } })),
+        imageBase64: base64,
+        imageContentType: contentType,
+        imageWidth: menu.size.width,
+        imageHeight: menu.size.height,
+        imageWarning: null,
+      })
+      setSelectedAreaIndex(null)
+      setFormError('')
+      setShowCreate(true)
+    } catch (err) {
+      setError(`複製に失敗しました: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setDuplicating(null)
+    }
   }
 
   const handleCreate = async () => {
@@ -367,6 +594,17 @@ export default function RichMenusPage() {
     }
   }
 
+  const layoutDef = LAYOUTS[form.layout]
+  const previewSize = layoutDef.size === 'large' ? SIZE_LARGE : SIZE_COMPACT
+  const compatibleLayouts = (Object.entries(LAYOUTS) as [LayoutKey, LayoutDef][]).filter(
+    ([, def]) =>
+      form.imageWidth && form.imageHeight
+        ? form.imageWidth / form.imageHeight > 2.2
+          ? def.size === 'compact'
+          : def.size === 'large'
+        : true,
+  )
+
   return (
     <div>
       <Header
@@ -374,11 +612,7 @@ export default function RichMenusPage() {
         description="LINE公式アカウントのリッチメニューを作成・管理します。"
         action={
           <button
-            onClick={() => {
-              setForm(initialForm)
-              setFormError('')
-              setShowCreate(true)
-            }}
+            onClick={openCreate}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
             style={{ backgroundColor: '#06C755' }}
           >
@@ -388,9 +622,7 @@ export default function RichMenusPage() {
       />
 
       {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          {error}
-        </div>
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
       )}
 
       {/* Default state banner */}
@@ -399,7 +631,7 @@ export default function RichMenusPage() {
           <div className="text-sm">
             {defaultId ? (
               <span className="text-gray-700">
-                現在のデフォルトリッチメニュー: <code className="text-xs bg-gray-100 px-2 py-0.5 rounded">{defaultId}</code>
+                現在のデフォルト: <code className="text-xs bg-gray-100 px-2 py-0.5 rounded">{defaultId}</code>
               </span>
             ) : (
               <span className="text-gray-500">デフォルトのリッチメニューは設定されていません。</span>
@@ -420,120 +652,151 @@ export default function RichMenusPage() {
       {/* Create form */}
       {showCreate && (
         <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">リッチメニュー新規作成</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left column: meta + image */}
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  名前（管理用） <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="例: 春キャンペーン用"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  チャットバーのテキスト（14文字以内） <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  maxLength={14}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  value={form.chatBarText}
-                  onChange={(e) => setForm({ ...form, chatBarText: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">レイアウト</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
-                  value={form.layout}
-                  onChange={(e) => updateLayout(e.target.value as LayoutKey)}
-                >
-                  {Object.entries(LAYOUTS).map(([key, def]) => (
-                    <option key={key} value={key}>
-                      {def.label}（{def.size === 'large' ? '2500×1686' : '2500×843'}）
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  メニュー画像 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg"
-                  onChange={(e) => handleImageChange(e.target.files?.[0] ?? null)}
-                  className="block w-full text-xs text-gray-700 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-green-50 file:text-green-700 file:text-xs hover:file:bg-green-100"
-                />
-                <p className="mt-1 text-[11px] text-gray-400">
-                  推奨サイズ: {LAYOUTS[form.layout].size === 'large' ? '2500×1686' : '2500×843'} px / PNG または JPEG / 1MB以下
-                </p>
-                {form.imageBase64 && (
-                  <img
-                    src={`data:${form.imageContentType};base64,${form.imageBase64}`}
-                    alt="preview"
-                    className="mt-2 w-full rounded border border-gray-200 bg-gray-50"
-                  />
-                )}
-              </div>
-
-              <label className="flex items-center gap-2 text-xs text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={form.selected}
-                  onChange={(e) => setForm({ ...form, selected: e.target.checked })}
-                />
-                作成と同時にデフォルトに設定する
-              </label>
-            </div>
-
-            {/* Right column: areas */}
-            <div className="space-y-3">
-              <p className="text-xs font-medium text-gray-600">エリアの動作（{form.areas.length}個）</p>
-              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                {form.areas.map((area, i) => (
-                  <AreaFormRow
-                    key={i}
-                    index={i}
-                    area={area}
-                    onChange={(next) => updateArea(i, next)}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {formError && <p className="mt-4 text-xs text-red-600">{formError}</p>}
-
-          <div className="mt-6 flex gap-2">
-            <button
-              onClick={handleCreate}
-              disabled={saving}
-              className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-              style={{ backgroundColor: '#06C755' }}
-            >
-              {saving ? '作成中...' : '作成して画像をアップロード'}
-            </button>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-800">リッチメニュー新規作成</h2>
             <button
               onClick={() => {
                 setShowCreate(false)
                 setFormError('')
               }}
-              className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              className="text-gray-400 hover:text-gray-600"
+              aria-label="閉じる"
             >
-              キャンセル
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           </div>
+
+          {/* Step 1: image upload */}
+          {!form.imageBase64 ? (
+            <div className="space-y-3">
+              <p className="text-xs text-gray-500">
+                まずメニュー画像をアップロードしてください。画像のサイズに合わせて自動でレイアウトを提案します。
+              </p>
+              <DropZone onFile={handleImageFile} />
+              {formError && <p className="text-xs text-red-600">{formError}</p>}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6">
+              {/* Visual canvas + meta */}
+              <div className="space-y-4">
+                <VisualAreaEditor
+                  imageDataUrl={form.imageBase64}
+                  imageContentType={form.imageContentType}
+                  size={previewSize}
+                  areas={form.areas}
+                  selectedIndex={selectedAreaIndex}
+                  onSelect={setSelectedAreaIndex}
+                />
+                {form.imageWarning && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    ⚠ {form.imageWarning}
+                  </p>
+                )}
+                <p className="text-[11px] text-gray-400">
+                  画像のエリアをクリックすると右側でアクションを編集できます。
+                </p>
+                <button
+                  onClick={removeImage}
+                  className="text-xs text-gray-500 hover:text-red-500 transition-colors"
+                >
+                  画像を選び直す
+                </button>
+              </div>
+
+              {/* Right panel: meta + selected area */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    名前（管理用） <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="例: 春キャンペーン用"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    チャットバーのテキスト <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={14}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    value={form.chatBarText}
+                    onChange={(e) => setForm({ ...form, chatBarText: e.target.value })}
+                  />
+                  <p className="mt-0.5 text-[11px] text-gray-400">14文字以内・LINEトーク下部に表示</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">レイアウト</label>
+                  <select
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                    value={form.layout}
+                    onChange={(e) => updateLayout(e.target.value as LayoutKey)}
+                  >
+                    {compatibleLayouts.map(([key, def]) => (
+                      <option key={key} value={key}>
+                        {def.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={form.selected}
+                    onChange={(e) => setForm({ ...form, selected: e.target.checked })}
+                  />
+                  作成と同時にデフォルトに設定する
+                </label>
+
+                {selectedAreaIndex !== null ? (
+                  <AreaActionPanel
+                    index={selectedAreaIndex}
+                    area={form.areas[selectedAreaIndex]}
+                    onChange={(next) => updateArea(selectedAreaIndex, next)}
+                    onClose={() => setSelectedAreaIndex(null)}
+                  />
+                ) : (
+                  <div className="bg-gray-50 border border-dashed border-gray-200 rounded-lg p-4 text-center text-xs text-gray-500">
+                    画像のエリアをクリックして
+                    <br />
+                    アクションを設定してください
+                  </div>
+                )}
+
+                {formError && <p className="text-xs text-red-600">{formError}</p>}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={handleCreate}
+                    disabled={saving}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
+                    style={{ backgroundColor: '#06C755' }}
+                  >
+                    {saving ? '作成中...' : '作成して反映'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowCreate(false)
+                      setFormError('')
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -558,6 +821,7 @@ export default function RichMenusPage() {
             const id = menu.richMenuId ?? ''
             const isDefault = id === defaultId
             const isBusy = busyMenuId === id
+            const isDuplicating = duplicating === id
             return (
               <div key={id} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 <div className="p-3">
@@ -578,24 +842,29 @@ export default function RichMenusPage() {
                   <div className="text-[11px] text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
                     <span>サイズ: {menu.size.width}×{menu.size.height}</span>
                     <span>エリア: {menu.areas.length}</span>
-                    <span className="truncate" title={id}>
-                      ID: {id.slice(0, 12)}…
-                    </span>
+                    <span className="truncate" title={id}>ID: {id.slice(0, 12)}…</span>
                   </div>
-                  <div className="flex gap-2 pt-2">
+                  <div className="flex flex-wrap gap-2 pt-2">
                     {!isDefault && (
                       <button
                         onClick={() => handleSetDefault(id)}
-                        disabled={isBusy}
-                        className="flex-1 px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
+                        disabled={isBusy || isDuplicating}
+                        className="flex-1 min-w-[120px] px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
                         style={{ backgroundColor: '#06C755' }}
                       >
                         デフォルトに設定
                       </button>
                     )}
                     <button
+                      onClick={() => handleDuplicate(menu)}
+                      disabled={isBusy || isDuplicating}
+                      className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50"
+                    >
+                      {isDuplicating ? '複製中...' : '複製して編集'}
+                    </button>
+                    <button
                       onClick={() => handleDelete(id)}
-                      disabled={isBusy}
+                      disabled={isBusy || isDuplicating}
                       className="px-3 py-1.5 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors disabled:opacity-50"
                     >
                       削除
@@ -609,4 +878,20 @@ export default function RichMenusPage() {
       )}
     </div>
   )
+}
+
+/**
+ * Try to infer which layout preset best matches an existing rich menu's areas.
+ * Used by the duplicate flow to pre-select the right layout dropdown value.
+ */
+function inferLayoutFromAreas(menu: RichMenuPayload): LayoutKey {
+  const isCompact = menu.size.width / menu.size.height > 2.2
+  const count = menu.areas.length
+  if (isCompact) {
+    if (count === 1) return '1x1'
+    if (count === 2) return '2x1'
+    return '3x1'
+  }
+  if (count === 4) return '2x2'
+  return '3x2'
 }
