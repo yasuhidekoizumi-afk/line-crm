@@ -11,9 +11,6 @@ import Header from '@/components/layout/header'
 // ─── Size & layout presets ────────────────────────────────────────────────────
 
 const SIZE_LARGE = { width: 2500, height: 1686 }
-const SIZE_COMPACT = { width: 2500, height: 843 }
-
-type SizeKind = 'large' | 'compact'
 
 type LayoutKey = '3x2' | '2x2' | '2x1' | '3x1' | '1x1'
 
@@ -21,20 +18,21 @@ interface LayoutDef {
   label: string
   rows: number
   cols: number
-  size: SizeKind
 }
 
 const LAYOUTS: Record<LayoutKey, LayoutDef> = {
-  '3x2': { label: '6分割（3列×2行）', rows: 2, cols: 3, size: 'large' },
-  '2x2': { label: '4分割（2列×2行）', rows: 2, cols: 2, size: 'large' },
-  '2x1': { label: '2分割（左右）', rows: 1, cols: 2, size: 'compact' },
-  '3x1': { label: '3分割（横並び）', rows: 1, cols: 3, size: 'compact' },
-  '1x1': { label: '1分割（全面）', rows: 1, cols: 1, size: 'compact' },
+  '3x2': { label: '6分割（3列×2行）', rows: 2, cols: 3 },
+  '2x2': { label: '4分割（2列×2行）', rows: 2, cols: 2 },
+  '3x1': { label: '3分割（横並び）', rows: 1, cols: 3 },
+  '2x1': { label: '2分割（左右）', rows: 1, cols: 2 },
+  '1x1': { label: '1分割（全面）', rows: 1, cols: 1 },
 }
 
-function buildAreas(layout: LayoutKey): RichMenuAreaPayload[] {
+function buildAreas(
+  layout: LayoutKey,
+  size: { width: number; height: number },
+): RichMenuAreaPayload[] {
   const def = LAYOUTS[layout]
-  const size = def.size === 'large' ? SIZE_LARGE : SIZE_COMPACT
   const cellW = Math.floor(size.width / def.cols)
   const cellH = Math.floor(size.height / def.rows)
   const areas: RichMenuAreaPayload[] = []
@@ -50,26 +48,23 @@ function buildAreas(layout: LayoutKey): RichMenuAreaPayload[] {
 }
 
 /** Pick a sensible default layout from an uploaded image's dimensions. */
-function detectLayoutFromAspect(width: number, height: number): {
-  layout: LayoutKey
-  size: SizeKind
-  warning: string | null
-} {
-  const ratio = width / height
-  // compact ratio ≈ 2.97, large ratio ≈ 1.48
-  const isCompact = ratio > 2.2
-  const expected = isCompact ? SIZE_COMPACT : SIZE_LARGE
-  const expectedRatio = expected.width / expected.height
-  const drift = Math.abs(ratio - expectedRatio) / expectedRatio
-  const warning =
-    drift > 0.05
-      ? `画像の縦横比が ${expected.width}×${expected.height} と少し異なります（${width}×${height}）。タップ位置がズレる場合があります。`
-      : null
-  return {
-    layout: isCompact ? '3x1' : '3x2',
-    size: isCompact ? 'compact' : 'large',
-    warning,
+function suggestLayout(width: number, height: number): LayoutKey {
+  // wide+short images suggest a single-row layout; taller images suggest a grid.
+  return width / height > 2.2 ? '3x1' : '3x2'
+}
+
+/** Validate against LINE rich menu image constraints. */
+function checkImageConstraints(width: number, height: number): string | null {
+  if (width < 800 || width > 2500) {
+    return `画像の幅は800〜2500pxの範囲が必要です（現在 ${width}px）`
   }
+  if (height < 250 || height > 1686) {
+    return `画像の高さは250〜1686pxの範囲が必要です（現在 ${height}px）`
+  }
+  if (width / height < 1.45) {
+    return `画像の縦横比は 1.45:1 以上が必要です（現在 ${(width / height).toFixed(2)}:1）`
+  }
+  return null
 }
 
 // ─── Components ───────────────────────────────────────────────────────────────
@@ -336,7 +331,24 @@ function DropZone({ onFile }: DropZoneProps) {
       </svg>
       <p className="text-sm font-medium text-gray-700">画像をここにドロップ</p>
       <p className="text-xs text-gray-400 mt-1">またはクリックしてファイルを選択（PNG / JPEG）</p>
-      <p className="text-[11px] text-gray-400 mt-3">推奨: 2500×1686（大）または 2500×843（小）</p>
+      <p className="text-[11px] text-gray-400 mt-3">
+        推奨: 2500×1686（大）または 2500×843（小）<br />
+        必須: 幅 800〜2500 / 高さ 250〜1686 / 縦横比 1.45:1 以上
+      </p>
+    </div>
+  )
+}
+
+/** Tiny mock of LINE's chat bar so users can preview the chatBarText live. */
+function ChatBarPreview({ text }: { text: string }) {
+  return (
+    <div className="mt-1.5 rounded-md border border-gray-200 bg-white overflow-hidden">
+      <div className="px-3 py-1.5 bg-gradient-to-b from-gray-50 to-gray-100 flex items-center justify-center gap-1.5 text-xs text-gray-700">
+        <span className="truncate max-w-[140px]">{text || ' '}</span>
+        <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+        </svg>
+      </div>
     </div>
   )
 }
@@ -361,7 +373,7 @@ const initialForm: CreateForm = {
   chatBarText: 'メニュー',
   layout: '3x2',
   selected: true,
-  areas: buildAreas('3x2'),
+  areas: buildAreas('3x2', SIZE_LARGE),
   imageBase64: null,
   imageContentType: 'image/png',
   imageWidth: null,
@@ -403,7 +415,13 @@ export default function RichMenusPage() {
   }, [load])
 
   const updateLayout = (layout: LayoutKey) => {
-    setForm((f) => ({ ...f, layout, areas: buildAreas(layout) }))
+    setForm((f) => {
+      const size =
+        f.imageWidth && f.imageHeight
+          ? { width: f.imageWidth, height: f.imageHeight }
+          : SIZE_LARGE
+      return { ...f, layout, areas: buildAreas(layout, size) }
+    })
     setSelectedAreaIndex(null)
   }
 
@@ -423,16 +441,22 @@ export default function RichMenusPage() {
       const base64 = result.replace(/^data:image\/\w+;base64,/, '')
       const img = new Image()
       img.onload = () => {
-        const detected = detectLayoutFromAspect(img.width, img.height)
+        const constraintError = checkImageConstraints(img.width, img.height)
+        if (constraintError) {
+          setFormError(constraintError)
+          return
+        }
+        const layout = suggestLayout(img.width, img.height)
+        const size = { width: img.width, height: img.height }
         setForm((f) => ({
           ...f,
           imageBase64: base64,
           imageContentType: file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png',
           imageWidth: img.width,
           imageHeight: img.height,
-          imageWarning: detected.warning,
-          layout: detected.layout,
-          areas: buildAreas(detected.layout),
+          imageWarning: null,
+          layout,
+          areas: buildAreas(layout, size),
         }))
         setSelectedAreaIndex(null)
       }
@@ -516,8 +540,10 @@ export default function RichMenusPage() {
     setSaving(true)
     setFormError('')
     try {
-      const layoutDef = LAYOUTS[form.layout]
-      const size = layoutDef.size === 'large' ? SIZE_LARGE : SIZE_COMPACT
+      const size =
+        form.imageWidth && form.imageHeight
+          ? { width: form.imageWidth, height: form.imageHeight }
+          : SIZE_LARGE
       const payload: RichMenuPayload = {
         size,
         selected: form.selected,
@@ -594,16 +620,11 @@ export default function RichMenusPage() {
     }
   }
 
-  const layoutDef = LAYOUTS[form.layout]
-  const previewSize = layoutDef.size === 'large' ? SIZE_LARGE : SIZE_COMPACT
-  const compatibleLayouts = (Object.entries(LAYOUTS) as [LayoutKey, LayoutDef][]).filter(
-    ([, def]) =>
-      form.imageWidth && form.imageHeight
-        ? form.imageWidth / form.imageHeight > 2.2
-          ? def.size === 'compact'
-          : def.size === 'large'
-        : true,
-  )
+  const previewSize =
+    form.imageWidth && form.imageHeight
+      ? { width: form.imageWidth, height: form.imageHeight }
+      : SIZE_LARGE
+  const allLayouts = Object.entries(LAYOUTS) as [LayoutKey, LayoutDef][]
 
   return (
     <div>
@@ -731,7 +752,10 @@ export default function RichMenusPage() {
                     value={form.chatBarText}
                     onChange={(e) => setForm({ ...form, chatBarText: e.target.value })}
                   />
-                  <p className="mt-0.5 text-[11px] text-gray-400">14文字以内・LINEトーク下部に表示</p>
+                  <ChatBarPreview text={form.chatBarText} />
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    14文字以内・LINEトーク下部に表示（{form.chatBarText.length}/14）
+                  </p>
                 </div>
 
                 <div>
@@ -741,7 +765,7 @@ export default function RichMenusPage() {
                     value={form.layout}
                     onChange={(e) => updateLayout(e.target.value as LayoutKey)}
                   >
-                    {compatibleLayouts.map(([key, def]) => (
+                    {allLayouts.map(([key, def]) => (
                       <option key={key} value={key}>
                         {def.label}
                       </option>
