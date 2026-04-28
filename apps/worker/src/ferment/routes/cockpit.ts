@@ -614,16 +614,18 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
 
     // 品質はサイズと aspect で表現（Gemini Image はサイズ指定で品質スケール）
     const aspectRatio = size === '1024x1024' ? '1:1' : size === '1536x1024' ? '16:9' : '9:16';
-    const geminiModel = 'gemini-3-flash-image-preview';
+    // 正式モデル ID: gemini-3.1-flash-image-preview（バージョン 3.1）
+    const geminiModel = 'gemini-3.1-flash-image-preview';
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts }],
+          contents: [{ role: 'user', parts }],
           generationConfig: {
-            responseModalities: ['IMAGE'],
+            // TEXT も含めないと一部のレスポンスが返らないことがある
+            responseModalities: ['TEXT', 'IMAGE'],
             imageConfig: { aspectRatio },
           },
         }),
