@@ -76,6 +76,32 @@ export async function fetchApiObjectUrl(path: string): Promise<string> {
   return URL.createObjectURL(blob)
 }
 
+/**
+ * Fetch an authenticated binary endpoint and return as base64 + content-type.
+ * Used when we need to round-trip an image (e.g. duplicating a rich menu).
+ */
+export async function fetchApiBase64(
+  path: string,
+): Promise<{ base64: string; contentType: 'image/png' | 'image/jpeg' }> {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: { Authorization: `Bearer ${getApiKey()}` },
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  const blob = await res.blob()
+  const contentType: 'image/png' | 'image/jpeg' =
+    blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+  const base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      resolve(dataUrl.replace(/^data:image\/\w+;base64,/, ''))
+    }
+    reader.onerror = () => reject(new Error('Failed to read image'))
+    reader.readAsDataURL(blob)
+  })
+  return { base64, contentType }
+}
+
 export type FriendListParams = {
   offset?: string
   limit?: string
@@ -546,6 +572,7 @@ export const api = {
         body: JSON.stringify({ image, contentType }),
       }),
     imageObjectUrl: (id: string) => fetchApiObjectUrl(`/api/rich-menus/${id}/image`),
+    imageBase64: (id: string) => fetchApiBase64(`/api/rich-menus/${id}/image`),
   },
 }
 
