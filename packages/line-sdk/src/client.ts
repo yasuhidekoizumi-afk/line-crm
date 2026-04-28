@@ -156,6 +156,55 @@ export class LineClient {
     );
   }
 
+  // ─── Rich Menu Aliases ────────────────────────────────────────────────────
+
+  async createRichMenuAlias(
+    richMenuAliasId: string,
+    richMenuId: string,
+  ): Promise<void> {
+    await this.request('/richmenu/alias', { richMenuAliasId, richMenuId });
+  }
+
+  async deleteRichMenuAlias(richMenuAliasId: string): Promise<void> {
+    await this.request(
+      `/richmenu/alias/${encodeURIComponent(richMenuAliasId)}`,
+      {},
+      'DELETE',
+    );
+  }
+
+  /**
+   * Update which rich menu an alias points to.
+   * LINE's spec uses POST (not PUT) for this endpoint.
+   */
+  async updateRichMenuAlias(
+    richMenuAliasId: string,
+    richMenuId: string,
+  ): Promise<void> {
+    await this.request(
+      `/richmenu/alias/${encodeURIComponent(richMenuAliasId)}`,
+      { richMenuId },
+    );
+  }
+
+  async getRichMenuAlias(
+    richMenuAliasId: string,
+  ): Promise<{ richMenuAliasId: string; richMenuId: string }> {
+    return this.request<{ richMenuAliasId: string; richMenuId: string }>(
+      `/richmenu/alias/${encodeURIComponent(richMenuAliasId)}`,
+      {},
+      'GET',
+    );
+  }
+
+  async getRichMenuAliasList(): Promise<{
+    aliases: Array<{ richMenuAliasId: string; richMenuId: string }>;
+  }> {
+    return this.request<{
+      aliases: Array<{ richMenuAliasId: string; richMenuId: string }>;
+    }>('/richmenu/alias/list', {}, 'GET');
+  }
+
   /** Fetch a rich menu image as binary. Returns the body and content-type. */
   async getRichMenuImage(
     richMenuId: string,

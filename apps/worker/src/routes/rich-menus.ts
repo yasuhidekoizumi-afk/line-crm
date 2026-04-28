@@ -203,4 +203,65 @@ richMenus.delete('/api/friends/:friendId/rich-menu', async (c) => {
   }
 });
 
+// ─── Rich Menu Aliases ──────────────────────────────────────────────────────
+// Aliases are needed for the richmenuswitch action (tab-style menus).
+
+richMenus.get('/api/rich-menu-aliases', async (c) => {
+  try {
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    const result = await lineClient.getRichMenuAliasList();
+    return c.json({ success: true, data: result.aliases ?? [] });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('GET /api/rich-menu-aliases error:', message);
+    return c.json({ success: false, error: `Failed to fetch aliases: ${message}` }, 500);
+  }
+});
+
+richMenus.post('/api/rich-menu-aliases', async (c) => {
+  try {
+    const body = await c.req.json<{ richMenuAliasId: string; richMenuId: string }>();
+    if (!body.richMenuAliasId || !body.richMenuId) {
+      return c.json({ success: false, error: 'richMenuAliasId and richMenuId are required' }, 400);
+    }
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    await lineClient.createRichMenuAlias(body.richMenuAliasId, body.richMenuId);
+    return c.json({ success: true, data: null }, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('POST /api/rich-menu-aliases error:', message);
+    return c.json({ success: false, error: `Failed to create alias: ${message}` }, 500);
+  }
+});
+
+richMenus.put('/api/rich-menu-aliases/:id', async (c) => {
+  try {
+    const aliasId = c.req.param('id');
+    const body = await c.req.json<{ richMenuId: string }>();
+    if (!body.richMenuId) {
+      return c.json({ success: false, error: 'richMenuId is required' }, 400);
+    }
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    await lineClient.updateRichMenuAlias(aliasId, body.richMenuId);
+    return c.json({ success: true, data: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('PUT /api/rich-menu-aliases/:id error:', message);
+    return c.json({ success: false, error: `Failed to update alias: ${message}` }, 500);
+  }
+});
+
+richMenus.delete('/api/rich-menu-aliases/:id', async (c) => {
+  try {
+    const aliasId = c.req.param('id');
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    await lineClient.deleteRichMenuAlias(aliasId);
+    return c.json({ success: true, data: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('DELETE /api/rich-menu-aliases/:id error:', message);
+    return c.json({ success: false, error: `Failed to delete alias: ${message}` }, 500);
+  }
+});
+
 export { richMenus };

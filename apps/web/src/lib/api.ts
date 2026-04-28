@@ -574,6 +574,29 @@ export const api = {
     imageObjectUrl: (id: string) => fetchApiObjectUrl(`/api/rich-menus/${id}/image`),
     imageBase64: (id: string) => fetchApiBase64(`/api/rich-menus/${id}/image`),
   },
+  richMenuAliases: {
+    list: () =>
+      fetchApi<ApiResponse<RichMenuAlias[]>>('/api/rich-menu-aliases'),
+    create: (data: RichMenuAlias) =>
+      fetchApi<ApiResponse<null>>('/api/rich-menu-aliases', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (aliasId: string, richMenuId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/rich-menu-aliases/${aliasId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ richMenuId }),
+      }),
+    delete: (aliasId: string) =>
+      fetchApi<ApiResponse<null>>(`/api/rich-menu-aliases/${aliasId}`, {
+        method: 'DELETE',
+      }),
+  },
+}
+
+export interface RichMenuAlias {
+  richMenuAliasId: string
+  richMenuId: string
 }
 
 // ─── Rich Menu types ──────────────────────────────────────────────────────────
