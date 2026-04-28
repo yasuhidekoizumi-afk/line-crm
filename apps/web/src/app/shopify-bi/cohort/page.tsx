@@ -203,8 +203,8 @@ export default function CohortPage() {
               <p className="text-xs text-gray-500 mb-4">
                 40%以上を緑、20%未満を赤で表示。新規200人以上&15%未満は異常値。
               </p>
-              <div className="overflow-x-auto pb-2">
-                <div className="flex items-end gap-1 sm:gap-2" style={{ height: '180px' }}>
+              <div className="w-full">
+                <div className="flex items-end gap-1 w-full" style={{ height: '200px' }}>
                   {cohort.map((c) => {
                     const BAR_AREA_PX = 160
                     const barHpx = Math.max(4, (Math.min(100, c.line_link_rate_pct) / 100) * BAR_AREA_PX)
@@ -217,28 +217,26 @@ export default function CohortPage() {
                     return (
                       <div
                         key={c.cohort_month}
-                        className="flex flex-col items-center justify-end min-w-[36px] flex-shrink-0"
-                        style={{ height: '180px' }}
+                        className="flex-1 flex flex-col items-center justify-end min-w-0"
+                        style={{ height: '200px' }}
+                        title={`${c.cohort_month}: ${c.line_link_rate_pct}% (${num(c.first_order_customers)}人)`}
                       >
                         <div className="text-[10px] text-gray-700 tabular-nums mb-1">
                           {c.line_link_rate_pct}%
                         </div>
                         <div
-                          className={`w-6 sm:w-8 ${color} rounded-t`}
+                          className={`w-full max-w-[32px] ${color} rounded-t`}
                           style={{ height: `${barHpx}px` }}
-                          title={`${c.cohort_month}: ${c.line_link_rate_pct}% (${num(
-                            c.first_order_customers,
-                          )}人)`}
                         />
                       </div>
                     )
                   })}
                 </div>
-                <div className="flex gap-1 sm:gap-2 mt-1">
+                <div className="flex gap-1 w-full mt-2">
                   {cohort.map((c) => (
                     <div
                       key={c.cohort_month}
-                      className="min-w-[36px] flex-shrink-0 text-[10px] text-gray-500 text-center"
+                      className="flex-1 text-[10px] text-gray-500 text-center min-w-0 truncate"
                     >
                       {c.cohort_month.slice(2)}
                     </div>
