@@ -100,6 +100,49 @@ customerJourney.get('/api/customer-journey/cohort', async (c) => {
   return c.json({ success: true, data: cohorts.results ?? [] });
 });
 
+// ─── 流入チャネル別 売上（landing_site UTM ベース）
+// utm_source / utm_medium を解析して email / line / tiktok / meta / google / other に分類
+customerJourney.get('/api/customer-journey/traffic-source', async (c) => {
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+
+  let where = `cancelled_at IS NULL AND (financial_status IS NULL OR financial_status NOT IN ('refunded','voided'))`;
+  const binds: string[] = [];
+  if (from) { where += ` AND processed_at >= ?`; binds.push(from); }
+  if (to)   { where += ` AND processed_at < ?`;  binds.push(to); }
+
+  const rows = await c.env.DB
+    .prepare(
+      `SELECT
+         CASE
+           WHEN landing_site LIKE '%utm_source=email%' OR landing_site LIKE '%utm_medium=email%' THEN 'email'
+           WHEN landing_site LIKE '%utm_source=line%' OR landing_site LIKE '%utm_medium=line%' THEN 'line'
+           WHEN landing_site LIKE '%utm_source=tiktok%' THEN 'tiktok'
+           WHEN landing_site LIKE '%utm_source=facebook%' OR landing_site LIKE '%utm_source=meta%' OR landing_site LIKE '%utm_source=instagram%' THEN 'meta'
+           WHEN landing_site LIKE '%utm_source=google%' THEN 'google'
+           WHEN landing_site LIKE '%utm%' THEN 'other_utm'
+           WHEN landing_site IS NULL OR landing_site = '' THEN 'none'
+           ELSE 'direct'
+         END AS source,
+         COUNT(*) AS orders,
+         COUNT(DISTINCT shopify_customer_id) AS unique_customers,
+         COALESCE(ROUND(SUM(total_price)), 0) AS revenue,
+         COALESCE(ROUND(SUM(CASE WHEN customer_orders_count = 1 THEN total_price ELSE 0 END)), 0) AS new_customer_revenue,
+         COALESCE(SUM(CASE WHEN customer_orders_count = 1 THEN 1 ELSE 0 END), 0) AS new_customer_orders,
+         COALESCE(SUM(CASE WHEN friend_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS line_linked_orders,
+         COALESCE(ROUND(SUM(total_price) / NULLIF(COUNT(*), 0)), 0) AS aov,
+         COALESCE(ROUND(SUM(total_price) / NULLIF(COUNT(DISTINCT shopify_customer_id), 0)), 0) AS revenue_per_customer
+       FROM shopify_orders
+       WHERE ${where}
+       GROUP BY source
+       ORDER BY revenue DESC`,
+    )
+    .bind(...binds)
+    .all();
+
+  return c.json({ success: true, data: rows.results ?? [] });
+});
+
 // ─── チャネルマトリクス（LINE × Email 4象限）
 customerJourney.get('/api/customer-journey/channel-matrix', async (c) => {
   const from = c.req.query('from');
