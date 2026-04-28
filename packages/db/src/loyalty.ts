@@ -312,30 +312,43 @@ export async function getLoyaltyPoints(
   const limit = opts.limit ?? 20;
   const offset = opts.offset ?? 0;
 
-  let where = '1=1';
+  // friends 起点の LEFT JOIN: ロイヤルティ未作成の LINE 友だちも一覧に出す（balance=0 表示）
+  // display_name IS NULL（プロフィール未取得）は除外
+  let where = 'f.display_name IS NOT NULL';
   const bindings: unknown[] = [];
 
   if (opts.rank) {
-    where += ' AND lp.rank = ?';
+    where += " AND COALESCE(lp.rank, 'レギュラー') = ?";
     bindings.push(opts.rank);
   }
   if (opts.search) {
-    where += ' AND f.display_name LIKE ?';
-    bindings.push(`%${opts.search}%`);
+    // 表示名 LIKE OR LINE UID 完全一致
+    where += ' AND (f.display_name LIKE ? OR f.line_user_id = ?)';
+    bindings.push(`%${opts.search}%`, opts.search);
   }
 
   const countRow = await db
-    .prepare(`SELECT COUNT(*) as n FROM loyalty_points lp JOIN friends f ON f.id = lp.friend_id WHERE ${where}`)
+    .prepare(`SELECT COUNT(*) as n FROM friends f LEFT JOIN loyalty_points lp ON lp.friend_id = f.id WHERE ${where}`)
     .bind(...bindings)
     .first<{ n: number }>();
 
   const rows = await db
     .prepare(
-      `SELECT lp.*, f.display_name, f.picture_url
-       FROM loyalty_points lp
-       JOIN friends f ON f.id = lp.friend_id
+      `SELECT
+         COALESCE(lp.id, '') as id,
+         f.id as friend_id,
+         COALESCE(lp.balance, 0) as balance,
+         COALESCE(lp.total_spent, 0) as total_spent,
+         COALESCE(lp.rank, 'レギュラー') as rank,
+         lp.shopify_customer_id,
+         COALESCE(lp.created_at, f.created_at) as created_at,
+         COALESCE(lp.updated_at, f.created_at) as updated_at,
+         f.display_name,
+         f.picture_url
+       FROM friends f
+       LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
        WHERE ${where}
-       ORDER BY lp.balance DESC
+       ORDER BY COALESCE(lp.balance, 0) DESC, f.display_name ASC
        LIMIT ? OFFSET ?`,
     )
     .bind(...bindings, limit, offset)
