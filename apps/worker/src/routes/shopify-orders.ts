@@ -172,6 +172,208 @@ shopifyOrders.get('/api/shopify/orders/stats', async (c) => {
   return c.json({ success: true, data: totals ?? null });
 });
 
+// ─── 時系列集計（日次・週次・月次）
+// granularity=day|week|month, range=7d|30d|90d|180d|1y|all
+shopifyOrders.get('/api/shopify/orders/timeseries', async (c) => {
+  const granularity = (c.req.query('granularity') ?? 'day') as 'day' | 'week' | 'month';
+  const range = (c.req.query('range') ?? '30d') as '7d' | '30d' | '90d' | '180d' | '1y' | 'all';
+
+  // 期間計算
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  let fromDate: string | null = null;
+  let prevFromDate: string | null = null;
+  let prevToDate: string | null = null;
+  const rangeDays: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '1y': 365 };
+  if (range !== 'all') {
+    const d = new Date(now);
+    d.setDate(d.getDate() - rangeDays[range]);
+    fromDate = d.toISOString().slice(0, 10);
+    const p1 = new Date(d);
+    p1.setDate(p1.getDate() - rangeDays[range]);
+    prevFromDate = p1.toISOString().slice(0, 10);
+    prevToDate = fromDate;
+  }
+
+  // バケット式
+  const bucket =
+    granularity === 'month'
+      ? `SUBSTR(processed_at, 1, 7)`
+      : granularity === 'week'
+      ? `strftime('%Y-W%W', processed_at)`
+      : `SUBSTR(processed_at, 1, 10)`;
+
+  const validFilter = `cancelled_at IS NULL
+    AND (financial_status IS NULL OR financial_status NOT IN ('refunded','voided'))`;
+
+  // 現期間
+  const seriesBinds: string[] = [];
+  let seriesWhere = validFilter;
+  if (fromDate) {
+    seriesWhere += ` AND processed_at >= ?`;
+    seriesBinds.push(fromDate);
+  }
+
+  const seriesRes = await c.env.DB
+    .prepare(
+      `SELECT
+         ${bucket} AS period,
+         COUNT(*) AS orders,
+         COALESCE(SUM(total_price), 0) AS revenue,
+         COALESCE(SUM(CASE WHEN friend_id IS NOT NULL THEN total_price ELSE 0 END), 0) AS line_revenue,
+         COALESCE(SUM(CASE WHEN friend_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS line_orders,
+         COUNT(DISTINCT shopify_customer_id) AS unique_customers
+       FROM shopify_orders
+       WHERE ${seriesWhere}
+       GROUP BY period
+       ORDER BY period`,
+    )
+    .bind(...seriesBinds)
+    .all();
+
+  // 期間サマリ
+  const summary = await c.env.DB
+    .prepare(
+      `SELECT
+         COUNT(*) AS total_orders,
+         COALESCE(SUM(total_price), 0) AS total_revenue,
+         COALESCE(SUM(CASE WHEN friend_id IS NOT NULL THEN total_price ELSE 0 END), 0) AS line_revenue,
+         COUNT(DISTINCT shopify_customer_id) AS unique_customers
+       FROM shopify_orders
+       WHERE ${seriesWhere}`,
+    )
+    .bind(...seriesBinds)
+    .first<{ total_orders: number; total_revenue: number; line_revenue: number; unique_customers: number }>();
+
+  // 前期間比較（range != 'all' のみ）
+  let comparison: { prev_total_revenue: number; pct_change: number | null } | null = null;
+  if (prevFromDate && prevToDate) {
+    const prev = await c.env.DB
+      .prepare(
+        `SELECT COALESCE(SUM(total_price), 0) AS prev_total_revenue, COUNT(*) AS prev_total_orders
+         FROM shopify_orders
+         WHERE ${validFilter} AND processed_at >= ? AND processed_at < ?`,
+      )
+      .bind(prevFromDate, prevToDate)
+      .first<{ prev_total_revenue: number; prev_total_orders: number }>();
+    const prevRev = prev?.prev_total_revenue ?? 0;
+    const curRev = summary?.total_revenue ?? 0;
+    comparison = {
+      prev_total_revenue: prevRev,
+      pct_change: prevRev > 0 ? Math.round(((curRev - prevRev) / prevRev) * 1000) / 10 : null,
+    };
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      granularity,
+      range,
+      from: fromDate,
+      to: today,
+      series: seriesRes.results ?? [],
+      summary: summary ?? { total_orders: 0, total_revenue: 0, line_revenue: 0, unique_customers: 0 },
+      comparison,
+    },
+  });
+});
+
+// ─── 期間別 KPI（当日・今週・今月・90日 まとめて）
+// メインダッシュボード や TOP の KPIバー用
+shopifyOrders.get('/api/shopify/orders/kpi-bar', async (c) => {
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+
+  // 今週初日（月曜起点）
+  const weekStart = new Date(now);
+  const dow = (weekStart.getDay() + 6) % 7; // Mon=0
+  weekStart.setDate(weekStart.getDate() - dow);
+  const weekStartStr = weekStart.toISOString().slice(0, 10);
+
+  // 今月初日
+  const monthStartStr = todayStr.slice(0, 7) + '-01';
+
+  // 直近90日
+  const ninetyAgo = new Date(now);
+  ninetyAgo.setDate(ninetyAgo.getDate() - 90);
+  const ninetyStartStr = ninetyAgo.toISOString().slice(0, 10);
+
+  // 比較用：先週初日 / 先月初日 / 90日前の前90日
+  const prevWeekStart = new Date(weekStart);
+  prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+  const prevWeekStartStr = prevWeekStart.toISOString().slice(0, 10);
+
+  const monthCursor = new Date(now);
+  monthCursor.setMonth(monthCursor.getMonth() - 1);
+  const prevMonthStartStr = monthCursor.toISOString().slice(0, 7) + '-01';
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+  const validFilter = `cancelled_at IS NULL
+    AND (financial_status IS NULL OR financial_status NOT IN ('refunded','voided'))`;
+
+  // 1クエリで複数期間の集計を取る
+  const result = await c.env.DB
+    .prepare(
+      `SELECT
+         -- 今日
+         COALESCE(SUM(CASE WHEN processed_at >= ? THEN total_price ELSE 0 END), 0) AS today_revenue,
+         SUM(CASE WHEN processed_at >= ? THEN 1 ELSE 0 END) AS today_orders,
+         -- 昨日（比較用）
+         COALESCE(SUM(CASE WHEN processed_at >= ? AND processed_at < ? THEN total_price ELSE 0 END), 0) AS yesterday_revenue,
+         -- 今週
+         COALESCE(SUM(CASE WHEN processed_at >= ? THEN total_price ELSE 0 END), 0) AS week_revenue,
+         SUM(CASE WHEN processed_at >= ? THEN 1 ELSE 0 END) AS week_orders,
+         -- 先週
+         COALESCE(SUM(CASE WHEN processed_at >= ? AND processed_at < ? THEN total_price ELSE 0 END), 0) AS prev_week_revenue,
+         -- 今月
+         COALESCE(SUM(CASE WHEN processed_at >= ? THEN total_price ELSE 0 END), 0) AS month_revenue,
+         SUM(CASE WHEN processed_at >= ? THEN 1 ELSE 0 END) AS month_orders,
+         COUNT(DISTINCT CASE WHEN processed_at >= ? THEN shopify_customer_id END) AS month_customers,
+         COALESCE(SUM(CASE WHEN processed_at >= ? AND friend_id IS NOT NULL THEN total_price ELSE 0 END), 0) AS month_line_revenue,
+         -- 先月（比較用）
+         COALESCE(SUM(CASE WHEN processed_at >= ? AND processed_at < ? THEN total_price ELSE 0 END), 0) AS prev_month_revenue,
+         -- 直近90日
+         COALESCE(SUM(CASE WHEN processed_at >= ? THEN total_price ELSE 0 END), 0) AS d90_revenue,
+         SUM(CASE WHEN processed_at >= ? THEN 1 ELSE 0 END) AS d90_orders
+       FROM shopify_orders
+       WHERE ${validFilter}`,
+    )
+    .bind(
+      todayStr, todayStr,
+      yesterdayStr, todayStr,
+      weekStartStr, weekStartStr,
+      prevWeekStartStr, weekStartStr,
+      monthStartStr, monthStartStr, monthStartStr, monthStartStr,
+      prevMonthStartStr, monthStartStr,
+      ninetyStartStr, ninetyStartStr,
+    )
+    .first<Record<string, number>>();
+
+  const r = result ?? {};
+  const pct = (cur: number, prev: number): number | null =>
+    prev > 0 ? Math.round(((cur - prev) / prev) * 1000) / 10 : null;
+
+  return c.json({
+    success: true,
+    data: {
+      today: { revenue: r.today_revenue, orders: r.today_orders, dod_pct: pct(r.today_revenue, r.yesterday_revenue) },
+      week: { revenue: r.week_revenue, orders: r.week_orders, wow_pct: pct(r.week_revenue, r.prev_week_revenue) },
+      month: {
+        revenue: r.month_revenue,
+        orders: r.month_orders,
+        customers: r.month_customers,
+        line_revenue: r.month_line_revenue,
+        line_share_pct: r.month_revenue > 0 ? Math.round((r.month_line_revenue / r.month_revenue) * 1000) / 10 : 0,
+        mom_pct: pct(r.month_revenue, r.prev_month_revenue),
+      },
+      d90: { revenue: r.d90_revenue, orders: r.d90_orders },
+    },
+  });
+});
+
 // ─── 商品別 集計（売上・LINE経由比率）
 shopifyOrders.get('/api/shopify/orders/products-stats', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') ?? 20), 100);
