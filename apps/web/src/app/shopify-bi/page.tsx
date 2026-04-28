@@ -33,6 +33,16 @@ interface CohortRow {
   noline_repeat_rate_pct: number | null
 }
 
+interface ChannelMatrixRow {
+  line_linked: number
+  email_subscribed: number
+  customers: number
+  orders: number
+  revenue: number
+  ltv: number
+  aov: number
+}
+
 const yen = (n: number) => '¥' + Math.round(n).toLocaleString('ja-JP')
 const num = (n: number) => Math.round(n).toLocaleString('ja-JP')
 
@@ -40,6 +50,7 @@ export default function ShopifyBiTopPage() {
   const [stats, setStats] = useState<OrderStats | null>(null)
   const [funnel, setFunnel] = useState<FunnelRow[]>([])
   const [cohort, setCohort] = useState<CohortRow[]>([])
+  const [channelMatrix, setChannelMatrix] = useState<ChannelMatrixRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [recomputing, setRecomputing] = useState(false)
@@ -50,16 +61,20 @@ export default function ShopifyBiTopPage() {
       setLoading(true)
       setError(null)
       try {
-        const [statsRes, funnelRes, cohortRes] = await Promise.all([
+        const [statsRes, funnelRes, cohortRes, matrixRes] = await Promise.all([
           fetchApi<{ success: boolean; data: OrderStats }>(`/api/shopify/orders/stats`),
           fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel`),
           fetchApi<{ success: boolean; data: CohortRow[] }>(
             `/api/customer-journey/cohort?from=2025-01&to=2026-12`,
           ),
+          fetchApi<{ success: boolean; data: ChannelMatrixRow[] }>(
+            `/api/customer-journey/channel-matrix`,
+          ),
         ])
         if (cancelled) return
         if (statsRes.success) setStats(statsRes.data)
         if (funnelRes.success) setFunnel(funnelRes.data)
+        if (matrixRes.success) setChannelMatrix(matrixRes.data)
         if (cohortRes.success) setCohort(cohortRes.data)
       } catch (e) {
         if (!cancelled) setError(`読み込み失敗: ${String(e)}`)
@@ -232,6 +247,58 @@ export default function ShopifyBiTopPage() {
                   <span className="text-indigo-700 ml-2">
                     （リピート率 {lineSeg.repeat_rate_pct}% vs {noLineSeg.repeat_rate_pct}%）
                   </span>
+                </div>
+              </div>
+            )}
+
+            {/* ─── チャネルマトリクス（LINE × Email 4象限）─── */}
+            {channelMatrix.length > 0 && (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
+                  <h2 className="font-bold text-gray-900">チャネル × LTV マトリクス</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    LINE連携 × メール購読 の組み合わせ別 LTV / 顧客数
+                  </p>
+                </div>
+                <div className="p-4 sm:p-5">
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { line: 1, email: 1, label: 'LINE有 × メール有', color: 'bg-purple-50 border-purple-300' },
+                      { line: 1, email: 0, label: 'LINE有 × メール無', color: 'bg-green-50 border-green-300' },
+                      { line: 0, email: 1, label: 'LINE無 × メール有', color: 'bg-blue-50 border-blue-300' },
+                      { line: 0, email: 0, label: 'LINE無 × メール無', color: 'bg-gray-50 border-gray-300' },
+                    ].map((q) => {
+                      const row = channelMatrix.find(
+                        (r) => r.line_linked === q.line && r.email_subscribed === q.email,
+                      )
+                      const totalCustomers = channelMatrix.reduce((s, r) => s + r.customers, 0)
+                      const sharePct = row && totalCustomers > 0 ? (row.customers / totalCustomers) * 100 : 0
+                      return (
+                        <div key={q.label} className={`border-2 rounded-lg p-3 ${q.color}`}>
+                          <div className="text-xs font-bold text-gray-700">{q.label}</div>
+                          {row ? (
+                            <>
+                              <div className="text-lg sm:text-xl font-bold text-gray-900 mt-1 tabular-nums">
+                                LTV {yen(row.ltv)}
+                              </div>
+                              <div className="text-xs text-gray-600 mt-1 tabular-nums">
+                                {num(row.customers)}人 ({sharePct.toFixed(1)}%) / {num(row.orders)}件 / 客単価 {yen(row.aov)}
+                              </div>
+                              <div className="text-xs text-gray-500 mt-0.5 tabular-nums">
+                                売上 {yen(row.revenue)}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-xs text-gray-400 mt-2">該当なし</div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-3 text-xs text-gray-500 bg-yellow-50 border border-yellow-200 rounded p-2">
+                    ⚠️ メール送信ログ（email_logs）はほぼ空のため「メール経由購入」のアトリビューションは現状不可。
+                    上の指標は「メール購読登録」ベース。
+                  </div>
                 </div>
               </div>
             )}
