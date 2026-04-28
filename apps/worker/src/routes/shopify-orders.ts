@@ -172,4 +172,39 @@ shopifyOrders.get('/api/shopify/orders/stats', async (c) => {
   return c.json({ success: true, data: totals ?? null });
 });
 
+// ─── 商品別 集計（売上・LINE経由比率）
+shopifyOrders.get('/api/shopify/orders/products-stats', async (c) => {
+  const limit = Math.min(Number(c.req.query('limit') ?? 20), 100);
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+
+  let where = `o.cancelled_at IS NULL AND (o.financial_status IS NULL OR o.financial_status NOT IN ('refunded','voided'))`;
+  const binds: (string | number)[] = [];
+  if (from) { where += ` AND o.processed_at >= ?`; binds.push(from); }
+  if (to)   { where += ` AND o.processed_at < ?`;  binds.push(to); }
+
+  const rows = await c.env.DB
+    .prepare(
+      `SELECT
+         oi.title,
+         oi.product_type,
+         COUNT(DISTINCT oi.shopify_order_id) AS order_count,
+         COALESCE(SUM(oi.quantity), 0) AS units_sold,
+         ROUND(COALESCE(SUM(oi.price * oi.quantity), 0)) AS gross_revenue,
+         ROUND(COALESCE(SUM(CASE WHEN o.friend_id IS NOT NULL THEN oi.price * oi.quantity ELSE 0 END), 0)) AS line_revenue,
+         ROUND(100.0 * COALESCE(SUM(CASE WHEN o.friend_id IS NOT NULL THEN oi.price * oi.quantity ELSE 0 END), 0)
+               / NULLIF(SUM(oi.price * oi.quantity), 0), 1) AS line_share_pct
+       FROM shopify_order_items oi
+       JOIN shopify_orders o ON o.shopify_order_id = oi.shopify_order_id
+       WHERE ${where}
+       GROUP BY oi.title
+       ORDER BY gross_revenue DESC
+       LIMIT ?`,
+    )
+    .bind(...binds, limit)
+    .all();
+
+  return c.json({ success: true, data: rows.results ?? [] });
+});
+
 export { shopifyOrders };
