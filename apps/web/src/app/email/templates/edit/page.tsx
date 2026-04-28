@@ -326,13 +326,31 @@ function EditPageInner() {
                 setImgError(null)
                 setImgResult(null)
                 try {
-                  const r = await fermentApi.cockpit.generateImage({
+                  // 詳細エラーを取れるよう raw fetch で叩く
+                  const apiKey = typeof window !== 'undefined' ? localStorage.getItem('lh_api_key') ?? '' : ''
+                  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
+                  const reqBody = {
                     prompt: imgPrompt.trim(),
                     size: imgSize,
                     quality: imgQuality,
                     product_ids: selectedProductIds.length > 0 ? selectedProductIds : undefined,
                     auto_detect_product: autoDetectProduct,
+                  }
+                  console.log('[image-gen] request:', reqBody)
+                  const rawRes = await fetch(`${apiUrl}/api/ferment/cockpit/generate-image`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify(reqBody),
                   })
+                  const rawText = await rawRes.text()
+                  let r: { success: boolean; data?: { url: string; cost_usd: number; reference_count: number }; error?: string; debug?: unknown }
+                  try { r = JSON.parse(rawText) } catch {
+                    r = { success: false, error: `HTTP ${rawRes.status}: ${rawText.slice(0, 300)}` }
+                  }
+                  console.log('[image-gen] response:', { status: rawRes.status, body: r })
                   if (r.success && r.data) {
                     setImgResult({ url: r.data.url, cost: r.data.cost_usd, refCount: r.data.reference_count })
                     // 既存 HTML の最後に <img> を追加
