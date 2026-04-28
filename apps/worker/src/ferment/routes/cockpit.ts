@@ -492,14 +492,16 @@ cockpitRoutes.post('/generate-image', async (c) => {
       prompt: string;
       size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
       quality?: 'low' | 'medium' | 'high' | 'auto';
+      model?: 'flash' | 'pro';            // flash = Nano Banana 2 / pro = Nano Banana Pro
       reference_image_urls?: string[];
-      product_ids?: string[];           // Shopify 商品 ID（複数可）→ 画像URLに展開
-      auto_detect_product?: boolean;     // プロンプトから AI が商品名を抽出して Shopify を検索
+      product_ids?: string[];
+      auto_detect_product?: boolean;
     }>();
     const prompt = (body.prompt ?? '').trim();
     if (!prompt) return c.json({ success: false, error: 'prompt is required' }, 400);
     const size = body.size ?? '1024x1024';
     const quality = body.quality ?? 'medium';
+    const modelTier = body.model ?? 'flash';
 
     // 参照画像 URL を構築: 明示的 URL + 商品 ID 解決 + AI 自動検出
     const refUrls: string[] = [...(body.reference_image_urls ?? [])];
@@ -614,8 +616,10 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
 
     // 品質はサイズと aspect で表現（Gemini Image はサイズ指定で品質スケール）
     const aspectRatio = size === '1024x1024' ? '1:1' : size === '1536x1024' ? '16:9' : '9:16';
-    // 正式モデル ID: gemini-3.1-flash-image-preview（バージョン 3.1）
-    const geminiModel = 'gemini-3.1-flash-image-preview';
+    // モデル選択: flash=Nano Banana 2（速い/安い）, pro=Nano Banana Pro（高品質/4K対応/14枚参照可）
+    const geminiModel = modelTier === 'pro'
+      ? 'gemini-3-pro-image-preview'
+      : 'gemini-3.1-flash-image-preview';
     const resp = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
       {
@@ -684,8 +688,8 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
     const workerUrl = c.env.WORKER_URL || new URL(c.req.url).origin;
     const imageUrl = `${workerUrl}/images/${key}`;
 
-    // コスト概算: Gemini 3 Flash Image ≈ $0.04/枚（quality に関わらずほぼ一定）
-    const cost = quality === 'high' ? 0.04 : quality === 'low' ? 0.02 : 0.04;
+    // コスト概算: Flash ≈ $0.04, Pro ≈ $0.15
+    const cost = modelTier === 'pro' ? 0.15 : 0.04;
     const today = new Date().toISOString().slice(0, 10);
     await c.env.DB
       .prepare(
@@ -706,6 +710,8 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
         size,
         quality,
         cost_usd: cost,
+        model: modelTier,
+        model_id: geminiModel,
         used_reference: finalRefUrls.length > 0,
         reference_count: finalRefUrls.length,
       },
