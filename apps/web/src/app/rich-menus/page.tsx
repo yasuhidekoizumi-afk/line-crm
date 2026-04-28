@@ -12,7 +12,7 @@ import Header from '@/components/layout/header'
 
 const SIZE_LARGE = { width: 2500, height: 1686 }
 
-type LayoutGroup = 'official-large' | 'official-compact' | 'extended'
+type LayoutGroup = 'official-large' | 'official-compact' | 'tab' | 'extended'
 
 interface ProportionalBounds {
   x: number
@@ -142,6 +142,62 @@ const LAYOUT_TEMPLATES: LayoutTemplate[] = [
       w: 1 / 3,
       h: 1 / 3,
     })) },
+  // ── タブ切替式（上部にタブ行＋下部にコンテンツ）────────────────
+  // タブ部分は上から 1/6 (約17%)。タップ時は通常 richmenuswitch アクションで別メニューに切替。
+  { key: 'TAB2-L1', label: '上タブ2 ＋ 1分割', group: 'tab',
+    bounds: [
+      { x: 0,   y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 1/2, y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 0,   y: 1 / 6, w: 1,     h: 5 / 6 },
+    ] },
+  { key: 'TAB2-L2-V', label: '上タブ2 ＋ 2分割（左右）', group: 'tab',
+    bounds: [
+      { x: 0,   y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 1/2, y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 0,   y: 1 / 6, w: 1 / 2, h: 5 / 6 },
+      { x: 1/2, y: 1 / 6, w: 1 / 2, h: 5 / 6 },
+    ] },
+  { key: 'TAB2-L4-Grid', label: '上タブ2 ＋ 4分割（2×2）', group: 'tab',
+    bounds: [
+      { x: 0,   y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 1/2, y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 0,   y: 1 / 6, w: 1 / 2, h: 5 / 12 },
+      { x: 1/2, y: 1 / 6, w: 1 / 2, h: 5 / 12 },
+      { x: 0,   y: 7 / 12, w: 1 / 2, h: 5 / 12 },
+      { x: 1/2, y: 7 / 12, w: 1 / 2, h: 5 / 12 },
+    ] },
+  { key: 'TAB2-L4-L1R3', label: '上タブ2 ＋ 4分割（左1+右3）', group: 'tab',
+    bounds: [
+      { x: 0,   y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 1/2, y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 0,   y: 1 / 6, w: 1 / 2, h: 5 / 6 },
+      { x: 1/2, y: 1 / 6, w: 1 / 2, h: 5 / 18 },
+      { x: 1/2, y: 1 / 6 + 5 / 18, w: 1 / 2, h: 5 / 18 },
+      { x: 1/2, y: 1 / 6 + 10 / 18, w: 1 / 2, h: 5 / 18 },
+    ] },
+  { key: 'TAB2-L6', label: '上タブ2 ＋ 6分割（3×2）', group: 'tab',
+    bounds: [
+      { x: 0,   y: 0,     w: 1 / 2, h: 1 / 6 },
+      { x: 1/2, y: 0,     w: 1 / 2, h: 1 / 6 },
+      ...Array.from({ length: 6 }, (_, i) => ({
+        x: (i % 3) / 3,
+        y: 1 / 6 + Math.floor(i / 3) * (5 / 12),
+        w: 1 / 3,
+        h: 5 / 12,
+      })),
+    ] },
+  { key: 'TAB3-L6', label: '上タブ3 ＋ 6分割（3×2）', group: 'tab',
+    bounds: [
+      { x: 0,   y: 0,     w: 1 / 3, h: 1 / 6 },
+      { x: 1/3, y: 0,     w: 1 / 3, h: 1 / 6 },
+      { x: 2/3, y: 0,     w: 1 / 3, h: 1 / 6 },
+      ...Array.from({ length: 6 }, (_, i) => ({
+        x: (i % 3) / 3,
+        y: 1 / 6 + Math.floor(i / 3) * (5 / 12),
+        w: 1 / 3,
+        h: 5 / 12,
+      })),
+    ] },
 ]
 
 const LAYOUT_BY_KEY: Record<string, LayoutTemplate> = Object.fromEntries(
@@ -296,10 +352,23 @@ interface AreaActionPanelProps {
 
 function AreaActionPanel({ index, area, onChange, onClose }: AreaActionPanelProps) {
   const action = area.action
-  const setActionType = (type: 'uri' | 'message' | 'postback') => {
-    if (type === 'uri') onChange({ ...area, action: { type: 'uri', uri: '', label: action.label } })
-    else if (type === 'message') onChange({ ...area, action: { type: 'message', text: '', label: action.label } })
-    else onChange({ ...area, action: { type: 'postback', data: '', displayText: '', label: action.label } })
+  const setActionType = (type: 'uri' | 'message' | 'postback' | 'richmenuswitch') => {
+    if (type === 'uri')
+      onChange({ ...area, action: { type: 'uri', uri: '', label: action.label } })
+    else if (type === 'message')
+      onChange({ ...area, action: { type: 'message', text: '', label: action.label } })
+    else if (type === 'postback')
+      onChange({ ...area, action: { type: 'postback', data: '', displayText: '', label: action.label } })
+    else
+      onChange({
+        ...area,
+        action: {
+          type: 'richmenuswitch',
+          richMenuAliasId: '',
+          data: 'switch',
+          label: action.label,
+        },
+      })
   }
 
   return (
@@ -329,15 +398,16 @@ function AreaActionPanel({ index, area, onChange, onClose }: AreaActionPanelProp
 
       <div>
         <label className="block text-[11px] text-gray-500 mb-1">タップ時の動作</label>
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-2 gap-1">
           {([
             { value: 'uri', label: 'リンクを開く' },
             { value: 'message', label: 'メッセージ送信' },
             { value: 'postback', label: 'ポストバック' },
+            { value: 'richmenuswitch', label: 'メニュー切替（タブ）' },
           ] as const).map((opt) => {
             const active =
               action.type === opt.value ||
-              (opt.value === 'uri' && !['uri', 'message', 'postback'].includes(action.type))
+              (opt.value === 'uri' && !['uri', 'message', 'postback', 'richmenuswitch'].includes(action.type))
             return (
               <button
                 key={opt.value}
@@ -398,6 +468,32 @@ function AreaActionPanel({ index, area, onChange, onClose }: AreaActionPanelProp
               className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
               value={action.displayText ?? ''}
               onChange={(e) => onChange({ ...area, action: { ...action, displayText: e.target.value } })}
+            />
+          </div>
+        </div>
+      )}
+      {action.type === 'richmenuswitch' && (
+        <div className="space-y-2">
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">切替先メニューのエイリアスID</label>
+            <input
+              type="text"
+              placeholder="例: news-tab"
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+              value={action.richMenuAliasId}
+              onChange={(e) => onChange({ ...area, action: { ...action, richMenuAliasId: e.target.value } })}
+            />
+            <p className="mt-0.5 text-[10px] text-gray-400">
+              タブをタップして別メニューに切り替えるための ID。LINE Messaging API で別途エイリアスを登録する必要があります。
+            </p>
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-0.5">data（任意）</label>
+            <input
+              type="text"
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+              value={action.data}
+              onChange={(e) => onChange({ ...area, action: { ...action, data: e.target.value } })}
             />
           </div>
         </div>
@@ -606,6 +702,9 @@ export default function RichMenusPage() {
       if (a.type === 'postback' && !a.data.trim()) {
         return `エリア${i + 1}: postback data を入力してください`
       }
+      if (a.type === 'richmenuswitch' && !a.richMenuAliasId.trim()) {
+        return `エリア${i + 1}: メニュー切替先のエイリアスIDを入力してください`
+      }
     }
     return null
   }
@@ -745,6 +844,7 @@ export default function RichMenusPage() {
   const layoutGroups: Array<{ label: string; group: LayoutGroup }> = [
     { label: 'LINE公式・大サイズ（最大6エリア）', group: 'official-large' },
     { label: 'LINE公式・小サイズ（最大3エリア）', group: 'official-compact' },
+    { label: 'タブ切替式（上部タブ＋コンテンツ）', group: 'tab' },
     { label: '拡張（API互換・5分割など）', group: 'extended' },
   ]
 
