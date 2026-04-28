@@ -100,6 +100,40 @@ customerJourney.get('/api/customer-journey/cohort', async (c) => {
   return c.json({ success: true, data: cohorts.results ?? [] });
 });
 
+// ─── チャネルマトリクス（LINE × Email 4象限）
+customerJourney.get('/api/customer-journey/channel-matrix', async (c) => {
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+
+  let where = `o.cancelled_at IS NULL
+    AND (o.financial_status IS NULL OR o.financial_status NOT IN ('refunded','voided'))
+    AND o.shopify_customer_id IS NOT NULL`;
+  const binds: string[] = [];
+  if (from) { where += ` AND o.processed_at >= ?`; binds.push(from); }
+  if (to)   { where += ` AND o.processed_at < ?`;  binds.push(to); }
+
+  const rows = await c.env.DB
+    .prepare(
+      `SELECT
+         CASE WHEN o.friend_id IS NOT NULL THEN 1 ELSE 0 END AS line_linked,
+         CASE WHEN c.subscribed_email = 1 THEN 1 ELSE 0 END AS email_subscribed,
+         COUNT(DISTINCT o.shopify_customer_id) AS customers,
+         COUNT(*) AS orders,
+         COALESCE(ROUND(SUM(o.total_price)), 0) AS revenue,
+         COALESCE(ROUND(SUM(o.total_price) / NULLIF(COUNT(DISTINCT o.shopify_customer_id), 0)), 0) AS ltv,
+         COALESCE(ROUND(SUM(o.total_price) / NULLIF(COUNT(*), 0)), 0) AS aov
+       FROM shopify_orders o
+       LEFT JOIN customers c ON c.customer_id = o.customer_id
+       WHERE ${where}
+       GROUP BY line_linked, email_subscribed
+       ORDER BY ltv DESC`,
+    )
+    .bind(...binds)
+    .all();
+
+  return c.json({ success: true, data: rows.results ?? [] });
+});
+
 // ─── セグメント別 (LINE連携・ロイヤルティランク・経過日数バケット)
 customerJourney.get('/api/customer-journey/segment', async (c) => {
   const stats = await c.env.DB
