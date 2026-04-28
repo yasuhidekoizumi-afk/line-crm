@@ -581,6 +581,7 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
 - 文字や日本語の挿入は最小限、清潔感のある構図`;
 
     let resp: Response;
+    let usedRefCount = 0;
     if (finalRefUrls.length > 0) {
       // I2I: gpt-image-2 の編集エンドポイントを使用（multipart）
       const form = new FormData();
@@ -590,17 +591,26 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
       form.append('quality', quality);
       form.append('n', '1');
       // 参照画像をフェッチして multipart に追加
+      // mime type / 拡張子を正しく判別（PNG/JPEG/WebP のみ受け付ける）
       for (const url of finalRefUrls) {
         try {
           const imgRes = await fetch(url);
-          if (imgRes.ok) {
-            const blob = await imgRes.blob();
-            form.append('image[]', blob, 'reference.png');
+          if (!imgRes.ok) {
+            console.warn(`[generate-image] reference fetch failed ${imgRes.status}: ${url}`);
+            continue;
           }
-        } catch {
-          /* 1 枚読めなくても続行 */
+          const ct = imgRes.headers.get('content-type') ?? 'image/jpeg';
+          const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg';
+          const blob = await imgRes.blob();
+          // Cloudflare Workers の Blob は OpenAI に渡す前に正しい type を持たせる
+          const typedBlob = new Blob([await blob.arrayBuffer()], { type: ct });
+          form.append('image[]', typedBlob, `reference-${usedRefCount}.${ext}`);
+          usedRefCount++;
+        } catch (e) {
+          console.warn('[generate-image] reference fetch error:', url, e);
         }
       }
+      console.log(`[generate-image] I2I with ${usedRefCount} references`);
       resp = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}` },
@@ -626,7 +636,17 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
 
     if (!resp.ok) {
       const text = await resp.text();
-      return c.json({ success: false, error: `OpenAI ${resp.status}: ${text.slice(0, 300)}` }, 500);
+      console.error(`[generate-image] OpenAI ${resp.status}:`, text);
+      return c.json({
+        success: false,
+        error: `OpenAI ${resp.status}: ${text.slice(0, 500)}`,
+        debug: {
+          openai_status: resp.status,
+          used_endpoint: finalRefUrls.length > 0 ? 'images/edits' : 'images/generations',
+          reference_urls_attempted: finalRefUrls.length,
+          reference_urls_succeeded: usedRefCount,
+        },
+      }, 500);
     }
     const data = await resp.json<{ data?: Array<{ b64_json?: string; url?: string }> }>();
     const item = data.data?.[0];
