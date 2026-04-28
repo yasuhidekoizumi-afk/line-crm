@@ -137,8 +137,8 @@ export async function persistShopifyOrder(
          financial_status, fulfillment_status, cancelled_at,
          source_name, landing_site, referring_site, tags,
          customer_orders_count,
-         processed_at, created_at_shopify, updated_at_shopify, raw_payload, ingested_via
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         processed_at, created_at_shopify, updated_at_shopify, ingested_via
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(shopify_order_id) DO UPDATE SET
          shopify_order_number  = excluded.shopify_order_number,
          customer_id           = COALESCE(excluded.customer_id, shopify_orders.customer_id),
@@ -161,8 +161,7 @@ export async function persistShopifyOrder(
          tags                  = excluded.tags,
          customer_orders_count = excluded.customer_orders_count,
          processed_at          = excluded.processed_at,
-         updated_at_shopify    = excluded.updated_at_shopify,
-         raw_payload           = excluded.raw_payload`,
+         updated_at_shopify    = excluded.updated_at_shopify`,
     )
     .bind(
       shopifyOrderId,
@@ -190,7 +189,6 @@ export async function persistShopifyOrder(
       processedAt,
       createdAtShopify,
       order.updated_at ?? null,
-      JSON.stringify(order),
       ingestedVia,
     )
     .run();
