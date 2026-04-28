@@ -37,14 +37,6 @@ function EditPageInner() {
   const [imgQuality, setImgQuality] = useState<'low' | 'medium' | 'high'>('medium')
   const [imgSize, setImgSize] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024')
   const [imgModel, setImgModel] = useState<'flash' | 'pro'>('flash')
-  // 比較生成（Flash と Pro を並列で生成）
-  const [compareResults, setCompareResults] = useState<Array<{
-    model: 'flash' | 'pro'
-    url: string | null
-    cost: number
-    error: string | null
-  }> | null>(null)
-  const [comparing, setComparing] = useState(false)
   // Shopify 商品参照
   const [shopifyProducts, setShopifyProducts] = useState<Array<{ id: string; title: string; image_url: string | null }>>([])
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
@@ -320,7 +312,7 @@ function EditPageInner() {
             <select
               value={imgModel}
               onChange={(e) => setImgModel(e.target.value as typeof imgModel)}
-              disabled={imgGenerating || comparing}
+              disabled={imgGenerating}
               className="border border-pink-300 rounded-lg px-2 py-2 text-sm bg-white"
               title="生成モデル"
             >
@@ -330,7 +322,7 @@ function EditPageInner() {
             <select
               value={imgQuality}
               onChange={(e) => setImgQuality(e.target.value as typeof imgQuality)}
-              disabled={imgGenerating || comparing}
+              disabled={imgGenerating}
               className="border border-pink-300 rounded-lg px-2 py-2 text-sm bg-white"
               title="品質（コストと速度に影響）"
             >
@@ -393,57 +385,10 @@ function EditPageInner() {
                   setImgGenerating(false)
                 }
               }}
-              disabled={imgGenerating || comparing || !imgPrompt.trim()}
+              disabled={imgGenerating || !imgPrompt.trim()}
               className="px-4 py-2 text-sm bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:opacity-50 whitespace-nowrap"
             >
               {imgGenerating ? '🎨 生成中...' : '🎨 画像生成'}
-            </button>
-            <button
-              onClick={async () => {
-                if (!imgPrompt.trim()) return
-                setComparing(true)
-                setImgError(null)
-                setImgResult(null)
-                setCompareResults([
-                  { model: 'flash', url: null, cost: 0, error: null },
-                  { model: 'pro', url: null, cost: 0, error: null },
-                ])
-                const apiKey = typeof window !== 'undefined' ? localStorage.getItem('lh_api_key') ?? '' : ''
-                const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? ''
-                const baseReq = {
-                  prompt: imgPrompt.trim(),
-                  size: imgSize,
-                  quality: imgQuality,
-                  product_ids: selectedProductIds.length > 0 ? selectedProductIds : undefined,
-                  auto_detect_product: autoDetectProduct,
-                }
-                const callOne = async (model: 'flash' | 'pro') => {
-                  try {
-                    const res = await fetch(`${apiUrl}/api/ferment/cockpit/generate-image`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                      body: JSON.stringify({ ...baseReq, model }),
-                    })
-                    const text = await res.text()
-                    let json: { success?: boolean; data?: { url: string; cost_usd: number }; error?: string }
-                    try { json = JSON.parse(text) } catch { json = { success: false, error: `HTTP ${res.status}` } }
-                    if (json.success && json.data) {
-                      return { model, url: json.data.url, cost: json.data.cost_usd, error: null }
-                    }
-                    return { model, url: null, cost: 0, error: json.error ?? 'failed' }
-                  } catch (e) {
-                    return { model, url: null, cost: 0, error: e instanceof Error ? e.message : String(e) }
-                  }
-                }
-                const [flashRes, proRes] = await Promise.all([callOne('flash'), callOne('pro')])
-                setCompareResults([flashRes, proRes])
-                setComparing(false)
-              }}
-              disabled={imgGenerating || comparing || !imgPrompt.trim()}
-              className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap"
-              title="Flash と Pro を並列で生成して比較"
-            >
-              {comparing ? '🆚 並列生成中...' : '🆚 Flash vs Pro 比較'}
             </button>
           </div>
           {imgError && (
@@ -464,59 +409,6 @@ function EditPageInner() {
                   位置はビジュアルエディタでドラッグ調整できます。
                 </div>
               </div>
-            </div>
-          )}
-          {compareResults && (
-            <div className="mt-3 p-3 bg-white border border-purple-200 rounded-lg">
-              <p className="text-xs font-semibold text-purple-800 mb-2">🆚 Flash vs Pro 比較結果（気に入った方を「採用」）</p>
-              <div className="grid grid-cols-2 gap-3">
-                {compareResults.map((r) => (
-                  <div key={r.model} className={`border rounded-lg p-2 ${r.model === 'pro' ? 'border-purple-300 bg-purple-50' : 'border-pink-200 bg-pink-50'}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold">
-                        {r.model === 'flash' ? '⚡ Flash ($0.04)' : '✨ Pro ($0.15)'}
-                      </span>
-                      {r.url && (
-                        <button
-                          onClick={async () => {
-                            const newImgTag = `<p style="text-align:center;margin:24px 0;"><img src="${r.url}" alt="" style="max-width:100%;height:auto;border-radius:8px;" /></p>`
-                            setHtml((prev) => prev + newImgTag)
-                            if (template) {
-                              await fermentApi.templates.update(template.template_id, {
-                                body_html: html + newImgTag,
-                              })
-                              setSavedAt(new Date())
-                            }
-                            setCompareResults(null)
-                            setImgPrompt('')
-                          }}
-                          className="text-xs px-2 py-0.5 bg-green-600 text-white rounded hover:bg-green-700"
-                        >
-                          採用
-                        </button>
-                      )}
-                    </div>
-                    {r.url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={r.url} alt={`${r.model} 生成`} className="w-full aspect-square object-cover rounded" />
-                    ) : r.error ? (
-                      <div className="aspect-square flex items-center justify-center bg-gray-100 rounded text-xs text-red-600 p-2 text-center">
-                        ⚠️ {r.error.slice(0, 80)}
-                      </div>
-                    ) : (
-                      <div className="aspect-square flex items-center justify-center bg-gray-100 rounded">
-                        <div className="animate-spin h-6 w-6 border-2 border-purple-600 border-t-transparent rounded-full" />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={() => setCompareResults(null)}
-                className="mt-2 text-xs text-gray-500 hover:text-gray-700"
-              >
-                比較を閉じる
-              </button>
             </div>
           )}
         </div>
