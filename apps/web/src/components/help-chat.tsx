@@ -7,10 +7,30 @@ type Msg = { role: 'user' | 'assistant'; content: string }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 
+// localStorage 永続化キー（v1: 初版・スキーマ変更時はバージョンアップで自動破棄）
+const STORAGE_KEY = 'oryzae_chat_history_v1'
+// 永続化する直近メッセージ数の上限（容量・コンテキスト両方の対策）
+const MAX_PERSISTED = 100
+
 const INITIAL: Msg = {
   role: 'assistant',
   content:
     'やぁ、ぼくはオリゼくん！🌾\nLINE Harness の使い方ならぼくに聞いてね。\n\n例：\n・「シナリオ配信ってどう作るの？」\n・「セグメントとタグの違いは？」\n・「この画面で何ができる？」',
+}
+
+function loadHistory(): Msg[] {
+  if (typeof window === 'undefined') return [INITIAL]
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return [INITIAL]
+    const parsed = JSON.parse(raw) as Msg[]
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.role === 'assistant') {
+      return parsed
+    }
+  } catch {
+    // パース失敗時は壊れた履歴を破棄
+  }
+  return [INITIAL]
 }
 
 // オリゼくん：米麹をモチーフにしたキャラクターアバター
@@ -46,10 +66,28 @@ function OryzaeAvatar({ size = 36, animated = false }: { size?: number; animated
 export default function HelpChat() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  // SSR 互換: 初期は INITIAL のみ。マウント後に localStorage から復元
   const [messages, setMessages] = useState<Msg[]>([INITIAL])
+  const [hydrated, setHydrated] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // マウント時に履歴を復元（hydration エラーを避けるため effect で実行）
+  useEffect(() => {
+    setMessages(loadHistory())
+    setHydrated(true)
+  }, [])
+
+  // 履歴を localStorage に永続化（直近 MAX_PERSISTED 件まで）
+  useEffect(() => {
+    if (!hydrated || typeof window === 'undefined') return
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-MAX_PERSISTED)))
+    } catch {
+      // 容量超過などは無視（次回起動時に破棄される）
+    }
+  }, [messages, hydrated])
 
   useEffect(() => {
     if (open && scrollRef.current) {
@@ -74,7 +112,8 @@ export default function HelpChat() {
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          messages: next.filter((m) => m !== INITIAL).map(({ role, content }) => ({ role, content })),
+          // 先頭の初期挨拶（INITIAL）は API には送らず、ユーザー発話以降のみを送信
+          messages: next.slice(1).map(({ role, content }) => ({ role, content })),
           current_page: pathname,
         }),
       })
@@ -99,6 +138,13 @@ export default function HelpChat() {
 
   function reset() {
     setMessages([INITIAL])
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(STORAGE_KEY)
+      } catch {
+        // ignore
+      }
+    }
   }
 
   return (
