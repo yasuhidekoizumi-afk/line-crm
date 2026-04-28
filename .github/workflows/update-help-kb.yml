@@ -1,0 +1,52 @@
+name: Update Oryze Help KB
+
+# docs/wiki/*.md または生成スクリプトが変更された時に
+# help-knowledge.generated.ts を自動再生成し、差分があれば main に直接コミットする。
+# その後の Worker デプロイは deploy-worker.yml が apps/worker/** トリガで自動実行する。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/wiki/**'
+      - 'apps/worker/scripts/build-help-kb.mjs'
+      - '.github/workflows/update-help-kb.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-help-kb
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 自動コミットを push するため fetch-depth: 0 が必要
+          fetch-depth: 0
+          # GITHUB_TOKEN で push 可能にする
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Rebuild help knowledge base
+        run: node apps/worker/scripts/build-help-kb.mjs
+
+      - name: Commit & push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet apps/worker/src/routes/help-knowledge.generated.ts; then
+            echo "✅ No changes to help-knowledge.generated.ts"
+          else
+            git add apps/worker/src/routes/help-knowledge.generated.ts
+            git commit -m "chore(help-kb): wiki から自動再生成"
+            git push
+            echo "✅ Pushed regenerated help-knowledge.generated.ts"
+          fi
