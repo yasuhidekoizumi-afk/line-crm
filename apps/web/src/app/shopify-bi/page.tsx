@@ -43,6 +43,18 @@ interface ChannelMatrixRow {
   aov: number
 }
 
+interface TrafficSourceRow {
+  source: string
+  orders: number
+  unique_customers: number
+  revenue: number
+  new_customer_revenue: number
+  new_customer_orders: number
+  line_linked_orders: number
+  aov: number
+  revenue_per_customer: number
+}
+
 const yen = (n: number) => '¥' + Math.round(n).toLocaleString('ja-JP')
 const num = (n: number) => Math.round(n).toLocaleString('ja-JP')
 
@@ -51,6 +63,7 @@ export default function ShopifyBiTopPage() {
   const [funnel, setFunnel] = useState<FunnelRow[]>([])
   const [cohort, setCohort] = useState<CohortRow[]>([])
   const [channelMatrix, setChannelMatrix] = useState<ChannelMatrixRow[]>([])
+  const [trafficSource, setTrafficSource] = useState<TrafficSourceRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [recomputing, setRecomputing] = useState(false)
@@ -61,7 +74,7 @@ export default function ShopifyBiTopPage() {
       setLoading(true)
       setError(null)
       try {
-        const [statsRes, funnelRes, cohortRes, matrixRes] = await Promise.all([
+        const [statsRes, funnelRes, cohortRes, matrixRes, trafficRes] = await Promise.all([
           fetchApi<{ success: boolean; data: OrderStats }>(`/api/shopify/orders/stats`),
           fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel`),
           fetchApi<{ success: boolean; data: CohortRow[] }>(
@@ -70,11 +83,15 @@ export default function ShopifyBiTopPage() {
           fetchApi<{ success: boolean; data: ChannelMatrixRow[] }>(
             `/api/customer-journey/channel-matrix`,
           ),
+          fetchApi<{ success: boolean; data: TrafficSourceRow[] }>(
+            `/api/customer-journey/traffic-source?from=2025-01-01`,
+          ),
         ])
         if (cancelled) return
         if (statsRes.success) setStats(statsRes.data)
         if (funnelRes.success) setFunnel(funnelRes.data)
         if (matrixRes.success) setChannelMatrix(matrixRes.data)
+        if (trafficRes.success) setTrafficSource(trafficRes.data)
         if (cohortRes.success) setCohort(cohortRes.data)
       } catch (e) {
         if (!cancelled) setError(`読み込み失敗: ${String(e)}`)
@@ -251,16 +268,82 @@ export default function ShopifyBiTopPage() {
               </div>
             )}
 
-            {/* ─── チャネルマトリクス（LINE × Email 4象限）─── */}
-            {channelMatrix.length > 0 && (
+            {/* ─── 流入チャネル別 売上（landing_site UTM ベース）─── */}
+            {trafficSource.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
-                  <h2 className="font-bold text-gray-900">チャネル × LTV マトリクス</h2>
+                  <h2 className="font-bold text-gray-900">流入チャネル別 売上（2025年〜）</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    LINE連携 × メール購読 の組み合わせ別 LTV / 顧客数
+                    Shopify注文の landing_site UTM パラメータ から判定（Shopify Flow メール / LINE / TikTok / 広告 etc）
                   </p>
                 </div>
-                <div className="p-4 sm:p-5">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-xs text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left">チャネル</th>
+                        <th className="px-3 py-2 text-right">注文</th>
+                        <th className="px-3 py-2 text-right">売上</th>
+                        <th className="px-3 py-2 text-right">客単価</th>
+                        <th className="px-3 py-2 text-right hidden sm:table-cell">顧客あたり</th>
+                        <th className="px-3 py-2 text-right hidden md:table-cell">新規率</th>
+                        <th className="px-3 py-2 text-right hidden md:table-cell">LINE連携率</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {trafficSource.map((s) => {
+                        const sourceMeta: Record<string, { label: string; emoji: string; color: string }> = {
+                          email: { label: 'Email (Shopify Flow等)', emoji: '✉️', color: 'text-purple-700' },
+                          line: { label: 'LINE', emoji: '🟢', color: 'text-green-700' },
+                          tiktok: { label: 'TikTok広告', emoji: '🎵', color: 'text-pink-700' },
+                          meta: { label: 'Meta (FB/IG)', emoji: '📘', color: 'text-blue-700' },
+                          google: { label: 'Google広告', emoji: '🔍', color: 'text-red-700' },
+                          other_utm: { label: 'その他UTM', emoji: '🏷️', color: 'text-gray-700' },
+                          direct: { label: '直接 (UTMなし)', emoji: '🔗', color: 'text-gray-600' },
+                          none: { label: '不明 (TikTok Shop等)', emoji: '❓', color: 'text-orange-700' },
+                        }
+                        const meta = sourceMeta[s.source] ?? { label: s.source, emoji: '', color: 'text-gray-700' }
+                        const newRate = s.orders > 0 ? (s.new_customer_orders / s.orders) * 100 : 0
+                        const lineRate = s.orders > 0 ? (s.line_linked_orders / s.orders) * 100 : 0
+                        return (
+                          <tr key={s.source}>
+                            <td className={`px-3 py-2 font-medium ${meta.color}`}>
+                              {meta.emoji} {meta.label}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums">{num(s.orders)}</td>
+                            <td className="px-3 py-2 text-right font-medium tabular-nums">{yen(s.revenue)}</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums">{yen(s.aov)}</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden sm:table-cell">
+                              {yen(s.revenue_per_customer)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">
+                              {newRate.toFixed(1)}%
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">
+                              {lineRate.toFixed(1)}%
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">
+                  💡 「不明」は landing_site が空の注文（TikTok Shop の checkout 経由など）。「直接」は landing_site あるが UTM 無し。
+                </div>
+              </div>
+            )}
+
+            {/* ─── サブセクション：LINE × Email 購読登録 4象限 ─── */}
+            {channelMatrix.length > 0 && (
+              <details className="bg-white border border-gray-200 rounded-lg">
+                <summary className="px-4 sm:px-5 py-3 cursor-pointer font-bold text-gray-900 hover:bg-gray-50">
+                  📋 LINE連携 × メール購読登録 4象限（参考）
+                </summary>
+                <div className="p-4 sm:p-5 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 mb-3">
+                    customers.subscribed_email = 1 の登録ベース。実購入経路（UTM）とは別軸。
+                  </p>
                   <div className="grid grid-cols-2 gap-3">
                     {[
                       { line: 1, email: 1, label: 'LINE有 × メール有', color: 'bg-purple-50 border-purple-300' },
@@ -271,21 +354,16 @@ export default function ShopifyBiTopPage() {
                       const row = channelMatrix.find(
                         (r) => r.line_linked === q.line && r.email_subscribed === q.email,
                       )
-                      const totalCustomers = channelMatrix.reduce((s, r) => s + r.customers, 0)
-                      const sharePct = row && totalCustomers > 0 ? (row.customers / totalCustomers) * 100 : 0
                       return (
                         <div key={q.label} className={`border-2 rounded-lg p-3 ${q.color}`}>
                           <div className="text-xs font-bold text-gray-700">{q.label}</div>
                           {row ? (
                             <>
-                              <div className="text-lg sm:text-xl font-bold text-gray-900 mt-1 tabular-nums">
+                              <div className="text-lg font-bold text-gray-900 mt-1 tabular-nums">
                                 LTV {yen(row.ltv)}
                               </div>
                               <div className="text-xs text-gray-600 mt-1 tabular-nums">
-                                {num(row.customers)}人 ({sharePct.toFixed(1)}%) / {num(row.orders)}件 / 客単価 {yen(row.aov)}
-                              </div>
-                              <div className="text-xs text-gray-500 mt-0.5 tabular-nums">
-                                売上 {yen(row.revenue)}
+                                {num(row.customers)}人 / {num(row.orders)}件
                               </div>
                             </>
                           ) : (
@@ -295,12 +373,8 @@ export default function ShopifyBiTopPage() {
                       )
                     })}
                   </div>
-                  <div className="mt-3 text-xs text-gray-500 bg-yellow-50 border border-yellow-200 rounded p-2">
-                    ⚠️ メール送信ログ（email_logs）はほぼ空のため「メール経由購入」のアトリビューションは現状不可。
-                    上の指標は「メール購読登録」ベース。
-                  </div>
                 </div>
-              </div>
+              </details>
             )}
 
             {/* ─── 直近 12ヶ月のコホート連携率推移 ─── */}
