@@ -5,6 +5,7 @@ import {
   api,
   type RichMenuPayload,
   type RichMenuAreaPayload,
+  type RichMenuAlias,
 } from '@/lib/api'
 import Header from '@/components/layout/header'
 
@@ -346,11 +347,12 @@ function VisualAreaEditor({ imageDataUrl, imageContentType, size, areas, selecte
 interface AreaActionPanelProps {
   index: number
   area: RichMenuAreaPayload
+  aliases: RichMenuAlias[]
   onChange: (next: RichMenuAreaPayload) => void
   onClose: () => void
 }
 
-function AreaActionPanel({ index, area, onChange, onClose }: AreaActionPanelProps) {
+function AreaActionPanel({ index, area, aliases, onChange, onClose }: AreaActionPanelProps) {
   const action = area.action
   const setActionType = (type: 'uri' | 'message' | 'postback' | 'richmenuswitch') => {
     if (type === 'uri')
@@ -475,17 +477,38 @@ function AreaActionPanel({ index, area, onChange, onClose }: AreaActionPanelProp
       {action.type === 'richmenuswitch' && (
         <div className="space-y-2">
           <div>
-            <label className="block text-[11px] text-gray-500 mb-0.5">切替先メニューのエイリアスID</label>
-            <input
-              type="text"
-              placeholder="例: news-tab"
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
-              value={action.richMenuAliasId}
-              onChange={(e) => onChange({ ...area, action: { ...action, richMenuAliasId: e.target.value } })}
-            />
-            <p className="mt-0.5 text-[10px] text-gray-400">
-              タブをタップして別メニューに切り替えるための ID。LINE Messaging API で別途エイリアスを登録する必要があります。
-            </p>
+            <label className="block text-[11px] text-gray-500 mb-0.5">切替先メニューのエイリアス</label>
+            {aliases.length > 0 ? (
+              <select
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
+                value={action.richMenuAliasId}
+                onChange={(e) =>
+                  onChange({ ...area, action: { ...action, richMenuAliasId: e.target.value } })
+                }
+              >
+                <option value="">— エイリアスを選択 —</option>
+                {aliases.map((a) => (
+                  <option key={a.richMenuAliasId} value={a.richMenuAliasId}>
+                    {a.richMenuAliasId}（→ {a.richMenuId.slice(0, 16)}…）
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder="例: news-tab"
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+                  value={action.richMenuAliasId}
+                  onChange={(e) =>
+                    onChange({ ...area, action: { ...action, richMenuAliasId: e.target.value } })
+                  }
+                />
+                <p className="mt-0.5 text-[10px] text-amber-600">
+                  ⚠ エイリアスがまだ登録されていません。下の「リッチメニューのエイリアス管理」から先に登録してください。
+                </p>
+              </>
+            )}
           </div>
           <div>
             <label className="block text-[11px] text-gray-500 mb-0.5">data（任意）</label>
@@ -598,6 +621,7 @@ const initialForm: CreateForm = {
 export default function RichMenusPage() {
   const [menus, setMenus] = useState<RichMenuPayload[]>([])
   const [defaultId, setDefaultId] = useState<string | null>(null)
+  const [aliases, setAliases] = useState<RichMenuAlias[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -609,20 +633,79 @@ export default function RichMenusPage() {
   const [busyMenuId, setBusyMenuId] = useState<string | null>(null)
   const [duplicating, setDuplicating] = useState<string | null>(null)
 
+  const [showAliasForm, setShowAliasForm] = useState(false)
+  const [aliasForm, setAliasForm] = useState<{ richMenuAliasId: string; richMenuId: string }>({
+    richMenuAliasId: '',
+    richMenuId: '',
+  })
+  const [aliasError, setAliasError] = useState('')
+  const [aliasSaving, setAliasSaving] = useState(false)
+
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const [list, def] = await Promise.all([api.richMenus.list(), api.richMenus.getDefault()])
+      const [list, def, aliasList] = await Promise.all([
+        api.richMenus.list(),
+        api.richMenus.getDefault(),
+        api.richMenuAliases.list(),
+      ])
       if (list.success) setMenus(list.data)
       else setError(list.error)
       if (def.success) setDefaultId(def.data.richMenuId ?? null)
+      if (aliasList.success) setAliases(aliasList.data)
     } catch {
       setError('リッチメニューの読み込みに失敗しました')
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const handleCreateAlias = async () => {
+    if (!aliasForm.richMenuAliasId.trim()) return setAliasError('エイリアスIDを入力してください')
+    if (!/^[A-Za-z0-9_-]+$/.test(aliasForm.richMenuAliasId)) {
+      return setAliasError('エイリアスIDは半角英数字・ハイフン・アンダースコアのみ使用できます')
+    }
+    if (!aliasForm.richMenuId) return setAliasError('紐付けるリッチメニューを選択してください')
+    setAliasSaving(true)
+    setAliasError('')
+    try {
+      const res = await api.richMenuAliases.create(aliasForm)
+      if (!res.success) {
+        setAliasError(res.error)
+        return
+      }
+      setShowAliasForm(false)
+      setAliasForm({ richMenuAliasId: '', richMenuId: '' })
+      await load()
+    } catch (err) {
+      setAliasError(err instanceof Error ? err.message : '作成に失敗しました')
+    } finally {
+      setAliasSaving(false)
+    }
+  }
+
+  const handleUpdateAlias = async (aliasId: string, richMenuId: string) => {
+    if (!richMenuId) return
+    try {
+      const res = await api.richMenuAliases.update(aliasId, richMenuId)
+      if (!res.success) setError(res.error)
+      else await load()
+    } catch {
+      setError('エイリアス更新に失敗しました')
+    }
+  }
+
+  const handleDeleteAlias = async (aliasId: string) => {
+    if (!confirm(`エイリアス "${aliasId}" を削除しますか？`)) return
+    try {
+      const res = await api.richMenuAliases.delete(aliasId)
+      if (!res.success) setError(res.error)
+      else await load()
+    } catch {
+      setError('エイリアス削除に失敗しました')
+    }
+  }
 
   useEffect(() => {
     load()
@@ -892,6 +975,133 @@ export default function RichMenusPage() {
         </div>
       )}
 
+      {/* Rich menu aliases */}
+      {!loading && (
+        <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">リッチメニューのエイリアス</h2>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                タブ切替式メニュー（メニュー切替アクション）で参照する識別子。同じエイリアスIDの参照先メニューを後から差し替えられます。
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setAliasForm({ richMenuAliasId: '', richMenuId: menus[0]?.richMenuId ?? '' })
+                setAliasError('')
+                setShowAliasForm(true)
+              }}
+              className="shrink-0 px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90"
+              style={{ backgroundColor: '#06C755' }}
+            >
+              + エイリアス追加
+            </button>
+          </div>
+
+          {showAliasForm && (
+            <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-md space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-gray-600 mb-0.5">エイリアスID（半角英数字）</label>
+                  <input
+                    type="text"
+                    placeholder="例: tab-news"
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+                    value={aliasForm.richMenuAliasId}
+                    onChange={(e) =>
+                      setAliasForm((f) => ({ ...f, richMenuAliasId: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-gray-600 mb-0.5">紐付けるリッチメニュー</label>
+                  <select
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
+                    value={aliasForm.richMenuId}
+                    onChange={(e) => setAliasForm((f) => ({ ...f, richMenuId: e.target.value }))}
+                  >
+                    <option value="">— メニューを選択 —</option>
+                    {menus.map((m) => (
+                      <option key={m.richMenuId} value={m.richMenuId}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {aliasError && <p className="text-[11px] text-red-600">{aliasError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCreateAlias}
+                  disabled={aliasSaving}
+                  className="px-3 py-1.5 text-xs font-medium text-white rounded-md disabled:opacity-50"
+                  style={{ backgroundColor: '#06C755' }}
+                >
+                  {aliasSaving ? '作成中...' : '作成'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAliasForm(false)
+                    setAliasError('')
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          )}
+
+          {aliases.length === 0 ? (
+            <p className="text-xs text-gray-400 py-2">
+              エイリアスは登録されていません。
+              {menus.length > 0
+                ? 'タブ切替式リッチメニューを使う場合は、まずタブごとに切替先メニューを作成してから、そのメニューにエイリアスIDを割り当ててください。'
+                : ''}
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {aliases.map((a) => {
+                const linkedMenu = menus.find((m) => m.richMenuId === a.richMenuId)
+                return (
+                  <div
+                    key={a.richMenuAliasId}
+                    className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded text-xs"
+                  >
+                    <code className="font-mono font-medium text-gray-800 shrink-0">
+                      {a.richMenuAliasId}
+                    </code>
+                    <span className="text-gray-400 shrink-0">→</span>
+                    <select
+                      className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
+                      value={a.richMenuId}
+                      onChange={(e) => handleUpdateAlias(a.richMenuAliasId, e.target.value)}
+                    >
+                      {!linkedMenu && (
+                        <option value={a.richMenuId}>
+                          (現在: {a.richMenuId.slice(0, 16)}…・該当メニュー削除済?)
+                        </option>
+                      )}
+                      {menus.map((m) => (
+                        <option key={m.richMenuId} value={m.richMenuId}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => handleDeleteAlias(a.richMenuAliasId)}
+                      className="shrink-0 px-2 py-1 text-[11px] text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded"
+                    >
+                      削除
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Create form */}
       {showCreate && (
         <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -1012,6 +1222,7 @@ export default function RichMenusPage() {
                   <AreaActionPanel
                     index={selectedAreaIndex}
                     area={form.areas[selectedAreaIndex]}
+                    aliases={aliases}
                     onChange={(next) => updateArea(selectedAreaIndex, next)}
                     onClose={() => setSelectedAreaIndex(null)}
                   />
