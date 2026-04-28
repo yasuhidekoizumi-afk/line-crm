@@ -168,36 +168,48 @@ export default function TimeseriesPage() {
               <p className="text-xs text-gray-500 mb-4">
                 青：全体売上 / 緑：LINE経由（最大値 {yen(maxRevenue)}）
               </p>
-              <div className="overflow-x-auto pb-2">
-                <div className="flex items-end gap-1" style={{ height: '180px' }}>
+              <div className="w-full">
+                <div className="flex items-end gap-1 w-full" style={{ height: '200px' }}>
                   {filteredSeries.map((s) => {
-                    const BAR_AREA_PX = 180
+                    const BAR_AREA_PX = 200
                     const barH = Math.max(2, (s.revenue / maxRevenue) * BAR_AREA_PX)
                     const lineRatio = s.revenue > 0 ? (s.line_revenue / s.revenue) * 100 : 0
                     return (
                       <div
                         key={s.period}
-                        className="relative w-4 sm:w-5 bg-blue-300 rounded-t-sm flex-shrink-0"
-                        style={{ height: `${barH}px` }}
+                        className="flex-1 flex flex-col justify-end items-center min-w-0"
                         title={`${s.period}: ${yen(s.revenue)} (LINE ${yen(s.line_revenue)} / ${lineRatio.toFixed(1)}%)`}
                       >
                         <div
-                          className="absolute bottom-0 left-0 w-full bg-green-500 rounded-t-sm"
-                          style={{ height: `${lineRatio}%` }}
-                        />
+                          className="w-full max-w-[40px] bg-blue-300 rounded-t-sm relative"
+                          style={{ height: `${barH}px` }}
+                        >
+                          <div
+                            className="absolute bottom-0 left-0 w-full bg-green-500 rounded-t-sm"
+                            style={{ height: `${lineRatio}%` }}
+                          />
+                        </div>
                       </div>
                     )
                   })}
                 </div>
-                <div className="flex gap-1 mt-1">
-                  {filteredSeries.map((s) => (
-                    <div
-                      key={s.period}
-                      className="w-4 sm:w-5 text-[9px] text-gray-500 text-center flex-shrink-0 transform -rotate-45 origin-top-left whitespace-nowrap"
-                    >
-                      {data.granularity === 'month' ? s.period.slice(2) : s.period.slice(5)}
-                    </div>
-                  ))}
+                <div className="flex gap-1 w-full mt-2">
+                  {filteredSeries.map((s, i) => {
+                    // データ点が多い時は2つに1つだけラベル表示
+                    const showLabel = filteredSeries.length <= 14 || i % 2 === 0
+                    return (
+                      <div
+                        key={s.period}
+                        className="flex-1 text-[10px] text-gray-500 text-center min-w-0 truncate"
+                      >
+                        {showLabel
+                          ? data.granularity === 'month'
+                            ? s.period.slice(2)
+                            : s.period.slice(5)
+                          : ''}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             </div>
