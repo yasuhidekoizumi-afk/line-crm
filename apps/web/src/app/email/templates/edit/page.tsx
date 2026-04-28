@@ -247,7 +247,7 @@ function EditPageInner() {
 
         {/* AI 画像生成 */}
         <div className="mt-3 pt-3 border-t border-purple-100">
-          <p className="text-xs font-semibold text-pink-800 mb-1">🎨 AI で画像を生成（GPT-Image-2）</p>
+          <p className="text-xs font-semibold text-pink-800 mb-1">🎨 AI で画像を生成（Gemini Nano Banana 2）</p>
           <p className="text-xs text-pink-600 mb-2">「春の食卓に並ぶ KOJIPOP」「米麹のテクスチャ背景」など、シーンを指示すると画像が生成されてエディタに挿入されます</p>
 
           {/* Shopify 商品参照 */}
@@ -315,9 +315,9 @@ function EditPageInner() {
               className="border border-pink-300 rounded-lg px-2 py-2 text-sm bg-white"
               title="品質（コストと速度に影響）"
             >
-              <option value="low">低品質 ($0.011)</option>
+              <option value="low">低 ($0.02)</option>
               <option value="medium">標準 ($0.04)</option>
-              <option value="high">高品質 ($0.17)</option>
+              <option value="high">高 ($0.04)</option>
             </select>
             <button
               onClick={async () => {
@@ -376,7 +376,7 @@ function EditPageInner() {
               disabled={imgGenerating || !imgPrompt.trim()}
               className="px-4 py-2 text-sm bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:opacity-50 whitespace-nowrap"
             >
-              {imgGenerating ? '🎨 生成中（10〜15秒）...' : '🎨 画像生成'}
+              {imgGenerating ? '🎨 生成中（2〜4秒）...' : '🎨 画像生成'}
             </button>
           </div>
           {imgError && (

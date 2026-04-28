@@ -473,19 +473,19 @@ cockpitRoutes.post('/draft-from-action', async (c) => {
   }
 });
 
-// ─── 1.6. AI 画像生成（OpenAI gpt-image-2） ──────
+// ─── 1.6. AI 画像生成（Gemini Nano Banana 2 = gemini-3-flash-image） ──────
 //
 // 自然言語プロンプトから画像を生成し R2 に保存して URL を返す。
 // テンプレ編集時に <img> タグとして本文に挿入する用途。
-// 入力に reference_image_url を渡せば I2I（商品画像をベースにシーン展開）も可能。
+// 入力に reference_image_urls / product_ids を渡せば I2I（商品画像をベースにシーン展開）も可能。
 
 cockpitRoutes.post('/generate-image', async (c) => {
   try {
     if (await isKilled(c.env, 'image')) {
       return c.json({ success: false, error: 'Image generation is paused' }, 503);
     }
-    const apiKey = c.env.OPENAI_API_KEY;
-    if (!apiKey) return c.json({ success: false, error: 'OPENAI_API_KEY not configured' }, 503);
+    const apiKey = c.env.GEMINI_API_KEY;
+    if (!apiKey) return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 503);
     if (!c.env.IMAGES) return c.json({ success: false, error: 'IMAGES R2 bucket not bound' }, 503);
 
     const body = await c.req.json<{
@@ -580,18 +580,16 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
 - 健康志向・誠実・上品な雰囲気
 - 文字や日本語の挿入は最小限、清潔感のある構図`;
 
-    let resp: Response;
+    // Gemini 3 Flash Image (= Nano Banana 2) で画像生成
+    // - T2I: contents に text のみ
+    // - I2I: contents に text + 参照画像（inline_data として base64 で渡す）
     let usedRefCount = 0;
+    const parts: Array<
+      | { text: string }
+      | { inline_data: { mime_type: string; data: string } }
+    > = [{ text: fullPrompt }];
+
     if (finalRefUrls.length > 0) {
-      // I2I: gpt-image-2 の編集エンドポイントを使用（multipart）
-      const form = new FormData();
-      form.append('model', 'gpt-image-2');
-      form.append('prompt', fullPrompt);
-      form.append('size', size);
-      form.append('quality', quality);
-      form.append('n', '1');
-      // 参照画像をフェッチして multipart に追加
-      // mime type / 拡張子を正しく判別（PNG/JPEG/WebP のみ受け付ける）
       for (const url of finalRefUrls) {
         try {
           const imgRes = await fetch(url);
@@ -600,84 +598,92 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
             continue;
           }
           const ct = imgRes.headers.get('content-type') ?? 'image/jpeg';
-          const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg';
-          const blob = await imgRes.blob();
-          // Cloudflare Workers の Blob は OpenAI に渡す前に正しい type を持たせる
-          const typedBlob = new Blob([await blob.arrayBuffer()], { type: ct });
-          form.append('image[]', typedBlob, `reference-${usedRefCount}.${ext}`);
+          const buf = new Uint8Array(await imgRes.arrayBuffer());
+          // base64 化
+          let bin = '';
+          for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+          const b64 = btoa(bin);
+          parts.push({ inline_data: { mime_type: ct, data: b64 } });
           usedRefCount++;
         } catch (e) {
           console.warn('[generate-image] reference fetch error:', url, e);
         }
       }
-      console.log(`[generate-image] I2I with ${usedRefCount} references`);
-      resp = await fetch('https://api.openai.com/v1/images/edits', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-        body: form,
-      });
-    } else {
-      // T2I: シンプルな JSON ボディ
-      resp = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-image-2',
-          prompt: fullPrompt,
-          size,
-          quality,
-          n: 1,
-        }),
-      });
     }
+    console.log(`[generate-image] Gemini ${finalRefUrls.length > 0 ? 'I2I' : 'T2I'} with ${usedRefCount} references, prompt len=${fullPrompt.length}`);
+
+    // 品質はサイズと aspect で表現（Gemini Image はサイズ指定で品質スケール）
+    const aspectRatio = size === '1024x1024' ? '1:1' : size === '1536x1024' ? '16:9' : '9:16';
+    const geminiModel = 'gemini-3-flash-image-preview';
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            responseModalities: ['IMAGE'],
+            imageConfig: { aspectRatio },
+          },
+        }),
+      },
+    );
 
     if (!resp.ok) {
       const text = await resp.text();
-      console.error(`[generate-image] OpenAI ${resp.status}:`, text);
+      console.error(`[generate-image] Gemini ${resp.status}:`, text);
       return c.json({
         success: false,
-        error: `OpenAI ${resp.status}: ${text.slice(0, 500)}`,
+        error: `Gemini ${resp.status}: ${text.slice(0, 500)}`,
         debug: {
-          openai_status: resp.status,
-          used_endpoint: finalRefUrls.length > 0 ? 'images/edits' : 'images/generations',
+          gemini_status: resp.status,
+          model: geminiModel,
           reference_urls_attempted: finalRefUrls.length,
           reference_urls_succeeded: usedRefCount,
         },
       }, 500);
     }
-    const data = await resp.json<{ data?: Array<{ b64_json?: string; url?: string }> }>();
-    const item = data.data?.[0];
-    if (!item) return c.json({ success: false, error: 'OpenAI response had no image' }, 500);
 
-    // gpt-image-2 は b64_json を返す
-    let bytes: Uint8Array;
-    if (item.b64_json) {
-      const bin = atob(item.b64_json);
-      bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    } else if (item.url) {
-      const r = await fetch(item.url);
-      bytes = new Uint8Array(await r.arrayBuffer());
-    } else {
-      return c.json({ success: false, error: 'OpenAI response had no b64_json or url' }, 500);
+    const data = await resp.json<{
+      candidates?: Array<{
+        content?: { parts?: Array<{ inline_data?: { mime_type?: string; data?: string }; inlineData?: { mimeType?: string; data?: string } }> };
+      }>;
+    }>();
+    // inline_data / inlineData どちらでも拾える
+    const cParts = data.candidates?.[0]?.content?.parts ?? [];
+    let imageB64: string | undefined;
+    let imageMime = 'image/png';
+    for (const p of cParts) {
+      const inline = p.inline_data ?? p.inlineData;
+      if (inline?.data) {
+        imageB64 = inline.data;
+        imageMime = inline.mime_type ?? inline.mimeType ?? 'image/png';
+        break;
+      }
     }
+    if (!imageB64) {
+      console.error('[generate-image] Gemini returned no image. Body:', JSON.stringify(data).slice(0, 500));
+      return c.json({ success: false, error: 'Gemini response had no image data' }, 500);
+    }
+    const bin = atob(imageB64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
     // R2 に保存
+    const ext = imageMime.includes('jpeg') ? 'jpg' : imageMime.includes('webp') ? 'webp' : 'png';
     const id = crypto.randomUUID();
-    const key = `ai/${id}.png`;
+    const key = `ai/${id}.${ext}`;
     await c.env.IMAGES.put(key, bytes, {
-      httpMetadata: { contentType: 'image/png' },
-      customMetadata: { source: 'gpt-image-2', prompt: prompt.slice(0, 500) },
+      httpMetadata: { contentType: imageMime },
+      customMetadata: { source: 'gemini-3-flash-image', prompt: prompt.slice(0, 500) },
     });
 
     const workerUrl = c.env.WORKER_URL || new URL(c.req.url).origin;
     const imageUrl = `${workerUrl}/images/${key}`;
 
-    // コスト概算: gpt-image-2 medium 1024x1024 ≈ $0.04
-    const cost = quality === 'high' ? 0.17 : quality === 'low' ? 0.011 : 0.04;
+    // コスト概算: Gemini 3 Flash Image ≈ $0.04/枚（quality に関わらずほぼ一定）
+    const cost = quality === 'high' ? 0.04 : quality === 'low' ? 0.02 : 0.04;
     const today = new Date().toISOString().slice(0, 10);
     await c.env.DB
       .prepare(
