@@ -7,6 +7,7 @@ import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
 import { ORYZAE_BENCHMARK, compareToBenchmark } from '@/lib/benchmarks'
 import AiCockpit from '@/components/dashboard/AiCockpit'
+import ShopifyKpiBar from '@/components/dashboard/ShopifyKpiBar'
 
 const ccPrompts = [
   {
@@ -281,6 +282,11 @@ export default function DashboardPage() {
           {error}
         </div>
       )}
+
+      {/* Shopify 売上 KPI バー（毎月開いて何を判断するかの起点） */}
+      <div className="mb-6">
+        <ShopifyKpiBar />
+      </div>
 
       {/* Demo banner */}
       <a

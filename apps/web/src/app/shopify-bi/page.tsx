@@ -317,7 +317,13 @@ export default function ShopifyBiTopPage() {
             )}
 
             {/* ─── 関連ページへの導線 ─── */}
-            <div className="grid sm:grid-cols-3 gap-3">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <NavCard
+                href="/shopify-bi/timeseries"
+                emoji="📅"
+                title="時系列分析"
+                desc="日次・週次・月次 売上推移と前期比較"
+              />
               <NavCard
                 href="/shopify-bi/cohort"
                 emoji="📈"
