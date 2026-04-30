@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAccount } from '@/contexts/account-context'
 import type { AccountWithStats } from '@/contexts/account-context'
 
@@ -271,6 +271,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
   const [staffName, setStaffName] = useState<string | null>(null)
   const [staffRole, setStaffRole] = useState<string | null>(null)
@@ -375,7 +376,7 @@ export default function Sidebar() {
             localStorage.removeItem('lh_api_key')
             localStorage.removeItem('lh_staff_name')
             localStorage.removeItem('lh_staff_role')
-            window.location.href = '/login'
+            router.push('/login')
           }}
           className="flex items-center gap-2 text-xs text-gray-400 hover:text-red-500 transition-colors"
         >
