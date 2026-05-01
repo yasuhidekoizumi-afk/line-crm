@@ -238,6 +238,69 @@ diagnostics.get('/api/admin/diagnostics/cart-message-history', async (c) => {
 });
 
 /**
+ * GET /api/admin/diagnostics/messages-log-coverage
+ * messages_log の最古/最新レコード時刻と、direction 別件数を返す。
+ * 「過去のデータが TTL で消えていないか」「いつから稼働しているか」の確認用。
+ */
+diagnostics.get('/api/admin/diagnostics/messages-log-coverage', async (c) => {
+  try {
+    const range = await c.env.DB
+      .prepare(
+        `SELECT
+            MIN(created_at) AS oldest,
+            MAX(created_at) AS newest,
+            COUNT(*)        AS total
+         FROM messages_log`,
+      )
+      .first<{ oldest: string | null; newest: string | null; total: number }>();
+
+    const byDirection = await c.env.DB
+      .prepare(
+        `SELECT direction, COUNT(*) AS n FROM messages_log GROUP BY direction`,
+      )
+      .all<{ direction: string; n: number }>();
+
+    const recentOutgoingTypes = await c.env.DB
+      .prepare(
+        `SELECT message_type, COUNT(*) AS n
+         FROM messages_log
+         WHERE direction = 'outgoing'
+           AND created_at >= datetime('now', '-30 days')
+         GROUP BY message_type
+         ORDER BY n DESC`,
+      )
+      .all<{ message_type: string; n: number }>();
+
+    const recentSamples = await c.env.DB
+      .prepare(
+        `SELECT id, friend_id, message_type, created_at, substr(content, 1, 120) AS excerpt
+         FROM messages_log
+         WHERE direction = 'outgoing'
+         ORDER BY created_at DESC
+         LIMIT 20`,
+      )
+      .all<{ id: string; friend_id: string; message_type: string; created_at: string; excerpt: string }>();
+
+    return c.json({
+      success: true,
+      data: {
+        range: {
+          oldest: range?.oldest ?? null,
+          newest: range?.newest ?? null,
+          total: range?.total ?? 0,
+        },
+        by_direction: byDirection.results,
+        recent_30d_outgoing_by_type: recentOutgoingTypes.results,
+        recent_outgoing_samples: recentSamples.results,
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/admin/diagnostics/messages-log-coverage error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+/**
  * GET /api/admin/diagnostics/scenarios-overview
  * scenarios と各シナリオの enroll 件数を返す。
  * 「カート」「checkout」を名称に含むシナリオは別軸でも返す。
