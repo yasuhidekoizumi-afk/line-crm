@@ -33,6 +33,9 @@ export default function StaffPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Current user role (from localStorage set at login)
+  const [currentUserRole, setCurrentUserRole] = useState<string>('staff')
+
   // New API key banner
   const [newKey, setNewKey] = useState<NewApiKey | null>(null)
   const [copied, setCopied] = useState(false)
@@ -41,9 +44,11 @@ export default function StaffPage() {
   const [showForm, setShowForm] = useState(false)
   const [formName, setFormName] = useState('')
   const [formEmail, setFormEmail] = useState('')
-  const [formRole, setFormRole] = useState<'admin' | 'staff'>('staff')
+  const [formRole, setFormRole] = useState<'owner' | 'admin' | 'staff'>('staff')
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
+
+  const isOwner = currentUserRole === 'owner'
 
   const loadMembers = async () => {
     setLoading(true)
@@ -64,6 +69,13 @@ export default function StaffPage() {
 
   useEffect(() => {
     loadMembers()
+    // Read current user's role from localStorage (set during login)
+    try {
+      const storedRole = localStorage.getItem('lh_staff_role')
+      if (storedRole) setCurrentUserRole(storedRole)
+    } catch {
+      // localStorage unavailable
+    }
   }, [])
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -71,7 +83,7 @@ export default function StaffPage() {
     setFormLoading(true)
     setFormError('')
     try {
-      const body: { name: string; role: 'admin' | 'staff'; email?: string } = {
+      const body: { name: string; role: 'owner' | 'admin' | 'staff'; email?: string } = {
         name: formName,
         role: formRole,
       }
@@ -135,6 +147,35 @@ export default function StaffPage() {
       await loadMembers()
     } catch {
       setError('削除に失敗しました')
+    }
+  }
+
+  const handlePromoteToOwner = async (member: StaffMember) => {
+    if (!confirm(`${member.name} をオーナーに昇格しますか？\nこの操作は元に戻せます。`)) return
+    try {
+      await fetchApi<ApiResponse<StaffMember>>(`/api/staff/${member.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role: 'owner' }),
+      })
+      await loadMembers()
+    } catch {
+      setError('昇格に失敗しました')
+    }
+  }
+
+  const handleDemoteFromOwner = async (member: StaffMember) => {
+    if (!confirm(`${member.name} を管理者に降格しますか？`)) return
+    try {
+      const res = await fetchApi<ApiResponse<StaffMember>>(`/api/staff/${member.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role: 'admin' }),
+      })
+      if (!res.success) {
+        setError(res.error ?? '降格に失敗しました')
+      }
+      await loadMembers()
+    } catch {
+      setError('降格に失敗しました')
     }
   }
 
@@ -217,11 +258,12 @@ export default function StaffPage() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">ロール *</label>
                 <select
                   value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as 'admin' | 'staff')}
+                  onChange={(e) => setFormRole(e.target.value as 'owner' | 'admin' | 'staff')}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
                 >
                   <option value="staff">スタッフ</option>
                   <option value="admin">管理者</option>
+                  {isOwner && <option value="owner">オーナー</option>}
                 </select>
               </div>
             </div>
@@ -307,8 +349,25 @@ export default function StaffPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      {member.role !== 'owner' && (
+                      {member.role === 'owner' ? (
+                        isOwner && (
+                          <button
+                            onClick={() => handleDemoteFromOwner(member)}
+                            className="px-2.5 py-1 text-xs font-medium text-yellow-600 bg-white border border-yellow-200 rounded hover:bg-yellow-50 transition-colors"
+                          >
+                            管理者に降格
+                          </button>
+                        )
+                      ) : (
                         <>
+                          {isOwner && (
+                            <button
+                              onClick={() => handlePromoteToOwner(member)}
+                              className="px-2.5 py-1 text-xs font-medium text-yellow-600 bg-white border border-yellow-200 rounded hover:bg-yellow-50 transition-colors"
+                            >
+                              オーナーに昇格
+                            </button>
+                          )}
                           <button
                             onClick={() => handleToggleActive(member)}
                             className="px-2.5 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
