@@ -1,6 +1,15 @@
+/**
+ * @deprecated FERMENT フォームに統合済み（migration 030）
+ *
+ * apps/worker/src/ferment/routes/forms.ts + packages/db/src/ferment.ts の
+ * FermentForm / FermentFormSubmission / getFermentFormSubmissions を代わりに使用。
+ *
+ * 削除時期: migration 030 適用後、既存データ確認が取れたら削除
+ */
 import { jstNow } from './utils.js';
 // =============================================================================
 // Forms — Survey / questionnaire system (L社 回答フォーム equivalent)
+// DEPRECATED: 統合先 → ferment.ts (FermentForm / FermentFormSubmission)
 // =============================================================================
 
 export interface Form {

@@ -1,3 +1,21 @@
+/**
+ * @deprecated FERMENT フォームに統合済み
+ *
+ * このルートは apps/worker/src/ferment/routes/forms.ts に統合されました。
+ * 新しいコードは FERMENT 側のフォームを使用してください。
+ *
+ * 削除時期: migration 030 適用後、既存データの移行確認が取れたら削除
+ *
+ * LINE CRM forms → FERMENT forms 対応表:
+ *   GET    /api/forms         → /api/forms (FERMENT)
+ *   GET    /api/forms/:id     → /api/forms/:id (FERMENT)
+ *   POST   /api/forms         → POST /api/forms (FERMENT)
+ *   PUT    /api/forms/:id     → PUT /api/forms/:id (FERMENT)
+ *   DELETE /api/forms/:id     → DELETE /api/forms/:id (FERMENT)
+ *   GET    /api/forms/:id/submissions → GET /api/forms/:id/submissions (FERMENT)
+ *   POST   /api/forms/:id/submit     → POST /forms/:formId/submit (FERMENT, 公開)
+ */
+
 import { Hono } from 'hono';
 import {
   getForms,

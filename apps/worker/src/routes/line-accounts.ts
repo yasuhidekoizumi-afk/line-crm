@@ -109,7 +109,7 @@ lineAccounts.get('/api/line-accounts/:id', async (c) => {
 });
 
 // POST /api/line-accounts - create
-lineAccounts.post('/api/line-accounts', requireRole('owner'), async (c) => {
+lineAccounts.post('/api/line-accounts', requireRole('owner', 'admin'), async (c) => {
   try {
     const body = await c.req.json<{
       channelId: string;
@@ -134,7 +134,7 @@ lineAccounts.post('/api/line-accounts', requireRole('owner'), async (c) => {
 });
 
 // PUT /api/line-accounts/:id - update
-lineAccounts.put('/api/line-accounts/:id', requireRole('owner'), async (c) => {
+lineAccounts.put('/api/line-accounts/:id', requireRole('owner', 'admin'), async (c) => {
   try {
     const id = c.req.param('id')!;
     const body = await c.req.json<{
@@ -162,7 +162,7 @@ lineAccounts.put('/api/line-accounts/:id', requireRole('owner'), async (c) => {
 });
 
 // DELETE /api/line-accounts/:id - delete
-lineAccounts.delete('/api/line-accounts/:id', requireRole('owner'), async (c) => {
+lineAccounts.delete('/api/line-accounts/:id', requireRole('owner', 'admin'), async (c) => {
   try {
     await deleteLineAccount(c.env.DB, c.req.param('id')!);
     return c.json({ success: true, data: null });
