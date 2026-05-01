@@ -678,11 +678,56 @@ liffRoutes.post('/api/liff/link', async (c) => {
   }
 });
 
+/**
+ * Shopify Liquid 側で発行された HMAC 署名を検証する。
+ *
+ * Liquid 側（顧客アカウントページ）で生成する文字列:
+ *   message  = "<shopifyCustomerId>:<expires>"
+ *   sig      = HMAC-SHA256(LINK_SHOPIFY_SIGNING_SECRET, message) を hex で
+ *   LIFF URL = .../?page=link-shopify&shopifyCustomerId=...&expires=<UNIX秒>&sig=<hex>
+ *
+ * 顧客アカウントページは Shopify ログイン必須で、{{customer.id}} はその
+ * ログイン中のお客様自身に紐付くため、この HMAC が検証できれば本人確認完了。
+ */
+async function verifyShopifyLinkSignature(
+  secret: string,
+  shopifyCustomerId: string,
+  expires: string,
+  sigHex: string,
+): Promise<boolean> {
+  const expiresNum = Number(expires);
+  if (!Number.isFinite(expiresNum)) return false;
+  // 5 分以内かつ未来日時でないこと
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (expiresNum < nowSec) return false;
+  if (expiresNum > nowSec + 60 * 30) return false; // 30 分以上未来は弾く（時計ずれ吸収）
+
+  const message = `${shopifyCustomerId}:${expires}`;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+  const expected = Array.from(new Uint8Array(sigBuf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  if (expected.length !== sigHex.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ sigHex.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 // POST /api/liff/link-shopify — LIFFからLINEとShopify顧客を紐付け＋300ptボーナス付与
 liffRoutes.post('/api/liff/link-shopify', async (c) => {
   try {
-    // 緊急停止: shopifyCustomerId のクライアント自己申告のみで紐付けされる脆弱性があり、
-    // Shopify 顧客アカウント側での所有確認が実装されるまで一時停止可能。
+    // 緊急停止: メンテナンスや事故時に LINK_SHOPIFY_DISABLED=1 で 503 にできる。
     if (c.env.LINK_SHOPIFY_DISABLED === '1') {
       return c.json({
         success: false,
@@ -690,12 +735,41 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       }, 503);
     }
 
-    const body = await c.req.json<{ accessToken?: string; idToken?: string; shopifyCustomerId: string }>();
+    const body = await c.req.json<{
+      accessToken?: string;
+      idToken?: string;
+      shopifyCustomerId: string;
+      expires?: string;
+      sig?: string;
+    }>();
     if (!body.shopifyCustomerId) {
       return c.json({ success: false, error: 'shopifyCustomerId は必須です' }, 400);
     }
     if (!body.accessToken && !body.idToken) {
       return c.json({ success: false, error: 'accessToken または idToken は必須です' }, 400);
+    }
+
+    // Shopify 顧客所有確認: Liquid 側で発行した HMAC を検証する。
+    // LINK_SHOPIFY_SIGNING_SECRET が未設定 (= Liquid 連携前) なら 503。
+    const signingSecret = (c.env as { LINK_SHOPIFY_SIGNING_SECRET?: string }).LINK_SHOPIFY_SIGNING_SECRET;
+    if (!signingSecret) {
+      return c.json({
+        success: false,
+        error: 'LINK_SHOPIFY_SIGNING_SECRET が未設定です。サーバ管理者にお問い合わせください。',
+      }, 503);
+    }
+    if (!body.expires || !body.sig) {
+      return c.json({
+        success: false,
+        error: 'expires と sig は必須です。Shopify 顧客アカウントページから開き直してください。',
+      }, 400);
+    }
+    const sigOk = await verifyShopifyLinkSignature(signingSecret, body.shopifyCustomerId, body.expires, body.sig);
+    if (!sigOk) {
+      return c.json({
+        success: false,
+        error: '署名が無効または期限切れです。Shopify 顧客アカウントページから開き直してください。',
+      }, 401);
     }
 
     // 許可チャネルID一覧（デフォルト + DB保存分）
