@@ -90,15 +90,34 @@ interface CartMetadata {
   type?: 'CHECKOUT' | 'CART';
 }
 
+/**
+ * Shopify の abandoned_checkout_url（/checkouts/c/<token>/recover）を、
+ * 第三者が踏んでも個人情報が露出しない安全な遷移先に書き換える。
+ *
+ * 元の URL は誰でも踏めばその顧客のカート/checkout を引き継いでしまうため、
+ * LINE で配信する際は **ストアのカート画面** に向けて、本人が改めて
+ * Shopify にログイン or カートに商品を入れ直す動線にする。
+ */
+function safeStoreCartUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
+  try {
+    const u = new URL(rawUrl);
+    return `${u.origin}/cart`;
+  } catch {
+    return '';
+  }
+}
+
 export function buildCartFlexMessage(metadataJson: string): Message {
   const meta: CartMetadata = JSON.parse(metadataJson);
   const items = meta.items ?? [];
   const firstItem = items[0];
-  const checkoutUrl = meta.checkout_url ?? '';
+  const rawCheckoutUrl = meta.checkout_url ?? '';
+  const checkoutUrl = safeStoreCartUrl(rawCheckoutUrl);
   const type = meta.type ?? 'CHECKOUT';
 
   const titleText = type === 'CART' ? 'カートに商品が残っています' : 'チェックアウトが未完了です';
-  const buttonLabel = type === 'CART' ? 'カートを見る' : '購入を完了する';
+  const buttonLabel = type === 'CART' ? 'カートを見る' : 'ストアを開く';
 
   const bodyContents: object[] = [];
 
