@@ -16,6 +16,12 @@ import type { FermentEnv } from '../types.js';
 export const cartWebhookRoutes = new Hono<FermentEnv>();
 
 cartWebhookRoutes.post('/cart', async (c) => {
+  // 緊急停止: 認証未実装かつ過去の誤紐付けデータが残るため、
+  // 認証実装と影響範囲調査が完了するまで受信を停止できるようにする。
+  if (c.env.CART_WEBHOOK_DISABLED === '1') {
+    return c.json({ success: false, error: 'Cart webhook is currently disabled' }, 503);
+  }
+
   const body = await c.req.json<{
     id?: string;
     token?: string;
@@ -58,6 +64,10 @@ cartWebhookRoutes.post('/cart', async (c) => {
 });
 
 cartWebhookRoutes.post('/cart/recovered', async (c) => {
+  if (c.env.CART_WEBHOOK_DISABLED === '1') {
+    return c.json({ success: false, error: 'Cart webhook is currently disabled' }, 503);
+  }
+
   const body = await c.req.json<{ id?: string; token?: string }>().catch(() => ({}));
   const cartId = String(body.id ?? body.token ?? '');
   if (!cartId) return c.json({ success: false }, 400);
