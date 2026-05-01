@@ -550,6 +550,33 @@ export const api = {
     regenerateKey: (id: string) =>
       fetchApi<ApiResponse<{ apiKey: string }>>(`/api/staff/${id}/regenerate-key`, { method: 'POST' }),
   },
+  images: {
+    upload: async (file: File): Promise<{ id: string; key: string; url: string; mimeType: string; size: number }> => {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const dataUrl = reader.result as string
+          resolve(dataUrl.replace(/^data:[^;]+;base64,/, ''))
+        }
+        reader.onerror = () => reject(new Error('Failed to read file'))
+        reader.readAsDataURL(file)
+      })
+      const res = await fetch(`${API_URL}/api/images`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getApiKey()}`,
+        },
+        body: JSON.stringify({
+          data: base64,
+          mimeType: file.type || 'image/png',
+          filename: file.name || undefined,
+        }),
+      })
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+      return res.json()
+    },
+  },
   richMenus: {
     list: () =>
       fetchApi<ApiResponse<RichMenuPayload[]>>('/api/rich-menus'),

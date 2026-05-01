@@ -4,6 +4,9 @@ import { useState } from 'react'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast } from '@/lib/api'
 import FlexPreviewComponent from '@/components/flex-preview'
+import ImageUploader from '@/components/messages/image-uploader'
+import FlexTemplates from '@/components/messages/flex-templates'
+import FlexEditor from '@/components/messages/flex-editor'
 import { useAccount } from '@/contexts/account-context'
 
 interface BroadcastFormProps {
@@ -64,8 +67,6 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft 
         targetType: form.targetType,
         targetTagId: form.targetType === 'tag' ? form.targetTagId || null : null,
         status: 'draft',
-        // datetime-local returns YYYY-MM-DDTHH:mm in JST wall-clock time
-        // Append +09:00 so new Date() parses correctly for epoch comparisons
         scheduledAt: form.sendNow || !form.scheduledAt
           ? null
           : form.scheduledAt + ':00.000+09:00',
@@ -127,70 +128,107 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft 
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">
             メッセージ内容 <span className="text-red-500">*</span>
-            {(form.messageType === 'flex' || form.messageType === 'image') && (
-              <span className="ml-1 text-gray-400">(JSON形式)</span>
-            )}
           </label>
 
-          {/* Image helper: URL inputs that auto-generate the required LINE image JSON */}
+          {/* ── Text type ───────────────────────────────────────────── */}
+          {form.messageType === 'text' && (
+            <textarea
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
+              rows={4}
+              placeholder="配信するメッセージを入力..."
+              value={form.messageContent}
+              onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
+            />
+          )}
+
+          {/* ── Image type: uploader + URL inputs ───────────────────── */}
           {form.messageType === 'image' && (() => {
             let parsed: { originalContentUrl?: string; previewImageUrl?: string } = {}
             try { parsed = JSON.parse(form.messageContent) } catch { /* not yet valid */ }
+
+            const setImageUrl = (url: string) => {
+              setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: url, previewImageUrl: url }) })
+            }
+
             return (
-              <div className="space-y-2 mb-2">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">元画像URL (originalContentUrl)</label>
-                  <input
-                    type="url"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="https://example.com/image.png"
-                    value={parsed.originalContentUrl ?? ''}
-                    onChange={(e) => {
-                      const orig = e.target.value
-                      const prev = parsed.previewImageUrl ?? orig
-                      setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: orig, previewImageUrl: prev }) })
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">プレビュー画像URL (previewImageUrl)</label>
-                  <input
-                    type="url"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="https://example.com/preview.png (空欄で元画像と同じ)"
-                    value={parsed.previewImageUrl ?? ''}
-                    onChange={(e) => {
-                      const prev = e.target.value
-                      setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: parsed.originalContentUrl ?? '', previewImageUrl: prev }) })
-                    }}
-                  />
+              <div className="space-y-3 mb-3">
+                <ImageUploader onUploaded={setImageUrl} />
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">元画像URL (originalContentUrl)</label>
+                    <input
+                      type="url"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="https://example.com/image.png"
+                      value={parsed.originalContentUrl ?? ''}
+                      onChange={(e) => {
+                        const orig = e.target.value
+                        const prev = parsed.previewImageUrl ?? orig
+                        setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: orig, previewImageUrl: prev }) })
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">プレビュー画像URL (previewImageUrl)</label>
+                    <input
+                      type="url"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="https://example.com/preview.png (空欄で元画像と同じ)"
+                      value={parsed.previewImageUrl ?? ''}
+                      onChange={(e) => {
+                        const prev = e.target.value
+                        setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: parsed.originalContentUrl ?? '', previewImageUrl: prev }) })
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             )
           })()}
 
-          <textarea
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
-            rows={form.messageType === 'flex' ? 8 : form.messageType === 'image' ? 3 : 4}
-            placeholder={
-              form.messageType === 'text'
-                ? '配信するメッセージを入力...'
-                : form.messageType === 'image'
-                ? '{"originalContentUrl":"...","previewImageUrl":"..."}'
-                : '{"type":"bubble","body":{...}}'
-            }
-            value={form.messageContent}
-            onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
-            style={{ fontFamily: form.messageType !== 'text' ? 'monospace' : 'inherit' }}
-          />
-          {form.messageType === 'image' && (
-            <p className="text-xs text-gray-400 mt-1">上のURLフォームか、直接JSONを編集できます</p>
+          {/* ── Flex type: template selector + visual editor ────────── */}
+          {form.messageType === 'flex' && (
+            <div className="space-y-3 mb-3">
+              {!form.messageContent.trim() && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">テンプレートを選択するか、JSONを直接編集してください</p>
+                  <FlexTemplates onSelect={(json) => setForm({ ...form, messageContent: json })} />
+                </div>
+              )}
+              {form.messageContent.trim() && (
+                <FlexEditor value={form.messageContent} onChange={(json) => setForm({ ...form, messageContent: json })} />
+              )}
+              {form.messageContent.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, messageContent: '' })}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline"
+                >
+                  テンプレートを選び直す
+                </button>
+              )}
+            </div>
           )}
+
+          {/* ── Image advanced: collapsible JSON editor ─────────────── */}
+          {form.messageType === 'image' && form.messageContent && (
+            <details className="border border-gray-200 rounded-lg">
+              <summary className="text-xs text-gray-400 px-3 py-2 cursor-pointer hover:bg-gray-50">JSONを直接編集</summary>
+              <textarea
+                className="w-full border-t border-gray-200 px-3 py-2 text-xs font-mono focus:outline-none resize-y"
+                rows={3}
+                value={form.messageContent}
+                onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
+              />
+            </details>
+          )}
+
+          {/* ── Flex / Image fallback preview ───────────────────────── */}
           {form.messageType === 'flex' && form.messageContent && (() => {
             try { JSON.parse(form.messageContent); return true } catch { return false }
           })() && (
             <div className="mt-3">
-              <p className="text-xs font-medium text-gray-500 mb-2">プレビュー</p>
+              <p className="text-xs font-medium text-gray-500 mb-2">プレビュー (簡易)</p>
               <FlexPreviewComponent content={form.messageContent} maxWidth={300} />
             </div>
           )}

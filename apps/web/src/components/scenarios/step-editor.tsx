@@ -2,6 +2,10 @@
 
 import { useState } from 'react'
 import type { ScenarioStep, MessageType } from '@line-crm/shared'
+import FlexPreviewComponent from '@/components/flex-preview'
+import ImageUploader from '@/components/messages/image-uploader'
+import FlexTemplates from '@/components/messages/flex-templates'
+import FlexEditor from '@/components/messages/flex-editor'
 
 interface StepEditorProps {
   step?: ScenarioStep
@@ -125,7 +129,12 @@ export default function StepEditor({ step, stepOrder, onSave, onCancel }: StepEd
             <button
               key={type}
               type="button"
-              onClick={() => setMessageType(type)}
+              onClick={() => {
+                setMessageType(type)
+                if (type === 'image' || type === 'flex') {
+                  // Don't clear content on switch — keep it for round-trip
+                }
+              }}
               className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
                 messageType === type
                   ? 'border-green-500 text-green-700 bg-green-50'
@@ -142,64 +151,109 @@ export default function StepEditor({ step, stepOrder, onSave, onCancel }: StepEd
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-2">
           メッセージ内容
-          {(messageType === 'flex' || messageType === 'image') && (
-            <span className="ml-1 text-gray-400">(JSON形式)</span>
-          )}
         </label>
 
-        {/* Image helper: URL inputs that auto-generate the required LINE image JSON */}
+        {/* ── Text type ─────────────────────────────────────────────── */}
+        {messageType === 'text' && (
+          <textarea
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
+            rows={4}
+            placeholder="メッセージテキストを入力..."
+            value={messageContent}
+            onChange={(e) => setMessageContent(e.target.value)}
+          />
+        )}
+
+        {/* ── Image type: uploader + URL inputs ─────────────────────── */}
         {messageType === 'image' && (() => {
           let parsed: { originalContentUrl?: string; previewImageUrl?: string } = {}
           try { parsed = JSON.parse(messageContent) } catch { /* not yet valid */ }
+
+          const setImageUrl = (url: string) => {
+            setMessageContent(JSON.stringify({ originalContentUrl: url, previewImageUrl: url }))
+          }
+
           return (
-            <div className="space-y-2 mb-2">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">元画像URL (originalContentUrl)</label>
-                <input
-                  type="url"
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="https://example.com/image.png"
-                  value={parsed.originalContentUrl ?? ''}
-                  onChange={(e) => {
-                    const orig = e.target.value
-                    const prev = parsed.previewImageUrl ?? orig
-                    setMessageContent(JSON.stringify({ originalContentUrl: orig, previewImageUrl: prev }))
-                  }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">プレビュー画像URL (previewImageUrl)</label>
-                <input
-                  type="url"
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="https://example.com/preview.png (空欄で元画像と同じ)"
-                  value={parsed.previewImageUrl ?? ''}
-                  onChange={(e) => {
-                    const prev = e.target.value
-                    setMessageContent(JSON.stringify({ originalContentUrl: parsed.originalContentUrl ?? '', previewImageUrl: prev }))
-                  }}
-                />
+            <div className="space-y-3 mb-3">
+              <ImageUploader onUploaded={setImageUrl} />
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">元画像URL (originalContentUrl)</label>
+                  <input
+                    type="url"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="https://example.com/image.png"
+                    value={parsed.originalContentUrl ?? ''}
+                    onChange={(e) => {
+                      const orig = e.target.value
+                      const prev = parsed.previewImageUrl ?? orig
+                      setMessageContent(JSON.stringify({ originalContentUrl: orig, previewImageUrl: prev }))
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">プレビュー画像URL (previewImageUrl)</label>
+                  <input
+                    type="url"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="https://example.com/preview.png (空欄で元画像と同じ)"
+                    value={parsed.previewImageUrl ?? ''}
+                    onChange={(e) => {
+                      const prev = e.target.value
+                      setMessageContent(JSON.stringify({ originalContentUrl: parsed.originalContentUrl ?? '', previewImageUrl: prev }))
+                    }}
+                  />
+                </div>
               </div>
             </div>
           )
         })()}
 
-        <textarea
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
-          rows={messageType === 'flex' ? 8 : messageType === 'image' ? 3 : 4}
-          placeholder={
-            messageType === 'text'
-              ? 'メッセージテキストを入力...'
-              : messageType === 'image'
-              ? '{"originalContentUrl":"...","previewImageUrl":"..."}'
-              : '{"type":"bubble","body":{...}}'
-          }
-          value={messageContent}
-          onChange={(e) => setMessageContent(e.target.value)}
-          style={{ fontFamily: messageType !== 'text' ? 'monospace' : 'inherit' }}
-        />
-        {messageType === 'image' && (
-          <p className="text-xs text-gray-400 mt-1">上のURLフォームか、直接JSONを編集できます</p>
+        {/* ── Flex type: template selector + visual editor ──────────── */}
+        {messageType === 'flex' && (
+          <div className="space-y-3 mb-3">
+            {!messageContent.trim() && (
+              <div>
+                <p className="text-xs text-gray-500 mb-2">テンプレートを選択するか、JSONを直接編集してください</p>
+                <FlexTemplates onSelect={(json) => setMessageContent(json)} />
+              </div>
+            )}
+            {messageContent.trim() && (
+              <FlexEditor value={messageContent} onChange={(json) => setMessageContent(json)} />
+            )}
+            {messageContent.trim() && (
+              <button
+                type="button"
+                onClick={() => setMessageContent('')}
+                className="text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                テンプレートを選び直す
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── Image advanced: collapsible JSON editor ───────────────── */}
+        {messageType === 'image' && messageContent && (
+          <details className="border border-gray-200 rounded-lg">
+            <summary className="text-xs text-gray-400 px-3 py-2 cursor-pointer hover:bg-gray-50">JSONを直接編集</summary>
+            <textarea
+              className="w-full border-t border-gray-200 px-3 py-2 text-xs font-mono focus:outline-none resize-y"
+              rows={3}
+              value={messageContent}
+              onChange={(e) => setMessageContent(e.target.value)}
+            />
+          </details>
+        )}
+
+        {/* ── Flex preview fallback ─────────────────────────────────── */}
+        {messageType === 'flex' && messageContent && (() => {
+          try { JSON.parse(messageContent); return true } catch { return false }
+        })() && (
+          <div className="mt-3">
+            <p className="text-xs font-medium text-gray-500 mb-2">プレビュー (簡易)</p>
+            <FlexPreviewComponent content={messageContent} maxWidth={300} />
+          </div>
         )}
       </div>
 
