@@ -30,7 +30,6 @@ import { chats } from './routes/chats.js';
 import { notifications } from './routes/notifications.js';
 import { stripe } from './routes/stripe.js';
 import { health } from './routes/health.js';
-import { diagnostics } from './routes/diagnostics.js';
 import { automations } from './routes/automations.js';
 import { richMenus } from './routes/rich-menus.js';
 import { trackedLinks } from './routes/tracked-links.js';
@@ -122,8 +121,6 @@ export type Env = {
     FERMENT_HMAC_SECRET?: string;
     // 緊急停止フラグ: '1' で /api/liff/link-shopify を 503 にする
     LINK_SHOPIFY_DISABLED?: string;
-    // インシデント調査用の診断エンドポイント認証トークン
-    DIAG_TOKEN?: string;
     // FERMENT 追加 vars
     FERMENT_FROM_EMAIL_JP?: string;
     FERMENT_FROM_EMAIL_US?: string;
@@ -180,7 +177,6 @@ app.route('/', chats);
 app.route('/', notifications);
 app.route('/', stripe);
 app.route('/', health);
-app.route('/', diagnostics);
 app.route('/', automations);
 app.route('/', richMenus);
 app.route('/', trackedLinks);

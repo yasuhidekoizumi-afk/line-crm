@@ -37,8 +37,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/email/optin-confirm' ||                // FERMENT 二重オプトイン確認
     path === '/api/ferment/phase5/double-optin/confirm' || // FERMENT 二重オプトイン確認(直接)
     path === '/api/ferment/phase5/gdpr/request' ||   // FERMENT GDPR削除リクエスト（公開）
-    path === '/webhooks/gmail' ||                    // CS Phase 1: Gmail Pub/Sub Push通知
-    path.startsWith('/api/admin/diagnostics/')       // インシデント調査用（DIAG_TOKEN ヘッダで内部認証）
+    path === '/webhooks/gmail'                       // CS Phase 1: Gmail Pub/Sub Push通知
   ) {
     return next();
   }
