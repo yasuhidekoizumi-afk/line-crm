@@ -142,4 +142,129 @@ diagnostics.get('/api/admin/diagnostics/cart-state-stats', async (c) => {
   }
 });
 
+/**
+ * GET /api/admin/diagnostics/reminders-overview
+ * リマインダ全体像。各 reminder ごとの enroll 件数 / 直近の配信件数を返す。
+ */
+diagnostics.get('/api/admin/diagnostics/reminders-overview', async (c) => {
+  try {
+    const reminders = await c.env.DB
+      .prepare(
+        `SELECT r.id, r.name, r.is_active,
+                (SELECT COUNT(*) FROM friend_reminders fr WHERE fr.reminder_id = r.id) AS enrolled_total,
+                (SELECT COUNT(*) FROM friend_reminders fr WHERE fr.reminder_id = r.id AND fr.status = 'active')    AS enrolled_active,
+                (SELECT COUNT(*) FROM friend_reminders fr WHERE fr.reminder_id = r.id AND fr.status = 'completed') AS enrolled_completed,
+                (SELECT COUNT(*) FROM friend_reminders fr WHERE fr.reminder_id = r.id AND fr.status = 'cancelled') AS enrolled_cancelled
+         FROM reminders r
+         ORDER BY r.created_at DESC`,
+      )
+      .all<{
+        id: string;
+        name: string;
+        is_active: number;
+        enrolled_total: number;
+        enrolled_active: number;
+        enrolled_completed: number;
+        enrolled_cancelled: number;
+      }>();
+
+    return c.json({
+      success: true,
+      data: {
+        reminders: reminders.results,
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/admin/diagnostics/reminders-overview error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * GET /api/admin/diagnostics/cart-message-history
+ * messages_log から「カート」「チェックアウト」「checkout_url」を含む outgoing
+ * メッセージの直近 50 件と総件数を返す。実際にどれだけカート系通知が
+ * LINE に飛んだかを確認する用。
+ */
+diagnostics.get('/api/admin/diagnostics/cart-message-history', async (c) => {
+  try {
+    const totalRow = await c.env.DB
+      .prepare(
+        `SELECT COUNT(*) AS n FROM messages_log
+         WHERE direction = 'outgoing'
+           AND (content LIKE '%カートに商品が残っています%'
+                OR content LIKE '%チェックアウトが未完了%'
+                OR content LIKE '%checkouts/c/%'
+                OR content LIKE '%abandoned_checkout_url%')`,
+      )
+      .first<{ n: number }>();
+
+    const recent = await c.env.DB
+      .prepare(
+        `SELECT m.id, m.friend_id, m.message_type, m.created_at,
+                f.line_user_id, f.display_name,
+                substr(m.content, 1, 200) AS content_excerpt
+         FROM messages_log m
+         LEFT JOIN friends f ON f.id = m.friend_id
+         WHERE m.direction = 'outgoing'
+           AND (m.content LIKE '%カートに商品が残っています%'
+                OR m.content LIKE '%チェックアウトが未完了%'
+                OR m.content LIKE '%checkouts/c/%'
+                OR m.content LIKE '%abandoned_checkout_url%')
+         ORDER BY m.created_at DESC
+         LIMIT 50`,
+      )
+      .all<{
+        id: string;
+        friend_id: string;
+        message_type: string;
+        created_at: string;
+        line_user_id: string | null;
+        display_name: string | null;
+        content_excerpt: string;
+      }>();
+
+    return c.json({
+      success: true,
+      data: {
+        total_cart_messages: totalRow?.n ?? 0,
+        recent: recent.results,
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/admin/diagnostics/cart-message-history error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * GET /api/admin/diagnostics/scenarios-overview
+ * scenarios と各シナリオの enroll 件数を返す。
+ * 「カート」「checkout」を名称に含むシナリオは別軸でも返す。
+ */
+diagnostics.get('/api/admin/diagnostics/scenarios-overview', async (c) => {
+  try {
+    const all = await c.env.DB
+      .prepare(
+        `SELECT s.id, s.name, s.is_active,
+                (SELECT COUNT(*) FROM friend_scenarios fs WHERE fs.scenario_id = s.id) AS enrolled_total,
+                (SELECT COUNT(*) FROM friend_scenarios fs WHERE fs.scenario_id = s.id AND fs.status = 'active') AS enrolled_active
+         FROM scenarios s
+         ORDER BY s.created_at DESC`,
+      )
+      .all<{ id: string; name: string; is_active: number; enrolled_total: number; enrolled_active: number }>()
+      .catch(() => ({ results: [] as { id: string; name: string; is_active: number; enrolled_total: number; enrolled_active: number }[] }));
+
+    return c.json({
+      success: true,
+      data: {
+        scenarios: all.results,
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/admin/diagnostics/scenarios-overview error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 export { diagnostics };
