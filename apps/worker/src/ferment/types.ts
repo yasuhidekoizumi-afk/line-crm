@@ -30,6 +30,8 @@ export type FermentEnv = {
     SLACK_WEBHOOK_URL?: string;
     FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
     FERMENT_HMAC_SECRET?: string;
+    // Shopify Webhook の HMAC SHA256 検証用シークレット
+    SHOPIFY_WEBHOOK_SECRET?: string;
     // 緊急停止フラグ: '1' で /webhook/shopify/cart 系を 503 にする
     CART_WEBHOOK_DISABLED?: string;
     // FERMENT 追加 vars（wrangler.toml の [vars]）
