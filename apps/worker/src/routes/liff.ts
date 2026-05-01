@@ -681,6 +681,15 @@ liffRoutes.post('/api/liff/link', async (c) => {
 // POST /api/liff/link-shopify — LIFFからLINEとShopify顧客を紐付け＋300ptボーナス付与
 liffRoutes.post('/api/liff/link-shopify', async (c) => {
   try {
+    // 緊急停止: shopifyCustomerId のクライアント自己申告のみで紐付けされる脆弱性があり、
+    // Shopify 顧客アカウント側での所有確認が実装されるまで一時停止可能。
+    if (c.env.LINK_SHOPIFY_DISABLED === '1') {
+      return c.json({
+        success: false,
+        error: 'LINEとShopifyの紐付け機能は現在メンテナンス中です。再開までしばらくお待ちください。',
+      }, 503);
+    }
+
     const body = await c.req.json<{ accessToken?: string; idToken?: string; shopifyCustomerId: string }>();
     if (!body.shopifyCustomerId) {
       return c.json({ success: false, error: 'shopifyCustomerId は必須です' }, 400);
