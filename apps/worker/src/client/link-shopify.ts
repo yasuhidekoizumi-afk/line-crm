@@ -2,13 +2,21 @@
  * LIFF Shopify連携ページ
  *
  * 遷移元: Shopify 顧客アカウントページの「LINE連携する」ボタン
- *   https://liff.line.me/<LIFF_ID>?page=link-shopify&shopifyCustomerId={{customer.id}}
+ *   https://liff.line.me/<LIFF_ID>?page=link-shopify
+ *     &shopifyCustomerId={{customer.id}}
+ *     &expires=<UNIX秒>
+ *     &sig=<HMAC-SHA256(LINK_SHOPIFY_SIGNING_SECRET, "{customer.id}:{expires}")>
+ *
+ * Shopify 顧客アカウントページは Shopify ログイン必須なので、ここで
+ * 生成された sig はログイン中の顧客本人のものになる。worker 側で sig を
+ * 検証することで「shopifyCustomerId の自己申告」を排除できる。
  *
  * 処理:
- *   1. URLクエリから shopifyCustomerId を取得
+ *   1. URLクエリから shopifyCustomerId / expires / sig を取得
  *   2. liff.getAccessToken() で LINE アクセストークンを取得
  *      （IDトークンはLIFFチャネルの openid スコープに依存するため避ける）
- *   3. POST /api/liff/link-shopify に送信 → サーバーで /v2/profile で検証 → 紐付け + 300ptボーナス + 過去注文backfill
+ *   3. POST /api/liff/link-shopify に送信 → サーバーで sig 検証 + LINE
+ *      アクセストークン検証 → 紐付け + 300ptボーナス + 過去注文 backfill
  *   4. 結果を表示
  */
 
@@ -147,9 +155,17 @@ export async function initLinkShopify(): Promise<void> {
   try {
     const params = new URLSearchParams(window.location.search);
     const shopifyCustomerId = params.get('shopifyCustomerId');
+    const expires = params.get('expires');
+    const sig = params.get('sig');
     if (!shopifyCustomerId) {
       showError('Shopify顧客IDが指定されていません。Shopifyのマイページからアクセスしてください。', {
         stage: 'missingCustomerId',
+      });
+      return;
+    }
+    if (!expires || !sig) {
+      showError('リンクが正しく生成されていません。Shopifyのマイページから開き直してください。', {
+        stage: 'missingSignature',
       });
       return;
     }
@@ -176,7 +192,7 @@ export async function initLinkShopify(): Promise<void> {
       res = await fetch('/api/liff/link-shopify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken, shopifyCustomerId }),
+        body: JSON.stringify({ accessToken, shopifyCustomerId, expires, sig }),
       });
       rawBody = await res.text();
     } catch (netErr) {

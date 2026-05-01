@@ -121,6 +121,8 @@ export type Env = {
     FERMENT_HMAC_SECRET?: string;
     // 緊急停止フラグ: '1' で /api/liff/link-shopify を 503 にする
     LINK_SHOPIFY_DISABLED?: string;
+    // Shopify Liquid 側で HMAC 署名生成に使う共有シークレット
+    LINK_SHOPIFY_SIGNING_SECRET?: string;
     // FERMENT 追加 vars
     FERMENT_FROM_EMAIL_JP?: string;
     FERMENT_FROM_EMAIL_US?: string;
