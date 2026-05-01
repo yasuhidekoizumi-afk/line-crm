@@ -119,6 +119,8 @@ export type Env = {
     SLACK_WEBHOOK_URL?: string;
     FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
     FERMENT_HMAC_SECRET?: string;
+    // 緊急停止フラグ: '1' で /api/liff/link-shopify を 503 にする
+    LINK_SHOPIFY_DISABLED?: string;
     // FERMENT 追加 vars
     FERMENT_FROM_EMAIL_JP?: string;
     FERMENT_FROM_EMAIL_US?: string;
