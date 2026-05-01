@@ -88,7 +88,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft 
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
       <h2 className="text-sm font-semibold text-gray-800 mb-5">新規配信を作成</h2>
 
-      <div className="space-y-4 max-w-lg">
+      <div className={`space-y-4 ${form.messageType === 'flex' ? 'max-w-3xl' : 'max-w-lg'}`}>
         {/* Title */}
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">
