@@ -4,21 +4,39 @@ import type { Env } from '../index.js';
 /**
  * セキュリティインシデント調査用の診断エンドポイント。
  *
- * 認証は authMiddleware (Bearer) を通過するため、API_KEY または
- * staff_members.api_key を持つ者のみアクセス可能。
+ * 認証: X-Diag-Token ヘッダ または ?diag_token クエリで env.DIAG_TOKEN と
+ * 一致する場合のみ通す。authMiddleware からは skip リスト経由で外している
+ * （インシデント対応専用の独立した認証経路を確保するため）。
  *
  * 提供する情報:
  *  - GET /api/admin/diagnostics/shopify-link-collisions
  *      LINE と Shopify 顧客の紐付けが「異常」なレコードを抽出する。
- *      具体的には:
- *        a. 同一 shopify_customer_id に複数 friend_id が紐付いているもの
- *        b. shopify_customer_id が空の友達のうち、過去にトランザクションで
- *           付与されている (= 紐付けが消えた疑い) もの
  *  - GET /api/admin/diagnostics/cart-state-stats
  *      customer_cart_states テーブルの直近件数・誤受信件数を返す。
  */
 
 const diagnostics = new Hono<Env>();
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+diagnostics.use('/api/admin/diagnostics/*', async (c, next) => {
+  const expected = c.env.DIAG_TOKEN;
+  if (!expected) {
+    return c.json({ success: false, error: 'DIAG_TOKEN not configured' }, 503);
+  }
+  const headerToken = c.req.header('X-Diag-Token') ?? c.req.header('x-diag-token');
+  const queryToken = c.req.query('diag_token');
+  const provided = headerToken ?? queryToken ?? '';
+  if (!provided || !constantTimeEqual(provided, expected)) {
+    return c.json({ success: false, error: 'Unauthorized' }, 401);
+  }
+  return next();
+});
 
 interface CollisionRow {
   shopify_customer_id: string;
