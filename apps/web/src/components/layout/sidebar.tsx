@@ -318,7 +318,7 @@ export default function Sidebar() {
               </div>
             )}
             {section.items.filter((item) => {
-              if (item.href === '/staff' && staffRole !== 'owner') return false
+              if (item.href === '/staff' && staffRole !== 'owner' && staffRole !== 'admin') return false
               if (item.href === '/accounts' && staffRole === 'staff') return false
               return true
             }).map((item) => {
