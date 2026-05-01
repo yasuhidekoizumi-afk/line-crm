@@ -214,9 +214,9 @@ export default function FlexTemplates({ onSelect }: FlexTemplatesProps) {
                   : 'border-gray-200 hover:border-gray-300 bg-white hover:shadow-sm'
               }`}
             >
-              {/* Visual preview */}
-              <div className="bg-gray-50 p-2 flex items-center justify-center min-h-[100px]">
-                <div className="scale-[0.35] origin-top-left transform-gpu" style={{ width: 240 }}>
+              {/* Visual preview — scale-down trick: outer clips to rendered size, inner scales from top-left */}
+              <div className="bg-gray-50 flex items-start justify-center overflow-hidden" style={{ height: 84 }}>
+                <div style={{ transform: 'scale(0.35)', transformOrigin: 'top left', width: 240, flexShrink: 0 }}>
                   <FlexPreviewComponent content={tpl.json} maxWidth={240} />
                 </div>
               </div>
