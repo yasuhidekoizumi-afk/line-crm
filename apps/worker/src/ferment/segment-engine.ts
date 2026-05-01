@@ -69,6 +69,8 @@ const ALLOWED_FIELDS = new Set([
   // 派生フィールド
   'days_since_last_order',
   'days_since_created',
+  // LINE CRM 連携
+  'friend_tag',
 ]);
 
 // ============================================================
@@ -92,6 +94,35 @@ function leafToSql(cond: SegmentLeafCondition): QueryPart {
   }
 
   // 派生フィールドの変換
+  if (field === 'friend_tag') {
+    // LINE CRM の friend_tags をサブクエリで参照
+    const tagName = String(value ?? '');
+    switch (op) {
+      case '=':
+        return {
+          sql: `EXISTS (
+            SELECT 1 FROM friend_tags ft
+            JOIN tags t ON t.id = ft.tag_id
+            JOIN friends f ON f.id = ft.friend_id
+            WHERE f.line_user_id = c.line_user_id AND t.name = ?
+          )`,
+          bindings: [tagName],
+        };
+      case '!=':
+        return {
+          sql: `NOT EXISTS (
+            SELECT 1 FROM friend_tags ft
+            JOIN tags t ON t.id = ft.tag_id
+            JOIN friends f ON f.id = ft.friend_id
+            WHERE f.line_user_id = c.line_user_id AND t.name = ?
+          )`,
+          bindings: [tagName],
+        };
+      default:
+        throw new Error(`friend_tag で未対応の演算子: ${op}（= または != のみ対応）`);
+    }
+  }
+
   const sqlField =
     field === 'days_since_last_order'
       ? `CAST((julianday('now') - julianday(c.last_order_at)) AS INTEGER)`

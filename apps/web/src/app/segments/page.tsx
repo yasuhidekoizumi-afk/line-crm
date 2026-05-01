@@ -206,9 +206,11 @@ export default function SegmentsPage() {
               {rulesError && <p className="text-xs text-red-500 mt-1">{rulesError}</p>}
               <div className="mt-2 p-3 bg-gray-50 rounded-lg text-xs text-gray-500 font-mono leading-relaxed">
                 <p className="font-semibold text-gray-600 mb-1">使用可能なフィールド：</p>
-                <p>ltv, order_count, subscribed_email, region, language, last_order_at, created_at</p>
+                <p>ltv, order_count, subscribed_email, region, language, tags, <strong>friend_tag</strong>, last_order_at, created_at</p>
                 <p className="font-semibold text-gray-600 mt-2 mb-1">演算子：</p>
                 <p>=, !=, &gt;, &gt;=, &lt;, &lt;=, in, not_in, contains, within_days, older_than_days, is_null, is_not_null</p>
+                <p className="font-semibold text-gray-600 mt-2 mb-1">friend_tag の使い方：</p>
+                <p>{`{"field":"friend_tag","operator":"=","value":"VIP"}`} — LINE友だちのタグ名で絞り込み</p>
               </div>
             </div>
           </div>
