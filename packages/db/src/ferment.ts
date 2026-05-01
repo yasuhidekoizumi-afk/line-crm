@@ -941,9 +941,19 @@ export interface FermentForm {
   display_config: string;
   on_submit_tag: string | null;
   on_submit_flow_id: string | null;
+  fields: string;
+  on_submit_scenario_id: string | null;
+  save_to_metadata: number;
   view_count: number;
   submit_count: number;
   is_active: number;
+  trigger_type: string | null;
+  trigger_value: number | null;
+  url_match_pattern: string | null;
+  device_filter: string | null;
+  show_frequency_days: number | null;
+  ab_variant_b_config: string | null;
+  css_overrides: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -954,6 +964,8 @@ export interface FermentFormSubmission {
   email: string;
   display_name: string | null;
   customer_id: string | null;
+  data: string;
+  friend_id: string | null;
   source_url: string | null;
   user_agent: string | null;
   ip_hash: string | null;
@@ -979,8 +991,9 @@ export async function createFermentForm(
     .prepare(
       `INSERT INTO ferment_forms (
         form_id, name, description, form_type, display_config,
-        on_submit_tag, on_submit_flow_id, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        on_submit_tag, on_submit_flow_id, is_active,
+        fields, on_submit_scenario_id, save_to_metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       data.form_id,
@@ -991,6 +1004,9 @@ export async function createFermentForm(
       data.on_submit_tag ?? null,
       data.on_submit_flow_id ?? null,
       data.is_active ?? 1,
+      data.fields ?? '[]',
+      data.on_submit_scenario_id ?? null,
+      data.save_to_metadata ?? 0,
     )
     .run();
 }
@@ -1005,6 +1021,7 @@ export async function updateFermentForm(
   const allowed: Array<keyof FermentForm> = [
     'name', 'description', 'form_type', 'display_config',
     'on_submit_tag', 'on_submit_flow_id', 'is_active',
+    'fields', 'on_submit_scenario_id', 'save_to_metadata',
   ];
   for (const k of allowed) {
     if (data[k] !== undefined) {
@@ -1040,8 +1057,8 @@ export async function recordFormSubmission(
     .prepare(
       `INSERT INTO ferment_form_submissions (
         submission_id, form_id, email, display_name, customer_id,
-        source_url, user_agent, ip_hash
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        data, friend_id, source_url, user_agent, ip_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       data.submission_id,
@@ -1049,6 +1066,8 @@ export async function recordFormSubmission(
       data.email,
       data.display_name,
       data.customer_id,
+      data.data ?? '{}',
+      data.friend_id ?? null,
       data.source_url,
       data.user_agent,
       data.ip_hash,
@@ -1058,4 +1077,21 @@ export async function recordFormSubmission(
     .prepare('UPDATE ferment_forms SET submit_count = submit_count + 1 WHERE form_id = ?')
     .bind(data.form_id)
     .run();
+}
+
+export async function getFermentFormSubmissions(
+  db: D1Database,
+  formId: string,
+): Promise<(FermentFormSubmission & { friend_name?: string | null })[]> {
+  const r = await db
+    .prepare(
+      `SELECT s.*, f.display_name as friend_name
+       FROM ferment_form_submissions s
+       LEFT JOIN friends f ON f.id = s.friend_id
+       WHERE s.form_id = ?
+       ORDER BY s.created_at DESC`,
+    )
+    .bind(formId)
+    .all<FermentFormSubmission & { friend_name: string | null }>();
+  return r.results;
 }

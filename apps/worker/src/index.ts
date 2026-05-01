@@ -33,7 +33,7 @@ import { health } from './routes/health.js';
 import { automations } from './routes/automations.js';
 import { richMenus } from './routes/rich-menus.js';
 import { trackedLinks } from './routes/tracked-links.js';
-import { forms } from './routes/forms.js';
+// import { forms } from './routes/forms.js'; // DEPRECATED: 統合先 → ferment/routes/forms.ts
 import { adPlatforms } from './routes/ad-platforms.js';
 import { staff } from './routes/staff.js';
 import { images } from './routes/images.js';
@@ -182,7 +182,7 @@ app.route('/', health);
 app.route('/', automations);
 app.route('/', richMenus);
 app.route('/', trackedLinks);
-app.route('/', forms);
+// app.route('/', forms); // DEPRECATED: 統合先 → ferment/routes/forms.ts
 app.route('/', adPlatforms);
 app.route('/', staff);
 app.route('/', images);

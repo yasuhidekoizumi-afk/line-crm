@@ -3,6 +3,8 @@
  *
  * 認証付き管理 API: /api/forms/*
  * 公開エンドポイント: /forms/embed/:formId.js, /forms/:formId/submit, /forms/:formId/view
+ *
+ * 統合版: LINE CRM forms の機能（フィールド定義・LIFF投稿・サイドエフェクト）を吸収
  */
 
 import { Hono } from 'hono';
@@ -15,10 +17,17 @@ import {
   deleteFermentForm,
   incrementFormView,
   recordFormSubmission,
+  getFermentFormSubmissions,
   upsertCustomer,
+  getFriendByLineUserId,
+  getFriendById,
+  addTagToFriend,
+  enrollFriendInScenario,
+  jstNow,
   type FermentForm,
 } from '@line-crm/db';
 import type { FermentEnv } from '../types.js';
+import type { Env } from '../../index.js';
 
 // ─── 管理 API（認証あり） ──────────────────────────────
 
@@ -48,6 +57,9 @@ formAdminRoutes.post('/', async (c) => {
     on_submit_tag: body.on_submit_tag ?? null,
     on_submit_flow_id: body.on_submit_flow_id ?? null,
     is_active: body.is_active ?? 1,
+    fields: body.fields ?? '[]',
+    on_submit_scenario_id: body.on_submit_scenario_id ?? null,
+    save_to_metadata: body.save_to_metadata ?? 0,
   });
   const created = await getFermentForm(c.env.DB, formId);
   return c.json({ success: true, data: created });
@@ -64,6 +76,18 @@ formAdminRoutes.put('/:id', async (c) => {
 formAdminRoutes.delete('/:id', async (c) => {
   await deleteFermentForm(c.env.DB, c.req.param('id'));
   return c.json({ success: true });
+});
+
+/**
+ * GET /:id/submissions — フォーム回答一覧
+ * LINE CRM forms の同機能を統合
+ */
+formAdminRoutes.get('/:id/submissions', async (c) => {
+  const formId = c.req.param('id');
+  const form = await getFermentForm(c.env.DB, formId);
+  if (!form) return c.json({ success: false, error: 'Form not found' }, 404);
+  const submissions = await getFermentFormSubmissions(c.env.DB, formId);
+  return c.json({ success: true, data: submissions });
 });
 
 // ─── 公開エンドポイント（認証なし） ──────────────────
@@ -179,54 +203,158 @@ formPublicRoutes.post('/:formId/view', async (c) => {
   return c.json({ ok: true });
 });
 
-/** フォーム送信 */
+/**
+ * フォーム送信（統合版）
+ *
+ * 2つのモード:
+ * 1. Web埋め込み（email capture）: { email, display_name?, source_url? }
+ * 2. LIFF投稿（LINE CRM forms互換）: { lineUserId?, friendId?, data?, email? }
+ */
 formPublicRoutes.post('/:formId/submit', async (c) => {
   const formId = c.req.param('formId');
-  const body = await c.req.json<{ email: string; display_name?: string; source_url?: string }>().catch(() => ({} as { email?: string }));
-  const email = body.email?.trim().toLowerCase();
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return c.json({ success: false, error: 'メールアドレスが不正です' }, 400);
-  }
+  const body = await c.req.json<{
+    email?: string;
+    display_name?: string;
+    source_url?: string;
+    lineUserId?: string;
+    friendId?: string;
+    data?: Record<string, unknown>;
+  }>().catch(() => ({}));
+
   const form = await getFermentForm(c.env.DB, formId);
   if (!form || form.is_active !== 1) {
     return c.json({ success: false, error: 'フォームが見つかりません' }, 404);
   }
 
-  // 既存 customer 検索 or 新規作成
-  const existing = await c.env.DB
-    .prepare('SELECT customer_id FROM customers WHERE email = ? LIMIT 1')
-    .bind(email)
-    .first<{ customer_id: string }>();
-  const customerId = existing?.customer_id ?? generateFermentId('cu');
+  // ── モード判定: LIFF投稿（lineUserId or friendId あり） or Web投稿（email capture） ──
+  const isLiffMode = !!(body.lineUserId || body.friendId);
 
-  // タグ付与
-  const tags: string[] = [`form:${formId}`];
-  if (form.on_submit_tag) tags.push(form.on_submit_tag);
+  if (isLiffMode) {
+    // === LIFF/CRMフォームモード ===
+    const submissionData = body.data ?? {};
 
-  await upsertCustomer(c.env.DB, {
-    customer_id: customerId,
-    email,
-    display_name: body.display_name ?? null,
-    region: 'JP',
-    language: 'ja',
-    subscribed_email: 1,
-    tags: tags.join(','),
-  });
+    // 必須フィールドバリデーション
+    let fields: Array<{ name: string; label: string; type: string; required?: boolean }> = [];
+    try { fields = JSON.parse(form.fields || '[]'); } catch { /* noop */ }
+    for (const field of fields) {
+      if (field.required) {
+        const val = submissionData[field.name];
+        if (val === undefined || val === null || val === '') {
+          return c.json({ success: false, error: `${field.label} は必須項目です` }, 400);
+        }
+      }
+    }
 
-  await recordFormSubmission(c.env.DB, {
-    submission_id: generateFermentId('sub'),
-    form_id: formId,
-    email,
-    display_name: body.display_name ?? null,
-    customer_id: customerId,
-    source_url: body.source_url ?? null,
-    user_agent: c.req.header('user-agent') ?? null,
-    ip_hash: null,
-  });
+    // 友だち解決
+    let friendId: string | null = body.friendId ?? null;
+    if (!friendId && body.lineUserId) {
+      const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+      if (friend) friendId = friend.id;
+    }
 
-  return c.json({ success: true, data: { customer_id: customerId } }, 200, {
-    'Access-Control-Allow-Origin': '*',
-  });
+    const submissionId = generateFermentId('sub');
+    await recordFormSubmission(c.env.DB, {
+      submission_id: submissionId,
+      form_id: formId,
+      email: body.email ?? '',
+      display_name: null,
+      customer_id: null,
+      data: JSON.stringify(submissionData),
+      friend_id: friendId,
+      source_url: body.source_url ?? null,
+      user_agent: c.req.header('user-agent') ?? null,
+      ip_hash: null,
+    });
+
+    // サイドエフェクト（LINE CRM forms 互換）
+    if (friendId) {
+      const db = c.env.DB;
+      const now = jstNow();
+      const sideEffects: Promise<unknown>[] = [];
+
+      // メタデータ保存
+      if (form.save_to_metadata) {
+        sideEffects.push(
+          (async () => {
+            const friend = await getFriendById(db, friendId!);
+            if (!friend) return;
+            const existing = JSON.parse(friend.metadata || '{}') as Record<string, unknown>;
+            const merged = { ...existing, ...submissionData };
+            await db
+              .prepare(`UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?`)
+              .bind(JSON.stringify(merged), now, friendId)
+              .run();
+          })(),
+        );
+      }
+
+      // タグ付与
+      if (form.on_submit_tag) {
+        sideEffects.push(addTagToFriend(db, friendId, form.on_submit_tag));
+      }
+
+      // シナリオ登録
+      if (form.on_submit_scenario_id) {
+        sideEffects.push(enrollFriendInScenario(db, friendId, form.on_submit_scenario_id));
+      }
+
+      if (sideEffects.length > 0) {
+        const results = await Promise.allSettled(sideEffects);
+        for (const r of results) {
+          if (r.status === 'rejected') console.error('Form side-effect failed:', r.reason);
+        }
+      }
+    }
+
+    return c.json({
+      success: true,
+      data: { submission_id: submissionId },
+    }, 201, { 'Access-Control-Allow-Origin': '*' });
+  } else {
+    // === Web埋め込み/メールアドレス収集モード ===
+    const email = body.email?.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return c.json({ success: false, error: 'メールアドレスが不正です' }, 400);
+    }
+
+    // 既存 customer 検索 or 新規作成
+    const existing = await c.env.DB
+      .prepare('SELECT customer_id FROM customers WHERE email = ? LIMIT 1')
+      .bind(email)
+      .first<{ customer_id: string }>();
+    const customerId = existing?.customer_id ?? generateFermentId('cu');
+
+    // タグ付与
+    const tags: string[] = [`form:${formId}`];
+    if (form.on_submit_tag) tags.push(form.on_submit_tag);
+
+    await upsertCustomer(c.env.DB, {
+      customer_id: customerId,
+      email,
+      display_name: body.display_name ?? null,
+      region: 'JP',
+      language: 'ja',
+      subscribed_email: 1,
+      tags: tags.join(','),
+    });
+
+    await recordFormSubmission(c.env.DB, {
+      submission_id: generateFermentId('sub'),
+      form_id: formId,
+      email,
+      display_name: body.display_name ?? null,
+      customer_id: customerId,
+      data: '{}',
+      friend_id: null,
+      source_url: body.source_url ?? null,
+      user_agent: c.req.header('user-agent') ?? null,
+      ip_hash: null,
+    });
+
+    return c.json({ success: true, data: { customer_id: customerId } }, 200, {
+      'Access-Control-Allow-Origin': '*',
+    });
+  }
 });
 
 // CORS preflight
