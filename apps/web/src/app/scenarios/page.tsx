@@ -131,7 +131,7 @@ export default function ScenariosPage() {
   return (
     <div>
       <Header
-        title="シナリオ配信"
+        title="LINEシナリオ"
         action={
           <button
             onClick={() => setShowCreate(true)}

@@ -239,7 +239,7 @@ function BroadcastsPageInner() {
   return (
     <div>
       <Header
-        title="一斉配信"
+        title="LINE一斉配信"
         action={
           <button
             onClick={() => setShowCreate(true)}

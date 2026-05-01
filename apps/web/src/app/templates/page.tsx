@@ -148,7 +148,7 @@ export default function TemplatesPage() {
   return (
     <div>
       <Header
-        title="テンプレート管理"
+        title="LINEテンプレート"
         action={
           <button
             onClick={() => setShowCreate(true)}
