@@ -15,14 +15,51 @@ import type { FermentEnv } from '../types.js';
 
 export const cartWebhookRoutes = new Hono<FermentEnv>();
 
+/**
+ * Shopify Webhook の HMAC SHA256 署名を検証する。
+ * Shopify は X-Shopify-Hmac-Sha256 ヘッダに base64 エンコード署名を付ける。
+ */
+async function verifyShopifyHmac(
+  secret: string,
+  rawBody: string,
+  hmacHeader: string | undefined,
+): Promise<boolean> {
+  if (!hmacHeader) return false;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(rawBody));
+  const expected = btoa(String.fromCharCode(...new Uint8Array(sigBuf)));
+  if (expected.length !== hmacHeader.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ hmacHeader.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 cartWebhookRoutes.post('/cart', async (c) => {
-  // 緊急停止: 認証未実装かつ過去の誤紐付けデータが残るため、
-  // 認証実装と影響範囲調査が完了するまで受信を停止できるようにする。
   if (c.env.CART_WEBHOOK_DISABLED === '1') {
     return c.json({ success: false, error: 'Cart webhook is currently disabled' }, 503);
   }
 
-  const body = await c.req.json<{
+  // Shopify HMAC 認証
+  const secret = (c.env as { SHOPIFY_WEBHOOK_SECRET?: string }).SHOPIFY_WEBHOOK_SECRET;
+  if (!secret) {
+    return c.json({ success: false, error: 'SHOPIFY_WEBHOOK_SECRET not configured' }, 500);
+  }
+  const rawBody = await c.req.text();
+  const hmacHeader = c.req.header('X-Shopify-Hmac-Sha256') ?? c.req.header('x-shopify-hmac-sha256');
+  if (!(await verifyShopifyHmac(secret, rawBody, hmacHeader))) {
+    return c.json({ success: false, error: 'Invalid HMAC signature' }, 401);
+  }
+
+  let body: {
     id?: string;
     token?: string;
     email?: string;
@@ -30,7 +67,12 @@ cartWebhookRoutes.post('/cart', async (c) => {
     total_price?: string;
     currency?: string;
     abandoned_checkout_url?: string;
-  }>().catch(() => ({}));
+  } = {};
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON' }, 400);
+  }
 
   const cartId = String(body.id ?? body.token ?? generateFermentId('cart'));
   const email = body.email?.toLowerCase() ?? null;
@@ -68,7 +110,22 @@ cartWebhookRoutes.post('/cart/recovered', async (c) => {
     return c.json({ success: false, error: 'Cart webhook is currently disabled' }, 503);
   }
 
-  const body = await c.req.json<{ id?: string; token?: string }>().catch(() => ({}));
+  const secret = (c.env as { SHOPIFY_WEBHOOK_SECRET?: string }).SHOPIFY_WEBHOOK_SECRET;
+  if (!secret) {
+    return c.json({ success: false, error: 'SHOPIFY_WEBHOOK_SECRET not configured' }, 500);
+  }
+  const rawBody = await c.req.text();
+  const hmacHeader = c.req.header('X-Shopify-Hmac-Sha256') ?? c.req.header('x-shopify-hmac-sha256');
+  if (!(await verifyShopifyHmac(secret, rawBody, hmacHeader))) {
+    return c.json({ success: false, error: 'Invalid HMAC signature' }, 401);
+  }
+
+  let body: { id?: string; token?: string } = {};
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON' }, 400);
+  }
   const cartId = String(body.id ?? body.token ?? '');
   if (!cartId) return c.json({ success: false }, 400);
   await c.env.DB
