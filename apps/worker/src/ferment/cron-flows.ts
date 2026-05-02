@@ -61,22 +61,36 @@ export async function processFlowDeliveries(env: FermentEnv): Promise<void> {
 
       // 顧客情報を取得
       const customer = await getCustomerById(env.DB, enrollment.customer_id);
-      if (!customer || !customer.email || !customer.subscribed_email) {
+      if (!customer) {
         await updateEnrollment(env.DB, enrollment.enrollment_id, { status: 'canceled' });
         continue;
       }
 
-      // このステップのメールを送信
-      if (currentStep.template_id) {
+      // LINEチャネル: line_user_id 確認
+      if (currentStep.channel === 'line' && !customer.line_user_id) {
+        await updateEnrollment(env.DB, enrollment.enrollment_id, { status: 'canceled' });
+        continue;
+      }
+      // メールチャネル: email + subscribe 確認
+      if (currentStep.channel !== 'line' && (!customer.email || !customer.subscribed_email)) {
+        await updateEnrollment(env.DB, enrollment.enrollment_id, { status: 'canceled' });
+        continue;
+      }
+
+      // このステップを配信
+      const hasContent = currentStep.channel === 'line'
+        ? currentStep.message_type && currentStep.message_content
+        : currentStep.template_id;
+      if (hasContent) {
         await executeFlowStep(
           customer,
-          currentStep.template_id,
+          currentStep.template_id ?? null,
           enrollment.flow_id,
           currentStep.step_id,
           env,
+          currentStep as { channel?: string; message_type?: string; message_content?: string; line_account_id?: string },
         );
       }
-
       // 次のステップへ進める
       const nextStep = steps.find((s) => s.step_order === enrollment.current_step + 1);
 

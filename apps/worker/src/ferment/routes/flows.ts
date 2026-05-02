@@ -64,6 +64,7 @@ emailFlowRoutes.post('/flows', async (c) => {
       trigger_type?: string;
       trigger_config?: object;
       is_active?: boolean;
+      line_account_id?: string;
     }>();
 
     if (!body.name) return c.json({ success: false, error: 'name は必須です' }, 400);
@@ -76,6 +77,7 @@ emailFlowRoutes.post('/flows', async (c) => {
       trigger_type: body.trigger_type ?? null,
       trigger_config: body.trigger_config ? JSON.stringify(body.trigger_config) : null,
       is_active: body.is_active ? 1 : 0,
+      line_account_id: body.line_account_id ?? null,
     });
 
     const [created, steps] = await Promise.all([
@@ -134,6 +136,13 @@ emailFlowRoutes.post('/flows/:id/steps', async (c) => {
       delay_hours?: number;
       template_id?: string;
       condition?: object;
+      channel?: string;
+      message_type?: string;
+      message_content?: string;
+      condition_type?: string;
+      condition_value?: string;
+      next_step_on_false?: string;
+      line_account_id?: string;
     }>();
 
     const stepId = generateFermentId('stp');
@@ -144,6 +153,13 @@ emailFlowRoutes.post('/flows/:id/steps', async (c) => {
       delay_hours: body.delay_hours ?? 0,
       template_id: body.template_id ?? null,
       condition: body.condition ? JSON.stringify(body.condition) : null,
+      channel: body.channel ?? 'email',
+      message_type: body.message_type ?? null,
+      message_content: body.message_content ?? null,
+      condition_type: body.condition_type ?? null,
+      condition_value: body.condition_value ?? null,
+      next_step_on_false: body.next_step_on_false ?? null,
+      action_type: 'send_email',
     });
 
     const steps = await getEmailFlowSteps(c.env.DB, flowId);

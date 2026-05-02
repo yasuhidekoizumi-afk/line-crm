@@ -237,17 +237,45 @@ export async function executeCampaign(
 
 /**
  * フローの1ステップを特定顧客に配信する
+ * LINE チャネルとメールチャネルの両方をサポート
  *
  * 呼び出し元: cron-flows.ts の enrollment 処理
  */
 export async function executeFlowStep(
   customer: Customer,
-  templateId: string,
+  templateId: string | null,
   flowId: string,
   stepId: string,
   env: FermentEnv,
+  step?: { channel?: string; message_type?: string; message_content?: string; line_account_id?: string },
 ): Promise<{ ok: boolean }> {
+  // LINE チャネル
+  if (step?.channel === 'line') {
+    if (!step.message_type || !step.message_content) return { ok: false };
+    if (!customer.line_user_id) return { ok: false };
+    try {
+      const { LineClient } = await import('@line-crm/line-sdk');
+      const { getLineAccountById } = await import('@line-crm/db');
+      let accessToken: string;
+      if (step.line_account_id) {
+        const account = await getLineAccountById(env.DB, step.line_account_id);
+        accessToken = account?.channel_access_token ?? (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+      } else {
+        accessToken = (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+      }
+      const lineClient = new LineClient(accessToken);
+      const { buildMessage } = await import('../../services/step-delivery.js');
+      await lineClient.pushMessage(customer.line_user_id, [buildMessage(step.message_type, step.message_content)]);
+      return { ok: true };
+    } catch (err) {
+      console.error('[FERMENT] LINE flow step failed:', err);
+      return { ok: false };
+    }
+  }
+
+  // メールチャネル（従来の動作）
   if (!customer.email) return { ok: false };
+  if (!templateId) return { ok: false };
 
   const suppressed = await isSuppressed(env.DB, customer.email);
   if (suppressed) return { ok: false };

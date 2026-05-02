@@ -95,6 +95,7 @@ export interface EmailFlow {
   trigger_type: string | null;
   trigger_config: string | null;
   is_active: number;
+  line_account_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -106,6 +107,13 @@ export interface EmailFlowStep {
   delay_hours: number;
   template_id: string | null;
   condition: string | null;
+  channel: string;
+  message_type: string | null;
+  message_content: string | null;
+  condition_type: string | null;
+  condition_value: string | null;
+  next_step_on_false: string | null;
+  action_type: string;
   created_at: string;
 }
 
@@ -536,8 +544,8 @@ export async function createEmailFlow(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO email_flows (flow_id, name, description, trigger_type, trigger_config, is_active)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO email_flows (flow_id, name, description, trigger_type, trigger_config, is_active, line_account_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       data.flow_id,
@@ -546,6 +554,7 @@ export async function createEmailFlow(
       data.trigger_type ?? null,
       data.trigger_config ?? null,
       data.is_active,
+      data.line_account_id ?? null,
     )
     .run();
 }
@@ -583,8 +592,11 @@ export async function createEmailFlowStep(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO email_flow_steps (step_id, flow_id, step_order, delay_hours, template_id, condition)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO email_flow_steps (
+        step_id, flow_id, step_order, delay_hours, template_id, condition,
+        channel, message_type, message_content,
+        condition_type, condition_value, next_step_on_false, action_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       data.step_id,
@@ -593,6 +605,13 @@ export async function createEmailFlowStep(
       data.delay_hours,
       data.template_id ?? null,
       data.condition ?? null,
+      data.channel ?? 'email',
+      data.message_type ?? null,
+      data.message_content ?? null,
+      data.condition_type ?? null,
+      data.condition_value ?? null,
+      data.next_step_on_false ?? null,
+      data.action_type ?? 'send_email',
     )
     .run();
 }
