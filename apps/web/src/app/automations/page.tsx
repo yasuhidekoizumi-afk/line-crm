@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { fermentApi, type Segment } from '@/lib/ferment-api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 
-type AutomationEventType = "friend_add" | "tag_change" | "score_threshold" | "cv_fire" | "message_received" | "calendar_booked"
+type AutomationEventType = "friend_add" | "tag_change" | "score_threshold" | "cv_fire" | "message_received" | "calendar_booked" | "segment_enter"
 
 interface AutomationAction {
   type: "add_tag" | "remove_tag" | "start_scenario" | "send_message" | "send_webhook" | "switch_rich_menu"
@@ -33,6 +34,7 @@ const eventTypeOptions: { value: AutomationEventType; label: string }[] = [
   { value: 'cv_fire', label: 'CV発火' },
   { value: 'message_received', label: 'メッセージ受信' },
   { value: 'calendar_booked', label: 'カレンダー予約' },
+  { value: 'segment_enter', label: 'セグメント参入' },
 ]
 
 const eventTypeLabelMap: Record<AutomationEventType, string> = {
@@ -51,6 +53,7 @@ const eventTypeBadgeColor: Record<AutomationEventType, string> = {
   cv_fire: 'bg-red-100 text-red-700',
   message_received: 'bg-purple-100 text-purple-700',
   calendar_booked: 'bg-indigo-100 text-indigo-700',
+  segment_enter: 'bg-purple-100 text-purple-700',
 }
 
 interface CreateFormState {
@@ -93,6 +96,7 @@ const ccPrompts = [
 export default function AutomationsPage() {
   const { selectedAccountId } = useAccount()
   const [automations, setAutomations] = useState<Automation[]>([])
+  const [segments, setSegments] = useState<Segment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -119,6 +123,7 @@ export default function AutomationsPage() {
 
   useEffect(() => {
     loadAutomations()
+    fermentApi.segments.list().then(r => { if (r.success && r.data) setSegments(r.data) }).catch(() => {})
   }, [loadAutomations])
 
   const handleCreate = async () => {
@@ -245,6 +250,23 @@ export default function AutomationsPage() {
                 ))}
               </select>
             </div>
+            {form.eventType === 'segment_enter' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">対象セグメント</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                  value={JSON.parse(form.conditionsJson).segment_id ?? ''}
+                  onChange={(e) => setForm({ ...form, conditionsJson: JSON.stringify({ segment_id: e.target.value || undefined }) })}
+                >
+                  <option value="">セグメントを選択...</option>
+                  {segments.map((seg) => (
+                    <option key={seg.segment_id} value={seg.segment_id}>
+                      {seg.name}（{seg.customer_count.toLocaleString()}人）
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">アクション (JSON)</label>
               <textarea
