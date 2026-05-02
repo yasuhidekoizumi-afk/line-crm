@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
 import SegmentRuleBuilder from '@/components/segments/rule-builder'
+import MemberModal from '@/components/segments/member-modal'
 
 const CHANNEL_LABEL: Record<string, string> = {
   all: '全チャネル',
@@ -25,6 +26,7 @@ export default function SegmentsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
   const [recomputingId, setRecomputingId] = useState<string | null>(null)
+  const [memberModal, setMemberModal] = useState<{ id: string; name: string } | null>(null)
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -256,6 +258,12 @@ export default function SegmentsPage() {
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button
+                    onClick={() => setMemberModal({ id: s.segment_id, name: s.name })}
+                    className="px-3 py-1.5 text-xs text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50"
+                  >
+                    メンバー一覧
+                  </button>
+                  <button
                     onClick={() => handleRecompute(s.segment_id)}
                     disabled={recomputingId === s.segment_id}
                     className="px-3 py-1.5 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50"
@@ -279,6 +287,13 @@ export default function SegmentsPage() {
             </div>
           ))}
         </div>
+      )}
+      {memberModal && (
+        <MemberModal
+          segmentId={memberModal.id}
+          segmentName={memberModal.name}
+          onClose={() => setMemberModal(null)}
+        />
       )}
     </div>
   )
