@@ -43,21 +43,25 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
         const ids = res.data as unknown as string[]
         setTotal(res.meta?.total ?? 0)
 
-        // Step 2: Fetch customer details in parallel
-        const customerPromises = ids.map((id) =>
-          fermentApi.customers.get(id).catch(() => null)
-        )
-        const results = await Promise.all(customerPromises)
-        if (cancelled) return
-
+        // Step 2: Fetch customer details in batches (max 5 concurrent)
         const info: MemberInfo[] = []
-        for (let i = 0; i < ids.length; i++) {
-          const c = results[i]?.data as Record<string, unknown> | undefined
-          info.push({
-            customer_id: ids[i],
-            display_name: c ? String(c.display_name ?? c.email ?? '') : '',
-            email: c ? String(c.email ?? '') : '',
-          })
+        const BATCH_SIZE = 5
+        for (let start = 0; start < ids.length; start += BATCH_SIZE) {
+          if (cancelled) return
+          const batch = ids.slice(start, start + BATCH_SIZE)
+          const batchResults = await Promise.all(
+            batch.map((id) =>
+              fermentApi.customers.get(id).catch(() => null)
+            )
+          )
+          for (let j = 0; j < batch.length; j++) {
+            const c = batchResults[j]?.data as Record<string, unknown> | undefined
+            info.push({
+              customer_id: batch[j],
+              display_name: c ? String(c.display_name ?? c.email ?? '') : '',
+              email: c ? String(c.email ?? '') : '',
+            })
+          }
         }
         setMembers(info)
       } catch (e) {
