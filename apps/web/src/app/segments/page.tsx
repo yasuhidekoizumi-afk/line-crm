@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
+import SegmentRuleBuilder from '@/components/segments/rule-builder'
 
 const CHANNEL_LABEL: Record<string, string> = {
   all: '全チャネル',
@@ -15,7 +16,7 @@ const SAMPLE_RULE = JSON.stringify({
     { field: 'subscribed_email', operator: '=', value: 1 },
     { field: 'ltv', operator: '>=', value: 5000 },
   ],
-}, null, 2)
+})
 
 export default function SegmentsPage() {
   const [segments, setSegments] = useState<Segment[]>([])
@@ -30,7 +31,6 @@ export default function SegmentsPage() {
     channel_scope: 'all',
     rules: SAMPLE_RULE,
   })
-  const [rulesError, setRulesError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
@@ -55,21 +55,17 @@ export default function SegmentsPage() {
     rules: SAMPLE_RULE,
   })
 
-  const validateRules = (rulesStr: string): boolean => {
-    try {
-      JSON.parse(rulesStr)
-      setRulesError('')
-      return true
-    } catch {
-      setRulesError('JSON が不正です')
-      return false
-    }
-  }
-
   const handleSave = async () => {
     if (!form.name) return
-    if (!validateRules(form.rules)) return
+    // Validate JSON
+    try {
+      JSON.parse(form.rules)
+    } catch {
+      setError('ルールの形式が不正です')
+      return
+    }
     setSaving(true)
+    setError('')
     try {
       const data = {
         name: form.name,
@@ -96,15 +92,22 @@ export default function SegmentsPage() {
   }
 
   const handleEdit = (s: Segment) => {
+    let rulesStr: string
+    try {
+      rulesStr = typeof s.rules === 'string'
+        ? s.rules
+        : JSON.stringify(s.rules, null, 2)
+    } catch {
+      rulesStr = SAMPLE_RULE
+    }
     setForm({
       name: s.name,
       description: s.description ?? '',
       channel_scope: s.channel_scope,
-      rules: typeof s.rules === 'string' ? s.rules : JSON.stringify(JSON.parse(s.rules), null, 2),
+      rules: rulesStr,
     })
     setEditId(s.segment_id)
     setShowCreate(true)
-    setRulesError('')
   }
 
   const handleRecompute = async (id: string) => {
@@ -140,7 +143,7 @@ export default function SegmentsPage() {
           <p className="text-sm text-gray-500 mt-1">ルールベースの顧客セグメント管理</p>
         </div>
         <button
-          onClick={() => { setShowCreate(true); setEditId(null); resetForm(); setRulesError('') }}
+          onClick={() => { setShowCreate(true); setEditId(null); resetForm() }}
           className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
         >
           + 新規作成
@@ -163,7 +166,7 @@ export default function SegmentsPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="メールアクティブ顧客"
+                  placeholder="例: 高LTVアクティブ顧客"
                 />
               </div>
               <div className="col-span-2 sm:col-span-1">
@@ -184,34 +187,20 @@ export default function SegmentsPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="メール購読中かつ LTV 5,000円以上の顧客"
+                  placeholder="例: メール購読中かつLTV5,000円以上のアクティブな顧客"
                 />
               </div>
             </div>
 
+            {/* ルールビルダー */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                セグメントルール（JSON）
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                セグメント条件 <span className="text-xs text-gray-400 font-normal">— ドロップダウンから条件を組み立ててください</span>
               </label>
-              <textarea
-                className={`w-full border rounded-lg px-3 py-2 text-sm font-mono ${rulesError ? 'border-red-400' : 'border-gray-300'}`}
-                rows={12}
+              <SegmentRuleBuilder
                 value={form.rules}
-                onChange={(e) => {
-                  setForm({ ...form, rules: e.target.value })
-                  if (rulesError) validateRules(e.target.value)
-                }}
-                spellCheck={false}
+                onChange={(json) => setForm({ ...form, rules: json })}
               />
-              {rulesError && <p className="text-xs text-red-500 mt-1">{rulesError}</p>}
-              <div className="mt-2 p-3 bg-gray-50 rounded-lg text-xs text-gray-500 font-mono leading-relaxed">
-                <p className="font-semibold text-gray-600 mb-1">使用可能なフィールド：</p>
-                <p>ltv, order_count, subscribed_email, region, language, tags, <strong>friend_tag</strong>, last_order_at, created_at</p>
-                <p className="font-semibold text-gray-600 mt-2 mb-1">演算子：</p>
-                <p>=, !=, &gt;, &gt;=, &lt;, &lt;=, in, not_in, contains, within_days, older_than_days, is_null, is_not_null</p>
-                <p className="font-semibold text-gray-600 mt-2 mb-1">friend_tag の使い方：</p>
-                <p>{`{"field":"friend_tag","operator":"=","value":"VIP"}`} — LINE友だちのタグ名で絞り込み</p>
-              </div>
             </div>
           </div>
 
@@ -224,7 +213,7 @@ export default function SegmentsPage() {
               {saving ? '保存中...' : '保存する'}
             </button>
             <button
-              onClick={() => { setShowCreate(false); setEditId(null); resetForm(); setRulesError('') }}
+              onClick={() => { setShowCreate(false); setEditId(null); resetForm() }}
               className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm"
             >
               キャンセル
