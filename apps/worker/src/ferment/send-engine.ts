@@ -167,6 +167,35 @@ export async function executeCampaign(
 ): Promise<{ sent: number; failed: number; done: boolean }> {
   const campaign = await getEmailCampaignById(env.DB, campaignId);
   if (!campaign) throw new Error(`Campaign not found: ${campaignId}`);
+
+  // LINE チャネル → broadcast.ts にディスパッチ
+  if (campaign.channel === 'line') {
+    try {
+      const { LineClient } = await import('@line-crm/line-sdk');
+      const { getLineAccountById } = await import('@line-crm/db');
+      let accessToken: string;
+      if (campaign.line_account_id) {
+        const account = await getLineAccountById(env.DB, campaign.line_account_id);
+        accessToken = account?.channel_access_token ?? (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+      } else {
+        accessToken = (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+      }
+      const lineClient = new LineClient(accessToken);
+      const { processBroadcastSend } = await import('../../services/broadcast.js');
+      await processBroadcastSend(
+        env.DB,
+        lineClient,
+        campaignId,
+        (env as Record<string, string>).WORKER_URL,
+      );
+      return { sent: 0, failed: 0, done: true };
+    } catch (err) {
+      console.error('[FERMENT] LINE campaign failed:', err);
+      await updateEmailCampaign(env.DB, campaignId, { status: 'failed' });
+      return { sent: 0, failed: 0, done: true };
+    }
+  }
+
   if (!campaign.template_id) throw new Error(`Campaign has no template: ${campaignId}`);
 
   const template = await getEmailTemplateById(env.DB, campaign.template_id);

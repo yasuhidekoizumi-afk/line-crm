@@ -61,6 +61,12 @@ emailCampaignRoutes.post('/campaigns', async (c) => {
       template_id?: string;
       segment_id?: string;
       scheduled_at?: string;
+      channel?: string;
+      message_type?: string;
+      message_content?: string;
+      target_type?: string;
+      target_tag_id?: string;
+      line_account_id?: string;
     }>();
 
     if (!body.name) {
@@ -84,6 +90,13 @@ emailCampaignRoutes.post('/campaigns', async (c) => {
       total_bounced: 0,
       total_converted: 0,
       total_revenue: 0,
+      channel: body.channel ?? 'email',
+      message_type: body.message_type ?? null,
+      message_content: body.message_content ?? null,
+      target_type: body.target_type ?? 'all',
+      target_tag_id: body.target_tag_id ?? null,
+      line_account_id: body.line_account_id ?? null,
+      alt_text: null,
     });
 
     const created = await getEmailCampaignById(c.env.DB, campaignId);

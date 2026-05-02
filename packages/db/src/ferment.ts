@@ -84,6 +84,13 @@ export interface EmailCampaign {
   total_bounced: number;
   total_converted: number;
   total_revenue: number;
+  channel: string;
+  message_type: string | null;
+  message_content: string | null;
+  target_type: string;
+  target_tag_id: string | null;
+  line_account_id: string | null;
+  alt_text: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -463,8 +470,10 @@ export async function createEmailCampaign(
       `INSERT INTO email_campaigns (
         campaign_id, name, template_id, segment_id, status,
         scheduled_at, total_targets, total_sent, total_opened,
-        total_clicked, total_bounced, total_converted, total_revenue
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        total_clicked, total_bounced, total_converted, total_revenue,
+        channel, message_type, message_content, target_type,
+        target_tag_id, line_account_id, alt_text
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       data.campaign_id,
@@ -480,6 +489,13 @@ export async function createEmailCampaign(
       data.total_bounced,
       data.total_converted,
       data.total_revenue,
+      data.channel ?? 'email',
+      data.message_type ?? null,
+      data.message_content ?? null,
+      data.target_type ?? 'all',
+      data.target_tag_id ?? null,
+      data.line_account_id ?? null,
+      data.alt_text ?? null,
     )
     .run();
 }
