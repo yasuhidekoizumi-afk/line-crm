@@ -39,7 +39,7 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
         setLoading(false)
         return
       }
-      const ids = res.data as string[]
+      const ids = res.data as unknown as string[]
       setTotal(res.meta?.total ?? 0)
 
       // Fetch customer details
@@ -48,7 +48,7 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
         try {
           const custRes = await fermentApi.customers.get(id)
           if (custRes.success && custRes.data) {
-            const c = custRes.data as Record<string, unknown>
+            const c = custRes.data as unknown as Record<string, unknown>
             details.push({
               customer_id: id,
               display_name: (c.display_name as string) ?? null,
