@@ -790,6 +790,25 @@ export async function getSegmentMemberIds(
   return result.results.map((r) => r.customer_id);
 }
 
+/**
+ * セグメントメンバーの LINE ユーザー ID 一覧を取得する
+ * LINE一斉配信のセグメントターゲット時に使用
+ */
+export async function getSegmentLineUserIds(
+  db: D1Database,
+  segmentId: string,
+): Promise<string[]> {
+  const result = await db
+    .prepare(
+      `SELECT c.line_user_id FROM customers c
+       INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
+       WHERE sm.segment_id = ? AND c.line_user_id IS NOT NULL`,
+    )
+    .bind(segmentId)
+    .all<{ line_user_id: string }>();
+  return result.results.map((r) => r.line_user_id);
+}
+
 export async function getSegmentMembersWithEmail(
   db: D1Database,
   segmentId: string,

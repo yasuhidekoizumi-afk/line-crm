@@ -98,7 +98,7 @@ export async function processSegmentSend(
   return (await getBroadcastById(db, broadcastId))!;
 }
 
-function buildMessage(messageType: string, messageContent: string, altText?: string): Message {
+export function buildMessage(messageType: string, messageContent: string, altText?: string): Message {
   if (messageType === 'text') {
     return { type: 'text', text: messageContent };
   }

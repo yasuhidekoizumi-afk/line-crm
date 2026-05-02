@@ -26,6 +26,7 @@ export interface PaginatedData<T> {
 export type ScenarioTriggerType = 'friend_add' | 'tag_added' | 'manual'
 export type MessageType = 'text' | 'image' | 'flex'
 export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent'
+export type BroadcastTargetType = 'all' | 'tag' | 'segment'
 
 // ─── Friend ─────────────────────────────────────────────
 export interface Friend {
@@ -149,8 +150,9 @@ export interface Broadcast {
   title: string
   messageType: MessageType
   messageContent: string
-  targetType: 'all' | 'tag'
+  targetType: BroadcastTargetType
   targetTagId: string | null
+  targetSegmentId: string | null
   status: BroadcastStatus
   scheduledAt: string | null
   sentAt: string | null
@@ -165,6 +167,7 @@ export interface CreateBroadcastInput {
   messageContent: string
   targetType: 'all' | 'tag'
   targetTagId?: string
+  targetSegmentId?: string
   scheduledAt?: string
   altText?: string
 }
@@ -173,8 +176,9 @@ export interface UpdateBroadcastInput {
   title?: string
   messageType?: MessageType
   messageContent?: string
-  targetType?: 'all' | 'tag'
+  targetType?: BroadcastTargetType
   targetTagId?: string | null
+  targetSegmentId?: string | null
   scheduledAt?: string | null
 }
 

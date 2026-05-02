@@ -4,6 +4,7 @@ import {
   getBroadcasts,
   updateBroadcastStatus,
   getFriendsByTag,
+  getSegmentLineUserIds,
   jstNow,
 } from '@line-crm/db';
 import type { Broadcast } from '@line-crm/db';
@@ -95,6 +96,50 @@ export async function processBroadcastSend(
         } catch (err) {
           console.error(`Multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
           // Continue with next batch; failed batch is not logged
+        }
+      }
+    } else if (broadcast.target_type === 'segment') {
+      if (!broadcast.target_segment_id) {
+        throw new Error('target_segment_id is required for segment-targeted broadcasts');
+      }
+
+      const lineUserIds = await getSegmentLineUserIds(db, broadcast.target_segment_id);
+      totalCount = lineUserIds.length;
+
+      // Send in batches with stealth delays
+      const now = jstNow();
+      const totalBatches = Math.ceil(lineUserIds.length / MULTICAST_BATCH_SIZE);
+      for (let i = 0; i < lineUserIds.length; i += MULTICAST_BATCH_SIZE) {
+        const batchIndex = Math.floor(i / MULTICAST_BATCH_SIZE);
+        const batch = lineUserIds.slice(i, i + MULTICAST_BATCH_SIZE);
+
+        if (batchIndex > 0) {
+          const delay = calculateStaggerDelay(lineUserIds.length, batchIndex);
+          await sleep(delay);
+        }
+
+        let batchMessage = message;
+        if (message.type === 'text' && totalBatches > 1) {
+          batchMessage = { ...message, text: addMessageVariation(message.text, batchIndex) };
+        }
+
+        try {
+          await lineClient.multicast(batch, [batchMessage]);
+          successCount += batch.length;
+
+          // Log messages (friend_id unknown for segment sends, use placeholder)
+          for (const lineUserId of batch) {
+            const logId = crypto.randomUUID();
+            await db
+              .prepare(
+                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+                 VALUES (?, '', 'outgoing', ?, ?, ?, NULL, ?)`,
+              )
+              .bind(logId, broadcast.message_type, broadcast.message_content, broadcastId, now)
+              .run();
+          }
+        } catch (err) {
+          console.error(`Segment multicast batch ${batchIndex} failed:`, err);
         }
       }
     }

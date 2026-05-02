@@ -1,5 +1,5 @@
 import { jstNow } from './utils.js';
-export type BroadcastTargetType = 'all' | 'tag';
+export type BroadcastTargetType = 'all' | 'tag' | 'segment';
 export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent';
 export type BroadcastMessageType = 'text' | 'image' | 'flex';
 
@@ -10,6 +10,7 @@ export interface Broadcast {
   message_content: string;
   target_type: BroadcastTargetType;
   target_tag_id: string | null;
+  target_segment_id: string | null;
   status: BroadcastStatus;
   scheduled_at: string | null;
   sent_at: string | null;
@@ -41,6 +42,7 @@ export interface CreateBroadcastInput {
   messageContent: string;
   targetType: BroadcastTargetType;
   targetTagId?: string | null;
+  targetSegmentId?: string | null;
   scheduledAt?: string | null;
 }
 
@@ -56,8 +58,8 @@ export async function createBroadcast(
   await db
     .prepare(
       `INSERT INTO broadcasts
-         (id, title, message_type, message_content, target_type, target_tag_id, status, scheduled_at, sent_at, total_count, success_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)`,
+         (id, title, message_type, message_content, target_type, target_tag_id, target_segment_id, status, scheduled_at, sent_at, total_count, success_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)`,
     )
     .bind(
       id,
@@ -66,6 +68,7 @@ export async function createBroadcast(
       input.messageContent,
       input.targetType,
       input.targetTagId ?? null,
+      input.targetSegmentId ?? null,
       initialStatus,
       input.scheduledAt ?? null,
       now,
@@ -83,6 +86,7 @@ export type UpdateBroadcastInput = Partial<
     | 'message_content'
     | 'target_type'
     | 'target_tag_id'
+    | 'target_segment_id'
     | 'status'
     | 'scheduled_at'
   >
@@ -115,6 +119,10 @@ export async function updateBroadcast(
   if (updates.target_tag_id !== undefined) {
     fields.push('target_tag_id = ?');
     values.push(updates.target_tag_id);
+  }
+  if (updates.target_segment_id !== undefined) {
+    fields.push('target_segment_id = ?');
+    values.push(updates.target_segment_id);
   }
   if (updates.status !== undefined) {
     fields.push('status = ?');

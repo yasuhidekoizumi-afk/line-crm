@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast } from '@/lib/api'
+import { fermentApi, type Segment } from '@/lib/ferment-api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import BroadcastForm from '@/components/broadcasts/broadcast-form'
@@ -15,6 +16,7 @@ interface BroadcastDraft {
   messageContent?: string
   targetType?: ApiBroadcast['targetType']
   targetTagId?: string
+  targetSegmentId?: string
   scheduledAt?: string
   sendNow?: boolean
 }
@@ -105,6 +107,7 @@ function BroadcastsPageInner() {
   const aiAction = decodeBase64Json<AiAction>(aiActionToken)
   const [broadcasts, setBroadcasts] = useState<ApiBroadcast[]>([])
   const [tags, setTags] = useState<Tag[]>([])
+  const [segments, setSegments] = useState<Segment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   // 即座にスケルトンプレフィル → Gemini 結果が来たら上書き
@@ -192,13 +195,15 @@ function BroadcastsPageInner() {
     setLoading(true)
     setError('')
     try {
-      const [broadcastsRes, tagsRes] = await Promise.all([
+      const [broadcastsRes, tagsRes, segmentsRes] = await Promise.all([
         api.broadcasts.list({ accountId: selectedAccountId || undefined }),
         api.tags.list(),
+        fermentApi.segments.list(),
       ])
       if (broadcastsRes.success) setBroadcasts(broadcastsRes.data)
       else setError(broadcastsRes.error)
       if (tagsRes.success) setTags(tagsRes.data)
+      if (segmentsRes.success && segmentsRes.data) setSegments(segmentsRes.data)
     } catch {
       setError('データの読み込みに失敗しました。もう一度お試しください。')
     } finally {
@@ -234,6 +239,24 @@ function BroadcastsPageInner() {
   const getTagName = (tagId: string | null) => {
     if (!tagId) return null
     return tags.find((t) => t.id === tagId)?.name ?? null
+  }
+
+  const getSegmentName = (segmentId: string | null) => {
+    if (!segmentId) return null
+    return segments.find((s) => s.segment_id === segmentId)?.name ?? null
+  }
+
+  const getTargetLabel = (b: ApiBroadcast) => {
+    if (b.targetType === 'all') return '全員'
+    if (b.targetType === 'tag') {
+      const name = getTagName(b.targetTagId)
+      return name ? `タグ: ${name}` : 'タグ指定'
+    }
+    if (b.targetType === 'segment') {
+      const name = getSegmentName(b.targetSegmentId)
+      return name ? `🎯 ${name}` : 'セグメント指定'
+    }
+    return '-'
   }
 
   return (
@@ -283,6 +306,7 @@ function BroadcastsPageInner() {
           <BroadcastForm
             key={initialDraft?.messageContent ?? 'empty'}
             tags={tags}
+            segments={segments}
             initialDraft={initialDraft}
             onSuccess={() => { setShowCreate(false); load() }}
             onCancel={() => setShowCreate(false)}
@@ -338,7 +362,6 @@ function BroadcastsPageInner() {
             <tbody className="divide-y divide-gray-100">
               {broadcasts.map((broadcast) => {
                 const statusInfo = statusConfig[broadcast.status]
-                const tagName = getTagName(broadcast.targetTagId)
                 const isSending = sendingId === broadcast.id
 
                 return (
@@ -362,13 +385,7 @@ function BroadcastsPageInner() {
 
                     {/* Target */}
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {broadcast.targetType === 'all' ? (
-                        '全員'
-                      ) : tagName ? (
-                        <span>タグ: {tagName}</span>
-                      ) : (
-                        'タグ指定'
-                      )}
+                      {getTargetLabel(broadcast)}
                     </td>
 
                     {/* Scheduled */}

@@ -10,6 +10,7 @@ import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetTyp
 import { LineClient } from '@line-crm/line-sdk';
 import { processBroadcastSend } from '../services/broadcast.js';
 import { processSegmentSend } from '../services/segment-send.js';
+import { getSegmentLineUserIds } from '@line-crm/db';
 import type { SegmentCondition } from '../services/segment-query.js';
 import type { Env } from '../index.js';
 
@@ -23,6 +24,7 @@ function serializeBroadcast(row: DbBroadcast) {
     messageContent: row.message_content,
     targetType: row.target_type,
     targetTagId: row.target_tag_id,
+    targetSegmentId: row.target_segment_id,
     status: row.status,
     scheduledAt: row.scheduled_at,
     sentAt: row.sent_at,
@@ -79,6 +81,7 @@ broadcasts.post('/api/broadcasts', async (c) => {
       messageContent: string;
       targetType: BroadcastTargetType;
       targetTagId?: string | null;
+      targetSegmentId?: string | null;
       scheduledAt?: string | null;
       lineAccountId?: string | null;
       altText?: string | null;
@@ -98,12 +101,20 @@ broadcasts.post('/api/broadcasts', async (c) => {
       );
     }
 
+    if (body.targetType === 'segment' && !body.targetSegmentId) {
+      return c.json(
+        { success: false, error: 'targetSegmentId is required when targetType is "segment"' },
+        400,
+      );
+    }
+
     const broadcast = await createBroadcast(c.env.DB, {
       title: body.title,
       messageType: body.messageType,
       messageContent: body.messageContent,
       targetType: body.targetType,
       targetTagId: body.targetTagId ?? null,
+      targetSegmentId: body.targetSegmentId ?? null,
       scheduledAt: body.scheduledAt ?? null,
     });
 
@@ -145,6 +156,7 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
       messageContent?: string;
       targetType?: BroadcastTargetType;
       targetTagId?: string | null;
+      targetSegmentId?: string | null;
       scheduledAt?: string | null;
     }>();
 
@@ -198,6 +210,15 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
     }
 
     const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+
+    if (existing.target_type === 'segment' && existing.target_segment_id) {
+      // セグメントターゲット: 事前に空でないことを確認
+      const count = (await getSegmentLineUserIds(c.env.DB, existing.target_segment_id)).length;
+      if (count === 0) {
+        return c.json({ success: false, error: 'セグメントに一致するLINE友だちがいません' }, 400);
+      }
+    }
+
     await processBroadcastSend(c.env.DB, lineClient, id, c.env.WORKER_URL);
 
     const result = await getBroadcastById(c.env.DB, id);

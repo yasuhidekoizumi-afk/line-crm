@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast } from '@/lib/api'
+import { fermentApi, type Segment } from '@/lib/ferment-api'
 import FlexPreviewComponent from '@/components/flex-preview'
 import ImageUploader from '@/components/messages/image-uploader'
 import FlexTemplates from '@/components/messages/flex-templates'
@@ -14,6 +15,7 @@ interface BroadcastFormProps {
   onSuccess: () => void
   onCancel: () => void
   initialDraft?: Partial<FormState> | null
+  segments?: Segment[]
 }
 
 const messageTypeLabels: Record<ApiBroadcast['messageType'], string> = {
@@ -28,11 +30,12 @@ interface FormState {
   messageContent: string
   targetType: ApiBroadcast['targetType']
   targetTagId: string
+  targetSegmentId: string
   scheduledAt: string
   sendNow: boolean
 }
 
-export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft }: BroadcastFormProps) {
+export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft, segments = [] }: BroadcastFormProps) {
   const { selectedAccountId } = useAccount()
   const [form, setForm] = useState<FormState>({
     title: initialDraft?.title ?? '',
@@ -40,6 +43,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft 
     messageContent: initialDraft?.messageContent ?? '',
     targetType: initialDraft?.targetType ?? 'all',
     targetTagId: initialDraft?.targetTagId ?? '',
+    targetSegmentId: initialDraft?.targetSegmentId ?? '',
     scheduledAt: initialDraft?.scheduledAt ?? '',
     sendNow: initialDraft?.sendNow ?? true,
   })
@@ -66,6 +70,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft 
         messageContent: form.messageContent,
         targetType: form.targetType,
         targetTagId: form.targetType === 'tag' ? form.targetTagId || null : null,
+        targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId || null : null,
         status: 'draft',
         scheduledAt: form.sendNow || !form.scheduledAt
           ? null
@@ -260,6 +265,17 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft 
             >
               タグで絞り込み
             </button>
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, targetType: 'segment', targetSegmentId: '' })}
+              className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
+                form.targetType === 'segment'
+                  ? 'border-purple-500 text-purple-700 bg-purple-50'
+                  : 'border-gray-300 text-gray-600 bg-white hover:border-gray-400'
+              }`}
+            >
+              🎯 セグメントで絞り込み
+            </button>
           </div>
           {form.targetType === 'tag' && (
             <select
@@ -270,6 +286,20 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft 
               <option value="">タグを選択...</option>
               {tags.map((tag) => (
                 <option key={tag.id} value={tag.id}>{tag.name}</option>
+              ))}
+            </select>
+          )}
+          {form.targetType === 'segment' && (
+            <select
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              value={form.targetSegmentId}
+              onChange={(e) => setForm({ ...form, targetSegmentId: e.target.value })}
+            >
+              <option value="">セグメントを選択...</option>
+              {segments.map((seg) => (
+                <option key={seg.segment_id} value={seg.segment_id}>
+                  {seg.name}（{seg.customer_count.toLocaleString()}人）
+                </option>
               ))}
             </select>
           )}
