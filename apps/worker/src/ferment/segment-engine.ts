@@ -71,6 +71,9 @@ const ALLOWED_FIELDS = new Set([
   'days_since_created',
   // LINE CRM 連携
   'friend_tag',
+  // ロイヤルティ連携
+  'loyalty_rank',
+  'loyalty_balance',
 ]);
 
 // ============================================================
@@ -120,6 +123,50 @@ function leafToSql(cond: SegmentLeafCondition): QueryPart {
         };
       default:
         throw new Error(`friend_tag で未対応の演算子: ${op}（= または != のみ対応）`);
+    }
+  }
+
+  // ロイヤルティ連携: loyalty_points テーブルをサブクエリ参照
+  if (field === 'loyalty_rank') {
+    const rankName = String(value ?? '');
+    switch (op) {
+      case '=':
+        return {
+          sql: `EXISTS (
+            SELECT 1 FROM loyalty_points lp
+            JOIN friends f ON f.id = lp.friend_id
+            WHERE f.line_user_id = c.line_user_id AND lp.rank = ?
+          )`,
+          bindings: [rankName],
+        };
+      case '!=':
+        return {
+          sql: `NOT EXISTS (
+            SELECT 1 FROM loyalty_points lp
+            JOIN friends f ON f.id = lp.friend_id
+            WHERE f.line_user_id = c.line_user_id AND lp.rank = ?
+          )`,
+          bindings: [rankName],
+        };
+      default:
+        throw new Error(`loyalty_rank で未対応の演算子: ${op}（= または != のみ対応）`);
+    }
+  }
+
+  if (field === 'loyalty_balance') {
+    const subquery = `(SELECT lp.balance FROM loyalty_points lp JOIN friends f ON f.id = lp.friend_id WHERE f.line_user_id = c.line_user_id)`;
+    const numValue = Number(value);
+    switch (op) {
+      case '=':  return { sql: `${subquery} = ?`, bindings: [numValue] };
+      case '!=': return { sql: `${subquery} != ?`, bindings: [numValue] };
+      case '>':  return { sql: `${subquery} > ?`, bindings: [numValue] };
+      case '>=': return { sql: `${subquery} >= ?`, bindings: [numValue] };
+      case '<':  return { sql: `${subquery} < ?`, bindings: [numValue] };
+      case '<=': return { sql: `${subquery} <= ?`, bindings: [numValue] };
+      case 'is_null':     return { sql: `${subquery} IS NULL`, bindings: [] };
+      case 'is_not_null': return { sql: `${subquery} IS NOT NULL`, bindings: [] };
+      default:
+        throw new Error(`loyalty_balance で未対応の演算子: ${op}`);
     }
   }
 

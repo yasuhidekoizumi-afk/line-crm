@@ -50,6 +50,9 @@ const FIELDS: FieldDef[] = [
   { value: 'first_order_at',   label: '初回注文日',       type: 'date' },
   { value: 'source',           label: '流入元',           type: 'string' },
   { value: 'display_name',     label: '表示名',           type: 'string' },
+  // ロイヤルティ
+  { value: 'loyalty_rank',     label: 'ロイヤルティランク', type: 'string' },
+  { value: 'loyalty_balance',  label: 'ポイント残高',      type: 'number', unit: 'pt' },
 ]
 
 const FIELD_MAP = Object.fromEntries(FIELDS.map((f) => [f.value, f]))
@@ -328,6 +331,19 @@ export default function SegmentRuleBuilder({ value, onChange }: RuleBuilderProps
                       />
                       {fieldDef?.unit && <span className="text-xs text-gray-400 shrink-0">{fieldDef.unit}</span>}
                     </div>
+                  ) : cond.field === 'loyalty_rank' ? (
+                    <select
+                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white"
+                      value={String(cond.value ?? '')}
+                      onChange={(e) => updateCondition(localRoot, idx, { value: e.target.value })}
+                    >
+                      <option value="">選択...</option>
+                      <option value="ダイヤモンド">💎 ダイヤモンド</option>
+                      <option value="プラチナ">🥇 プラチナ</option>
+                      <option value="ゴールド">🥈 ゴールド</option>
+                      <option value="シルバー">🥉 シルバー</option>
+                      <option value="レギュラー">レギュラー</option>
+                    </select>
                   ) : (
                     <input
                       type="text"
