@@ -141,10 +141,21 @@ function jsonToCondition(json: Record<string, unknown>): Condition {
       conditions: (json.conditions as Record<string, unknown>[]).map(jsonToCondition),
     }
   }
+  const rawValue = json.value
+  let val: string | number | string[] | undefined = ''
+  if (rawValue !== undefined && rawValue !== null) {
+    if (typeof rawValue === 'number') {
+      val = rawValue
+    } else if (Array.isArray(rawValue)) {
+      val = rawValue.map(String)
+    } else {
+      val = String(rawValue)
+    }
+  }
   return {
     field: String(json.field ?? 'ltv'),
     operator: (json.operator as SegmentOperator) ?? '=',
-    value: json.value ?? '',
+    value: val,
   }
 }
 
