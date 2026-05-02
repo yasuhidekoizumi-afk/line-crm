@@ -33,8 +33,16 @@ interface FermentEnv {
 
 /**
  * 期限が来たフロー enrollment を処理する
+ * 配送時間枠: 9:00〜23:00 JST（LINE側と統一）
  */
 export async function processFlowDeliveries(env: FermentEnv): Promise<void> {
+  // JST配送時間枠チェック
+  const jstHour = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', hour12: false });
+  const hour = parseInt(jstHour, 10);
+  if (hour < 9 || hour >= 23) {
+    return; // 配送時間外
+  }
+
   const enrollments = await getDueEnrollments(env.DB, 50);
 
   for (const enrollment of enrollments) {

@@ -23,6 +23,7 @@ import {
   createEmailFlowStep,
   deleteEmailFlowStep,
   createEnrollment,
+  updateEnrollment,
   generateFermentId,
 } from '@line-crm/db';
 import type { FermentEnv } from '../types.js';
@@ -189,6 +190,36 @@ emailFlowRoutes.post('/flows/:id/enroll', async (c) => {
     });
 
     return c.json({ success: true, data: { enrollment_id: enrollmentId } }, 201);
+  } catch (err) {
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// 一時停止
+emailFlowRoutes.post('/flows/:flowId/enrollments/:enrollmentId/pause', async (c) => {
+  try {
+    await updateEnrollment(c.env.DB, c.req.param('enrollmentId'), {
+      status: 'paused',
+      next_send_at: null,
+    });
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// 再開
+emailFlowRoutes.post('/flows/:flowId/enrollments/:enrollmentId/resume', async (c) => {
+  try {
+    const enrollmentId = c.req.param('enrollmentId');
+    const body = await c.req.json<{ delay_hours?: number }>().catch(() => ({}));
+    const delayHours = body.delay_hours ?? 0;
+    const nextSendAt = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
+    await updateEnrollment(c.env.DB, enrollmentId, {
+      status: 'active',
+      next_send_at: nextSendAt,
+    });
+    return c.json({ success: true });
   } catch (err) {
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
