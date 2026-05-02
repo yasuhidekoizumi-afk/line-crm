@@ -18,6 +18,7 @@ import {
   updateSegment,
   deleteSegment,
   getSegmentMemberIds,
+  getSegmentMemberNames,
   getSegmentMembersWithEmail,
   generateFermentId,
 } from '@line-crm/db';
@@ -138,7 +139,7 @@ segmentRoutes.get('/:id/members', async (c) => {
     const withEmail = c.req.query('with_email') === 'true';
 
     const data = withEmail
-      ? await getSegmentMembersWithEmail(c.env.DB, id, limit, offset)
+      ? await getSegmentMemberNames(c.env.DB, id, limit, offset)
       : await getSegmentMemberIds(c.env.DB, id);
 
     return c.json({

@@ -830,6 +830,29 @@ export async function getSegmentMembersWithEmail(
   return result.results;
 }
 
+/**
+ * セグメントメンバーの基本情報（customer_id, display_name, email）を取得する
+ * getSegmentMembersWithEmail と違い、メール購読有無に関わらず全メンバーを返す
+ */
+export async function getSegmentMemberNames(
+  db: D1Database,
+  segmentId: string,
+  limit = 100,
+  offset = 0,
+): Promise<Array<{ customer_id: string; display_name: string | null; email: string | null }>> {
+  const result = await db
+    .prepare(
+      `SELECT c.customer_id, c.display_name, c.email FROM customers c
+       INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
+       WHERE sm.segment_id = ?
+       ORDER BY c.display_name ASC
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(segmentId, limit, offset)
+    .all<{ customer_id: string; display_name: string | null; email: string | null }>();
+  return result.results;
+}
+
 // ============================================================
 // email_logs クエリ
 // ============================================================

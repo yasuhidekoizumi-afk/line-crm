@@ -9,19 +9,13 @@ interface MemberModalProps {
   onClose: () => void
 }
 
-interface MemberInfo {
-  customer_id: string
-  display_name: string
-  email: string
-}
-
 export default function MemberModal({ segmentId, segmentName, onClose }: MemberModalProps) {
-  const [members, setMembers] = useState<MemberInfo[]>([])
+  const [members, setMembers] = useState<Array<{ customer_id: string; display_name: string | null; email: string | null }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
-  const PAGE_SIZE = 50
+  const PAGE_SIZE = 100
 
   useEffect(() => {
     let cancelled = false
@@ -29,10 +23,10 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
       setLoading(true)
       setError('')
       try {
-        // Step 1: Get member IDs
         const res = await fermentApi.segments.members(segmentId, {
           limit: PAGE_SIZE,
           offset: page * PAGE_SIZE,
+          with_email: true,
         })
         if (cancelled) return
         if (!res.success || !res.data) {
@@ -40,30 +34,8 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
           setLoading(false)
           return
         }
-        const ids = res.data as unknown as string[]
+        setMembers(res.data as unknown as Array<{ customer_id: string; display_name: string | null; email: string | null }>)
         setTotal(res.meta?.total ?? 0)
-
-        // Step 2: Fetch customer details in batches (max 5 concurrent)
-        const info: MemberInfo[] = []
-        const BATCH_SIZE = 5
-        for (let start = 0; start < ids.length; start += BATCH_SIZE) {
-          if (cancelled) return
-          const batch = ids.slice(start, start + BATCH_SIZE)
-          const batchResults = await Promise.all(
-            batch.map((id) =>
-              fermentApi.customers.get(id).catch(() => null)
-            )
-          )
-          for (let j = 0; j < batch.length; j++) {
-            const c = batchResults[j]?.data as Record<string, unknown> | undefined
-            info.push({
-              customer_id: batch[j],
-              display_name: c ? String(c.display_name ?? c.email ?? '') : '',
-              email: c ? String(c.email ?? '') : '',
-            })
-          }
-        }
-        setMembers(info)
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : '読み込みに失敗しました')
       } finally {
@@ -81,7 +53,6 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
         className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
           <div>
             <h2 className="text-base font-bold text-gray-900">{segmentName}</h2>
@@ -94,7 +65,6 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
           </button>
         </div>
 
-        {/* Content */}
         <div className="overflow-y-auto flex-1 px-6 py-4">
           {error && (
             <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>
@@ -109,7 +79,6 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
             <div className="text-center py-8 text-gray-400 text-sm">メンバーがいません</div>
           ) : (
             <div className="space-y-1">
-              {/* Header */}
               <div className="flex items-center gap-3 px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                 <div className="w-6 shrink-0">#</div>
                 <div className="flex-1">表示名</div>
@@ -132,7 +101,6 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
           )}
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 shrink-0">
             <button
