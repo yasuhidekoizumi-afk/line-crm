@@ -89,7 +89,7 @@ export default function MemberModal({ segmentId, segmentName, onClose }: MemberM
                   <div className="w-6 shrink-0 text-xs text-gray-400">{page * PAGE_SIZE + i + 1}</div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 truncate">
-                      {m.display_name || <span className="text-gray-400">（名前なし）</span>}
+                      {m.display_name || (m.email ? m.email.split('@')[0] : <span className="text-gray-400">（名前なし）</span>)}
                     </p>
                   </div>
                   <div className="w-48 text-xs text-gray-500 truncate">
