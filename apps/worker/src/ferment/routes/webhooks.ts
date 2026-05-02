@@ -160,6 +160,8 @@ async function handleShopifyWebhook(
         shopify_id?: string;
         email?: string;
         display_name?: string;
+        first_name?: string;
+        last_name?: string;
         tags?: string[];
       };
       order?: {
@@ -183,10 +185,16 @@ async function handleShopifyWebhook(
       const shopifyIdField =
         region === 'JP' ? 'shopify_customer_id_jp' : 'shopify_customer_id_us';
 
+      // display_name がない場合 first_name + last_name から生成
+      const webhookDisplayName = shopifyCustomer.display_name
+        ?? (shopifyCustomer.first_name || shopifyCustomer.last_name
+          ? `${shopifyCustomer.first_name ?? ''} ${shopifyCustomer.last_name ?? ''}`.trim()
+          : null)
+
       await upsertCustomer(c.env.DB, {
         customer_id: customerId,
         email: shopifyCustomer.email,
-        display_name: shopifyCustomer.display_name ?? null,
+        display_name: webhookDisplayName,
         region,
         language: region === 'JP' ? 'ja' : 'en',
         [shopifyIdField]: shopifyCustomer.shopify_id ?? null,
