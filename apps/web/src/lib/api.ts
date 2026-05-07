@@ -26,6 +26,7 @@ import type {
 } from '@line-crm/shared'
 
 import type { Broadcast } from '@line-crm/shared'
+import { notifyApiError } from '@/lib/api-error'
 
 /** Broadcast type from API (now camelCase after worker serialization) */
 export type ApiBroadcast = Broadcast
@@ -58,7 +59,18 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
       ...options?.headers,
     },
   })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) {
+    let message = `API error: ${res.status}`
+    try {
+      const body = await res.json()
+      if (body?.error) message = body.error
+      if (body?.message) message = body.message
+    } catch {
+      // ignore parse failure
+    }
+    notifyApiError(res.status, message)
+    throw new Error(message)
+  }
   return res.json() as Promise<T>
 }
 

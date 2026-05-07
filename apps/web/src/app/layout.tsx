@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import AppShell from '@/components/app-shell'
 import { ToastProvider } from '@/lib/toast'
+import ApiErrorWire from '@/components/api-error-wire'
 
 export const metadata: Metadata = {
   title: 'LINE CRM 管理画面',
@@ -17,6 +18,7 @@ export default function RootLayout({
     <html lang="ja">
       <body className="bg-gray-50 text-gray-900 antialiased" style={{ fontFamily: "'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif" }}>
         <ToastProvider>
+          <ApiErrorWire />
           <AppShell>
             {children}
           </AppShell>
