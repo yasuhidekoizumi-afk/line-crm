@@ -71,6 +71,21 @@ const TX_TYPE_META: Record<string, { label: string; color: string; bg: string }>
 
 const RANKS: LoyaltyRank[] = ['レギュラー', 'シルバー', 'ゴールド', 'プラチナ', 'ダイヤモンド']
 
+const PERIOD_LABELS: Record<string, string> = {
+  this_month: '今月',
+  last_month: '先月',
+  last_7d: '過去7日間',
+  last_30d: '過去30日間',
+  last_90d: '過去90日間',
+  this_year: '今年',
+}
+
+const COMPARE_LABELS: Record<string, string> = {
+  previous_period: '前期比',
+  previous_year: '前年比',
+  none: '比較なし',
+}
+
 function RankBadge({ rank }: { rank: LoyaltyRank }) {
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${RANK_COLORS[rank]}`}>
@@ -95,8 +110,8 @@ function Avatar({ name, pictureUrl, size = 36 }: { name: string | null; pictureU
 }
 
 // ─── KPI カード ───
-function KpiCard({ label, current, previous, unit = 'pt', color = 'text-gray-900' }: {
-  label: string; current: number; previous: number; unit?: string; color?: string
+function KpiCard({ label, current, previous, unit = 'pt', color = 'text-gray-900', comparisonLabel }: {
+  label: string; current: number; previous: number; unit?: string; color?: string; comparisonLabel?: string
 }) {
   const diff = current - previous
   const isUp = diff >= 0
@@ -104,19 +119,20 @@ function KpiCard({ label, current, previous, unit = 'pt', color = 'text-gray-900
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <p className="text-xs text-gray-500 mb-2">{label}（今月）</p>
+      <p className="text-xs text-gray-500 mb-2">{label}</p>
       <p className={`text-2xl font-bold ${color} mb-1`}>{current.toLocaleString('ja-JP')} {unit}</p>
-      <div className="flex items-center gap-1.5 text-xs">
-        <span className={`font-semibold ${isUp ? 'text-green-600' : 'text-red-500'}`}>
-          {isUp ? '↑' : '↓'} {Math.abs(diff).toLocaleString('ja-JP')} {unit}
-        </span>
-        {pct !== null && (
-          <span className="text-gray-400">（前月比 {pct}%）</span>
-        )}
-        {pct === null && previous === 0 && (
-          <span className="text-gray-400">前月 0</span>
-        )}
-      </div>
+      {comparisonLabel !== undefined && (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className={`font-semibold ${isUp ? 'text-green-600' : 'text-red-500'}`}>
+            {isUp ? '↑' : '↓'} {Math.abs(diff).toLocaleString('ja-JP')} {unit}
+          </span>
+          {pct !== null ? (
+            <span className="text-gray-400">（{comparisonLabel} {pct}%）</span>
+          ) : (
+            <span className="text-gray-400">比較データなし</span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -733,35 +749,54 @@ export default function LoyaltyPage() {
   const [periodStats, setPeriodStats] = useState<PeriodStats | null>(null)
   const [tab, setTab] = useState<TabType>('members')
   const [selected, setSelected] = useState<LoyaltyPoint | null>(null)
+  const [period, setPeriod] = useState('this_month')
+  const [compare, setCompare] = useState('previous_period')
 
   useEffect(() => {
+    const params = new URLSearchParams({ period, compare })
     fetchApi<{ success: boolean; data: Stats }>('/api/loyalty/stats')
       .then((r) => { if (r.success) setStats(r.data) })
       .catch(() => {})
-    fetchApi<{ success: boolean; data: PeriodStats }>('/api/loyalty/period-stats')
+    fetchApi<{ success: boolean; data: PeriodStats }>(`/api/loyalty/period-stats?${params}`)
       .then((r) => { if (r.success) setPeriodStats(r.data) })
       .catch(() => {})
-  }, [])
-
-  const now = new Date()
-  const monthLabel = `${now.getFullYear()}年${now.getMonth() + 1}月`
+  }, [period, compare])
 
   return (
     <div>
       <Header title="ロイヤルティ" />
 
+      {/* 期間フィルター */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <select value={period} onChange={(e) => setPeriod(e.target.value)}
+          className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+          <option value="this_month">今月</option>
+          <option value="last_month">先月</option>
+          <option value="last_7d">過去7日間</option>
+          <option value="last_30d">過去30日間</option>
+          <option value="last_90d">過去90日間</option>
+          <option value="this_year">今年</option>
+        </select>
+        <select value={compare} onChange={(e) => setCompare(e.target.value)}
+          className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+          <option value="previous_period">前期比</option>
+          <option value="previous_year">前年比</option>
+          <option value="none">比較なし</option>
+        </select>
+      </div>
+
       {/* 期間 KPI */}
       {periodStats ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-6">
-          <KpiCard label="付与ポイント"
+          <KpiCard label={`${PERIOD_LABELS[period]} 付与ポイント`}
             current={periodStats.current.awarded} previous={periodStats.previous.awarded}
-            color="text-green-700" />
-          <KpiCard label="利用ポイント"
+            color="text-green-700" comparisonLabel={compare !== 'none' ? COMPARE_LABELS[compare] : undefined} />
+          <KpiCard label={`${PERIOD_LABELS[period]} 利用ポイント`}
             current={periodStats.current.redeemed} previous={periodStats.previous.redeemed}
-            color="text-red-600" />
-          <KpiCard label="新規会員"
+            color="text-red-600" comparisonLabel={compare !== 'none' ? COMPARE_LABELS[compare] : undefined} />
+          <KpiCard label={`${PERIOD_LABELS[period]} 新規会員`}
             current={periodStats.current.newMembers} previous={periodStats.previous.newMembers}
-            unit="名" color="text-blue-700" />
+            unit="名" color="text-blue-700" comparisonLabel={compare !== 'none' ? COMPARE_LABELS[compare] : undefined} />
           {stats && (
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <p className="text-xs text-gray-500 mb-2">会員数・ランク内訳</p>
