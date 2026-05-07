@@ -68,7 +68,7 @@ function FlexText({ node }: { node: FlexNode }) {
     color: node.color || '#111',
     margin: 0,
     lineHeight: 1.4,
-    ...(node.wrap === false ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : { wordBreak: 'break-word' }),
+    ...(node.wrap === false ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }),
     ...(node.align === 'center' ? { textAlign: 'center' } : node.align === 'end' ? { textAlign: 'right' } : {}),
     ...(node.flex !== undefined ? { flex: node.flex } : {}),
   }
