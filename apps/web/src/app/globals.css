@@ -1,9 +1,41 @@
 @import "tailwindcss";
 
+/* ───── ダークモードを class ベースに切り替え ───── */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ───── カスタムプロパティ ───── */
+:root {
+  --color-bg-primary: #f9fafb;
+  --color-bg-card: #ffffff;
+  --color-bg-sidebar: #ffffff;
+  --color-border: #e5e7eb;
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+}
+
+.dark {
+  --color-bg-primary: #0f172a;
+  --color-bg-card: #1e293b;
+  --color-bg-sidebar: #1e293b;
+  --color-border: #334155;
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+}
+
+/* ───── ベーススタイル ───── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
 /* ============================================================
  * GrapesJS（メールテンプレート ビジュアルエディタ）の見やすさ調整
- * - デフォルトの暗いキャンバス背景を明るくし、プレビューが読みやすいように
- * - モバイルプレビュー時にキャンバスを中央寄せして空白の暗部を減らす
  * ========================================================== */
 .gjs-cv-canvas {
   background-color: #f5f6f8 !important;
