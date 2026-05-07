@@ -40,8 +40,8 @@ jobs:
       - name: 管理画面ビルド
         working-directory: apps/web
         env:
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
           GITHUB_PAGES: 'true'
+        # NEXT_PUBLIC_API_URL は apps/web/.env.production.local から自動読み込み
         run: pnpm build
 
       - name: GitHub Pages 設定
