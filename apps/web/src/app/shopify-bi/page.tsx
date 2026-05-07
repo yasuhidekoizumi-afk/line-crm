@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import Link from 'next/link'
 import { fetchApi } from '@/lib/api'
 import Header from '@/components/layout/header'
@@ -58,7 +58,41 @@ interface TrafficSourceRow {
 const yen = (n: number) => '¥' + Math.round(n).toLocaleString('ja-JP')
 const num = (n: number) => Math.round(n).toLocaleString('ja-JP')
 
+const PERIOD_OPTIONS = [
+  { value: '7d',   label: '過去7日' },
+  { value: '30d',  label: '過去30日' },
+  { value: '90d',  label: '過去90日' },
+  { value: '180d', label: '過去180日' },
+  { value: '1y',   label: '過去1年' },
+  { value: 'all',  label: '全期間' },
+] as const
+
+function calcDateRange(period: string) {
+  const now = new Date()
+  const today = now.toISOString().slice(0, 10)
+  if (period === 'all') return { from: undefined, to: undefined, fromYs: undefined, toYs: undefined }
+
+  const days: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '1y': 365 }
+  const d = days[period] ?? 30
+  const from = new Date(now)
+  from.setDate(from.getDate() - d)
+  const fromStr = from.toISOString().slice(0, 10)
+
+  // 前年同期（コホート用に月単位）
+  const fromMonth = fromStr.slice(0, 7)
+  const toMonth = today.slice(0, 7)
+
+  return {
+    from: fromStr,
+    to: today,
+    // コホートは月単位（全範囲をカバー）
+    fromMonth,
+    toMonth,
+  }
+}
+
 export default function ShopifyBiTopPage() {
+  const [period, setPeriod] = useState('90d')
   const [stats, setStats] = useState<OrderStats | null>(null)
   const [funnel, setFunnel] = useState<FunnelRow[]>([])
   const [cohort, setCohort] = useState<CohortRow[]>([])
@@ -68,51 +102,51 @@ export default function ShopifyBiTopPage() {
   const [error, setError] = useState<string | null>(null)
   const [recomputing, setRecomputing] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const [statsRes, funnelRes, cohortRes, matrixRes, trafficRes] = await Promise.all([
-          fetchApi<{ success: boolean; data: OrderStats }>(`/api/shopify/orders/stats`),
-          fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel`),
-          fetchApi<{ success: boolean; data: CohortRow[] }>(
-            `/api/customer-journey/cohort?from=2025-01&to=2026-12`,
-          ),
-          fetchApi<{ success: boolean; data: ChannelMatrixRow[] }>(
-            `/api/customer-journey/channel-matrix`,
-          ),
-          fetchApi<{ success: boolean; data: TrafficSourceRow[] }>(
-            `/api/customer-journey/traffic-source?from=2025-01-01`,
-          ),
-        ])
-        if (cancelled) return
-        if (statsRes.success) setStats(statsRes.data)
-        if (funnelRes.success) setFunnel(funnelRes.data)
-        if (matrixRes.success) setChannelMatrix(matrixRes.data)
-        if (trafficRes.success) setTrafficSource(trafficRes.data)
-        if (cohortRes.success) setCohort(cohortRes.data)
-      } catch (e) {
-        if (!cancelled) setError(`読み込み失敗: ${String(e)}`)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
+  const range = calcDateRange(period)
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const ps = new URLSearchParams()
+      if (range.from && range.to) { ps.set('from', range.from); ps.set('to', range.to) }
+
+      const cohortPs = new URLSearchParams()
+      if (range.fromMonth && range.toMonth) { cohortPs.set('from', range.fromMonth); cohortPs.set('to', range.toMonth) }
+
+      const [statsRes, funnelRes, cohortRes, matrixRes, trafficRes] = await Promise.all([
+        fetchApi<{ success: boolean; data: OrderStats }>(`/api/shopify/orders/stats?${ps}`),
+        fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel?${ps}`),
+        fetchApi<{ success: boolean; data: CohortRow[] }>(`/api/customer-journey/cohort?${cohortPs}`),
+        fetchApi<{ success: boolean; data: ChannelMatrixRow[] }>(`/api/customer-journey/channel-matrix?${ps}`),
+        fetchApi<{ success: boolean; data: TrafficSourceRow[] }>(`/api/customer-journey/traffic-source?${ps}`),
+      ])
+      if (statsRes.success) setStats(statsRes.data)
+      if (funnelRes.success) setFunnel(funnelRes.data)
+      if (matrixRes.success) setChannelMatrix(matrixRes.data)
+      if (trafficRes.success) setTrafficSource(trafficRes.data)
+      if (cohortRes.success) setCohort(cohortRes.data)
+    } catch (e) {
+      setError(`読み込み失敗: ${String(e)}`)
+    } finally {
+      setLoading(false)
     }
-  }, [])
+  }, [period])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
 
   const handleRecompute = async () => {
     setRecomputing(true)
     try {
       await fetchApi<{ success: boolean }>(`/api/customer-journey/recompute`, { method: 'POST' })
+      const cohortPs = new URLSearchParams()
+      if (range.fromMonth && range.toMonth) { cohortPs.set('from', range.fromMonth); cohortPs.set('to', range.toMonth) }
+      const ps = new URLSearchParams()
+      if (range.from && range.to) { ps.set('from', range.from); ps.set('to', range.to) }
+
       const [funnelRes, cohortRes] = await Promise.all([
-        fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel`),
-        fetchApi<{ success: boolean; data: CohortRow[] }>(
-          `/api/customer-journey/cohort?from=2025-01&to=2026-12`,
-        ),
+        fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel?${ps}`),
+        fetchApi<{ success: boolean; data: CohortRow[] }>(`/api/customer-journey/cohort?${cohortPs}`),
       ])
       if (funnelRes.success) setFunnel(funnelRes.data)
       if (cohortRes.success) setCohort(cohortRes.data)
@@ -123,7 +157,7 @@ export default function ShopifyBiTopPage() {
     }
   }
 
-  // 異常検知: コホート別 LINE連携率 < 15% の月を抽出
+  // 異常検知: コホート別 LINE連携率 < 15%
   const anomalies = cohort
     .filter((c) => c.first_order_customers >= 200 && c.line_link_rate_pct < 15)
     .sort((a, b) => b.first_order_customers - a.first_order_customers)
@@ -131,7 +165,6 @@ export default function ShopifyBiTopPage() {
   const lineSeg = funnel.find((f) => f.segment === 'LINE連携あり')
   const noLineSeg = funnel.find((f) => f.segment === 'LINE連携なし')
 
-  // 経済価値の試算
   const ltvDelta =
     lineSeg && noLineSeg ? Math.max(0, lineSeg.ltv - noLineSeg.ltv) : 0
   const lostCustomersInAnomalies = anomalies.reduce(
@@ -139,6 +172,8 @@ export default function ShopifyBiTopPage() {
     0,
   )
   const lostValue = ltvDelta * lostCustomersInAnomalies
+
+  const periodLabel = PERIOD_OPTIONS.find(p => p.value === period)?.label ?? ''
 
   return (
     <div>
@@ -152,7 +187,7 @@ export default function ShopifyBiTopPage() {
               CRM活動 × Shopify購入 のアトリビューション。月次の経営判断起点。
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <button
               onClick={handleRecompute}
               disabled={recomputing}
@@ -175,23 +210,45 @@ export default function ShopifyBiTopPage() {
           </div>
         )}
 
+        {/* ─── 期間フィルター ─── */}
+        <div className="flex flex-wrap items-center gap-2">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setPeriod(opt.value)}
+              className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
+                period === opt.value
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+          {range.from && (
+            <span className="text-xs text-gray-400 ml-1">
+              {range.from} 〜 {range.to}
+            </span>
+          )}
+        </div>
+
         {loading ? (
           <div className="text-center text-gray-400 py-12">読み込み中…</div>
         ) : (
           <>
-            {/* ─── 全期間サマリ KPIカード ─── */}
+            {/* ─── KPIカード ─── */}
             {stats && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <KpiCard label="総注文数" value={num(stats.order_count)} unit="件" color="blue" />
-                <KpiCard label="総売上" value={yen(stats.total_revenue)} color="green" />
+                <KpiCard label={`${periodLabel} 注文数`} value={num(stats.order_count)} unit="件" color="blue" />
+                <KpiCard label={`${periodLabel} 売上`} value={yen(stats.total_revenue)} color="green" />
                 <KpiCard
-                  label="ユニーク顧客"
+                  label={`${periodLabel} 顧客数`}
                   value={num(stats.unique_customers)}
                   unit="人"
                   color="purple"
                 />
                 <KpiCard
-                  label="LINE連携注文比率"
+                  label={`${periodLabel} LINE連携比率`}
                   value={
                     stats.order_count > 0
                       ? `${((stats.line_linked_orders / stats.order_count) * 100).toFixed(1)}%`
@@ -212,8 +269,7 @@ export default function ShopifyBiTopPage() {
                       LINE連携率が著しく低いコホートを {anomalies.length} 件検出
                     </div>
                     <div className="text-sm text-red-700 mt-1">
-                      新規顧客 200人以上の月で LINE連携率 15% 未満。獲得チャネルが LINE 連携導線を
-                      持っていない可能性。
+                      新規顧客 200人以上の月で LINE連携率 15% 未満。獲得チャネルが LINE 連携導線を持っていない可能性。
                     </div>
                     <div className="mt-3 grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {anomalies.slice(0, 6).map((a) => (
@@ -249,8 +305,7 @@ export default function ShopifyBiTopPage() {
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
                   <h2 className="font-bold text-gray-900">LINE連携の経済価値</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    全期間の初回購入顧客 {num(lineSeg.first_order_customers + noLineSeg.first_order_customers)}人
-                    の比較
+                    {periodLabel} の初回購入顧客 {num(lineSeg.first_order_customers + noLineSeg.first_order_customers)}人 の比較
                   </p>
                 </div>
                 <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-200">
@@ -268,13 +323,13 @@ export default function ShopifyBiTopPage() {
               </div>
             )}
 
-            {/* ─── 流入チャネル別 売上（landing_site UTM ベース）─── */}
+            {/* ─── 流入チャネル別 ─── */}
             {trafficSource.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
-                  <h2 className="font-bold text-gray-900">流入チャネル別 売上（2025年〜）</h2>
+                  <h2 className="font-bold text-gray-900">流入チャネル別 売上（{periodLabel}）</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Shopify注文の landing_site UTM パラメータ から判定（Shopify Flow メール / LINE / TikTok / 広告 etc）
+                    Shopify注文の landing_site UTM パラメータから判定
                   </p>
                 </div>
                 <div className="overflow-x-auto">
@@ -340,16 +395,16 @@ export default function ShopifyBiTopPage() {
                   </table>
                 </div>
                 <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">
-                  💡 「不明」は landing_site が空の注文（TikTok Shop の checkout 経由など）。「直接」は landing_site あるが UTM 無し。
+                  💡 「不明」は landing_site が空の注文。「直接」は landing_site あるが UTM 無し。
                 </div>
               </div>
             )}
 
-            {/* ─── サブセクション：LINE × Email 購読登録 4象限 ─── */}
+            {/* ─── LINE × Email 4象限 ─── */}
             {channelMatrix.length > 0 && (
               <details className="bg-white border border-gray-200 rounded-lg">
                 <summary className="px-4 sm:px-5 py-3 cursor-pointer font-bold text-gray-900 hover:bg-gray-50">
-                  📋 LINE連携 × メール購読登録 4象限（参考）
+                  📋 LINE連携 × メール購読登録 4象限（{periodLabel}）
                 </summary>
                 <div className="p-4 sm:p-5 border-t border-gray-100">
                   <p className="text-xs text-gray-500 mb-3">
@@ -388,7 +443,7 @@ export default function ShopifyBiTopPage() {
               </details>
             )}
 
-            {/* ─── 直近 12ヶ月のコホート連携率推移 ─── */}
+            {/* ─── コホート連携率推移 ─── */}
             {cohort.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
@@ -468,7 +523,7 @@ export default function ShopifyBiTopPage() {
               </div>
             )}
 
-            {/* ─── 関連ページへの導線 ─── */}
+            {/* ─── 関連ページ ─── */}
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <NavCard
                 href="/shopify-bi/timeseries"
@@ -496,7 +551,6 @@ export default function ShopifyBiTopPage() {
               />
             </div>
 
-            {/* ─── FERMENT cockpit へのリンク ─── */}
             <div className="text-sm text-gray-500 text-center pt-2">
               メールマーケ・AI施策の意思決定は{' '}
               <Link
