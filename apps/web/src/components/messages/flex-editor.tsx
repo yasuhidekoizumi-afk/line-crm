@@ -404,7 +404,16 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
 
               {selectedEntry.type === 'text' && (
                 <div className="space-y-1.5">
-                  {editField('テキスト', 'text', { placeholder: '表示するテキスト' })}
+                  <div className="flex items-start gap-2">
+                    <label className="text-xs text-gray-500 w-24 shrink-0 mt-1.5">テキスト</label>
+                    <textarea
+                      className="flex-1 border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500 resize-y"
+                      rows={3}
+                      value={propValue('text')}
+                      onChange={e => updateProperty('text', e.target.value)}
+                      placeholder="表示するテキスト（Enterで改行）"
+                    />
+                  </div>
                   {editField('サイズ', 'size', { options: [
                     { value: 'xxs', label: 'XXS (10px)' },
                     { value: 'xs', label: 'XS (12px)' },
