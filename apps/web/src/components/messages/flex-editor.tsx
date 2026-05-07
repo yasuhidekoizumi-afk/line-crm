@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import FlexPreviewComponent from '@/components/flex-preview'
+import ImageUploader from '@/components/messages/image-uploader'
 
 interface FlexEditorProps {
   value: string
@@ -505,6 +506,7 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
 
               {selectedEntry.type === 'image' && (
                 <div className="space-y-1.5">
+                  <ImageUploader onUploaded={(url) => updateProperty('url', url)} />
                   {editField('画像URL', 'url', { placeholder: 'https://...', type: 'url' })}
                   {editField('アスペクト比', 'aspectRatio', { placeholder: '例: 1:1, 1040:600' })}
                   {editField('表示モード', 'aspectMode', { options: [
