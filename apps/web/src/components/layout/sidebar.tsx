@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAccount } from '@/contexts/account-context'
 import type { AccountWithStats } from '@/contexts/account-context'
+import { useTheme } from '@/lib/theme'
 
 // ─── メニュー定義 ───
 
@@ -69,28 +70,28 @@ function AccountSwitcher() {
   if (loading || accounts.length === 0) return null
   const displayName = selectedAccount?.displayName || selectedAccount?.name || ''
   return (
-    <div ref={ref} className="px-3 py-3 border-b border-gray-200">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+    <div ref={ref} className="px-3 py-3 border-b border-gray-200 dark:border-gray-700">
+      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
         {selectedAccount && <AccountAvatar account={selectedAccount} size={28} />}
         <div className="flex-1 text-left min-w-0">
-          <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{displayName}</p>
         </div>
         <svg className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       {open && (
-        <div className="mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+        <div className="mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden">
           {accounts.map((account) => {
             const isSelected = account.id === selectedAccount?.id
             const name = account.displayName || account.name
             return (
               <button key={account.id} onClick={() => { setSelectedAccountId(account.id); setOpen(false) }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${isSelected ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${isSelected ? 'bg-green-50 dark:bg-green-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                 <AccountAvatar account={account} size={24} />
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm truncate ${isSelected ? 'font-semibold text-green-700' : 'text-gray-700'}`}>{name}</p>
-                  {account.basicId && <p className="text-xs text-gray-400 truncate">{account.basicId}</p>}
+                  <p className={`text-sm truncate ${isSelected ? 'font-semibold text-green-700 dark:text-green-400' : 'text-gray-700 dark:text-gray-300'}`}>{name}</p>
+                  {account.basicId && <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{account.basicId}</p>}
                 </div>
                 {isSelected && <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
               </button>
@@ -121,29 +122,29 @@ const shortcuts = [
 function ShortcutHelp({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-bold text-gray-900">⌨ キーボードショートカット</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+          <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">⌨ キーボードショートカット</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
         <div className="overflow-y-auto px-6 py-4 space-y-3">
           {shortcuts.map((s) => (
             <div key={s.keys} className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{s.desc}</span>
-              <kbd className="ml-4 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 text-xs font-mono font-semibold text-gray-700 border border-gray-200 shadow-sm">
+              <span className="text-sm text-gray-600 dark:text-gray-400">{s.desc}</span>
+              <kbd className="ml-4 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-xs font-mono font-semibold text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 shadow-sm">
                 {s.keys.split('→').map((part, i) => (
                   <span key={i}>
                     {i > 0 && <span className="text-gray-400 mx-0.5">→</span>}
-                    <span className="bg-white px-1.5 py-0.5 rounded border border-gray-200">{part.trim()}</span>
+                    <span className="bg-white dark:bg-gray-900 px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-600">{part.trim()}</span>
                   </span>
                 ))}
               </kbd>
             </div>
           ))}
         </div>
-        <div className="px-6 py-3 border-t border-gray-100">
+        <div className="px-6 py-3 border-t border-gray-100 dark:border-gray-700">
           <p className="text-xs text-gray-400">これらのショートカットはどの画面でも使えます。</p>
         </div>
       </div>
@@ -165,17 +166,17 @@ const helpSections = [
 function HelpModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div><h2 className="text-base font-bold text-gray-900">使い方ガイド</h2><p className="text-xs text-gray-400 mt-0.5">LINE Harness 管理画面</p></div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+          <div><h2 className="text-base font-bold text-gray-900 dark:text-gray-100">使い方ガイド</h2><p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">LINE Harness 管理画面</p></div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
         <div className="overflow-y-auto px-6 py-4 space-y-4">
           {helpSections.map((s) => (
             <div key={s.title} className="flex gap-3">
-              <div className="flex-1 min-w-0"><p className="text-sm font-semibold text-gray-800">{s.title}</p><p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{s.body}</p></div>
+              <div className="flex-1 min-w-0"><p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{s.title}</p><p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">{s.body}</p></div>
             </div>
           ))}
         </div>
@@ -187,6 +188,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const { theme, toggle: toggleTheme } = useTheme()
   const [isOpen, setIsOpen] = useState(false)
   const [staffName, setStaffName] = useState<string | null>(null)
   const [staffRole, setStaffRole] = useState<string | null>(null)
@@ -199,17 +201,14 @@ export default function Sidebar() {
   useEffect(() => {
     let gPressed = false
     const handler = (e: KeyboardEvent) => {
-      // モーダルやinputがフォーカスされているときは無視
       const tag = (e.target as HTMLElement).tagName
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
 
-      // ?: ショートカットヘルプ
       if (e.key === '?' && !e.shiftKey) {
         setShowShortcuts((v) => !v)
         return
       }
 
-      // g → 次のキー
       if (e.key === 'g') { gPressed = true; return }
       if (gPressed) {
         gPressed = false
@@ -225,7 +224,6 @@ export default function Sidebar() {
         return
       }
 
-      // 通常キーは1文字だけなので、gが単独で押されたらタイムアウト
       setTimeout(() => { gPressed = false }, 1000)
     }
     window.addEventListener('keydown', handler)
@@ -243,7 +241,6 @@ export default function Sidebar() {
     return () => { document.body.style.overflow = '' }
   }, [isOpen])
 
-  // / キーで検索フォーカス（input以外の時）
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === '/' && document.activeElement !== searchRef.current && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -266,24 +263,24 @@ export default function Sidebar() {
 
   const sidebarContent = (
     <>
-      <div className="px-6 py-5 border-b border-gray-200">
+      <div className="px-6 py-5 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: '#06C755' }}>H</div>
-          <div><p className="text-sm font-bold text-gray-900 leading-tight">LINE Harness</p><p className="text-xs text-gray-400">管理画面</p></div>
+          <div><p className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-tight">LINE Harness</p><p className="text-xs text-gray-400 dark:text-gray-500">管理画面</p></div>
         </div>
       </div>
       <AccountSwitcher />
       <div className="px-3 pt-3">
         <div className="relative">
           <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          <input ref={searchRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="メニューを検索... (⌘/)" className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-200 transition-colors" aria-label="メニューを検索" />
+          <input ref={searchRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="メニューを検索..." className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 focus:bg-white dark:focus:bg-gray-700 focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-200 dark:focus:ring-green-800 transition-colors text-gray-900 dark:text-gray-100" aria-label="メニューを検索" />
           {searchQuery && <button onClick={() => { setSearchQuery(''); searchRef.current?.focus() }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" aria-label="クリア"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>}
         </div>
       </div>
       <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
         {filteredSections.map((section, si) => (
           <div key={si}>
-            {section.label && <div className="pt-4 pb-1 px-3"><p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">{section.label}</p></div>}
+            {section.label && <div className="pt-4 pb-1 px-3"><p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">{section.label}</p></div>}
             {section.items.filter((item) => {
               if (item.href === '/staff' && staffRole !== 'owner' && staffRole !== 'admin') return false
               if (item.href === '/accounts' && staffRole === 'staff') return false
@@ -293,36 +290,45 @@ export default function Sidebar() {
               const isDanger = 'danger' in item && item.danger
               return (
                 <Link key={item.href} href={item.href}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? 'text-white' : isDanger ? 'text-red-500 hover:bg-red-50' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? 'text-white' : isDanger ? 'text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-100'}`}
                   style={active ? { backgroundColor: isDanger ? '#EF4444' : '#06C755' } : {}}>
                   <NavIcon d={item.icon} />
                   <span className="flex-1">{item.label}</span>
-                  {(item as { key?: string }).key && <kbd className="text-[10px] text-gray-400 font-mono bg-gray-100 rounded px-1.5 py-0.5 border border-gray-200">{(item as { key: string }).key}</kbd>}
+                  {(item as { key?: string }).key && <kbd className="text-[10px] text-gray-400 dark:text-gray-500 font-mono bg-gray-100 dark:bg-gray-700 rounded px-1.5 py-0.5 border border-gray-200 dark:border-gray-600">{(item as { key: string }).key}</kbd>}
                 </Link>
               )
             })}
           </div>
         ))}
-        {filteredSections.length === 0 && <div className="px-3 py-8 text-center"><p className="text-xs text-gray-400">「{searchQuery}」に一致するメニューがありません</p></div>}
+        {filteredSections.length === 0 && <div className="px-3 py-8 text-center"><p className="text-xs text-gray-400 dark:text-gray-500">「{searchQuery}」に一致するメニューがありません</p></div>}
       </nav>
-      <div className="border-t border-gray-200">
+      <div className="border-t border-gray-200 dark:border-gray-700">
         {staffName && (
-          <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-100">
-            <div className="font-medium text-gray-700">{staffName}</div>
-            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium mt-0.5 ${staffRole === 'owner' ? 'bg-yellow-100 text-yellow-800' : staffRole === 'admin' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>{staffRole === 'owner' ? 'オーナー' : staffRole === 'admin' ? '管理者' : 'スタッフ'}</span>
+          <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700">
+            <div className="font-medium text-gray-700 dark:text-gray-300">{staffName}</div>
+            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium mt-0.5 ${staffRole === 'owner' ? 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300' : staffRole === 'admin' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>{staffRole === 'owner' ? 'オーナー' : staffRole === 'admin' ? '管理者' : 'スタッフ'}</span>
           </div>
         )}
         <div className="px-6 py-4 space-y-3">
-          <p className="text-xs text-gray-400">LINE Harness v{process.env.APP_VERSION || '0.0.0'}</p>
-          <button onClick={() => setShowShortcuts(true)} className="flex items-center gap-2 text-xs text-gray-500 hover:text-green-600 transition-colors">
+          <p className="text-xs text-gray-400 dark:text-gray-500">LINE Harness v{process.env.APP_VERSION || '0.0.0'}</p>
+          <button onClick={() => setShowShortcuts(true)} className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             ショートカット
           </button>
-          <button onClick={() => setShowHelp(true)} className="flex items-center gap-2 text-xs text-gray-500 hover:text-green-600 transition-colors">
+          <button onClick={() => setShowHelp(true)} className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             使い方
           </button>
-          <button onClick={() => { localStorage.removeItem('lh_api_key'); localStorage.removeItem('lh_staff_name'); localStorage.removeItem('lh_staff_role'); router.push('/login') }} className="flex items-center gap-2 text-xs text-gray-400 hover:text-red-500 transition-colors">
+          <button onClick={toggleTheme} className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {theme === 'dark'
+                ? <><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></>
+                : <><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></>
+              }
+            </svg>
+            {theme === 'dark' ? 'ライトモード' : 'ダークモード'}
+          </button>
+          <button onClick={() => { localStorage.removeItem('lh_api_key'); localStorage.removeItem('lh_staff_name'); localStorage.removeItem('lh_staff_role'); router.push('/login') }} className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
             ログアウト
           </button>
@@ -335,24 +341,24 @@ export default function Sidebar() {
     <>
       {showShortcuts && <ShortcutHelp onClose={() => setShowShortcuts(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => setIsOpen(!isOpen)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors" aria-label="メニュー">
-          <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center gap-3">
+        <button onClick={() => setIsOpen(!isOpen)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" aria-label="メニュー">
+          <svg className="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             {isOpen ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
           </svg>
         </button>
-        <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-xs" style={{ backgroundColor: '#06C755' }}>H</div><p className="text-sm font-bold text-gray-900">LINE Harness</p></div>
+        <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-xs" style={{ backgroundColor: '#06C755' }}>H</div><p className="text-sm font-bold text-gray-900 dark:text-gray-100">LINE Harness</p></div>
       </div>
       {isOpen && <div className="lg:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setIsOpen(false)} />}
-      <aside className={`lg:hidden fixed top-0 left-0 z-50 w-72 bg-white flex flex-col h-screen transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`lg:hidden fixed top-0 left-0 z-50 w-72 bg-white dark:bg-gray-900 flex flex-col h-screen transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="absolute top-4 right-4">
-          <button onClick={() => setIsOpen(false)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-gray-100" aria-label="閉じる">
-            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={() => setIsOpen(false)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="閉じる">
+            <svg className="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
         {sidebarContent}
       </aside>
-      <aside className="hidden lg:flex w-64 bg-white border-r border-gray-200 flex-col h-screen sticky top-0">
+      <aside className="hidden lg:flex w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex-col h-screen sticky top-0">
         {sidebarContent}
       </aside>
     </>
