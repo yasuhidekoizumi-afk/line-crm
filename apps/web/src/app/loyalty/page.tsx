@@ -74,6 +74,7 @@ const RANKS: LoyaltyRank[] = ['レギュラー', 'シルバー', 'ゴールド',
 const PERIOD_LABELS: Record<string, string> = {
   this_month: '今月',
   last_month: '先月',
+  yesterday: '昨日',
   last_7d: '過去7日間',
   last_30d: '過去30日間',
   last_90d: '過去90日間',
@@ -82,6 +83,7 @@ const PERIOD_LABELS: Record<string, string> = {
 
 const COMPARE_LABELS: Record<string, string> = {
   previous_period: '前期比',
+  previous_day: '前日比',
   previous_year: '前年比',
   none: '比較なし',
 }
@@ -772,6 +774,7 @@ export default function LoyaltyPage() {
           className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
           <option value="this_month">今月</option>
           <option value="last_month">先月</option>
+          <option value="yesterday">昨日</option>
           <option value="last_7d">過去7日間</option>
           <option value="last_30d">過去30日間</option>
           <option value="last_90d">過去90日間</option>
@@ -780,6 +783,7 @@ export default function LoyaltyPage() {
         <select value={compare} onChange={(e) => setCompare(e.target.value)}
           className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
           <option value="previous_period">前期比</option>
+          <option value="previous_day">前日比</option>
           <option value="previous_year">前年比</option>
           <option value="none">比較なし</option>
         </select>
