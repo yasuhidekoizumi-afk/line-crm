@@ -22,7 +22,7 @@ binding = "IMAGES"
 bucket_name = "oryzae-line-crm-images"
 
 [triggers]
-# 5分毎: LINE ステップ配信・ブロードキャスト + FERMENT キャンペーン/フロー処理
+# 5分毎: LINE ステップ配信・ブロードキャスト + FERMENT キャンペーン/フロー + 異常検知
 # 1時間毎: FERMENT セグメント再計算
 # 毎日 0:00 UTC (9:00 JST): FERMENT 日次サマリー
 crons = ["*/5 * * * *", "0 * * * *", "0 0 * * *"]
@@ -37,6 +37,12 @@ FERMENT_FROM_EMAIL_US = "hello@mail.oryzae.site"
 FERMENT_FROM_NAME_JP = "オリゼ"
 FERMENT_FROM_NAME_US = "ORYZAE"
 FERMENT_UNSUBSCRIBE_BASE_URL = "https://oryzae-line-crm.oryzae.workers.dev/email/unsubscribe"
+
+# CS: Gmail 送信元アドレス（Gmail API で impersonate 可能な実ユーザー）
+# support@oryzae.site はエイリアス（実体無し）のため、実ユーザーを指定する。
+# Reply-To ヘッダーで support@ を表示し、顧客が返信するとこのアドレスに届く。
+# 未設定時は yasuhide.koizumi@oryzae.site にフォールバック。
+CS_GMAIL_SENDER_EMAIL = ""
 
 # FERMENT シークレット（要 wrangler secret put コマンドで設定）
 # wrangler secret put RESEND_API_KEY

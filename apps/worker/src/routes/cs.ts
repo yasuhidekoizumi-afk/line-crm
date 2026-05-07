@@ -391,6 +391,30 @@ async function runTriageForMessage(
 
 // ==================== 返信送信 ====================
 
+/**
+ * チャネルに応じたReply-To表示用アドレス
+ */
+function getVisibleAlias(channel: CsChannel): string {
+  switch (channel) {
+    case 'email_customer_support':
+      return 'customer-support@oryzae.shop';
+    case 'email_support':
+    default:
+      return 'support@oryzae.site';
+  }
+}
+
+/**
+ * Gmail API で impersonate 可能な実ユーザーアドレスを取得。
+ * support@oryzae.site / customer-support@oryzae.shop はエイリアス（実体無し）のため、
+ * Gmail API のドメイン委任では impersonate できない。そのため実ユーザー受信箱から送信し、
+ * Reply-To ヘッダーで表示上の送信元を設定する。
+ * 環境変数 CS_GMAIL_SENDER_EMAIL で設定可能、未設定時は yasuhide.koizumi@oryzae.site にフォールバック。
+ */
+function getSenderEmail(env: Env['Bindings']): string {
+  return env.CS_GMAIL_SENDER_EMAIL || 'yasuhide.koizumi@oryzae.site';
+}
+
 async function sendReply(
   env: Env['Bindings'],
   chatId: string,
@@ -411,10 +435,9 @@ async function sendReply(
     console.error('[cs/sendReply] service account not configured');
     return;
   }
-  // support@oryzae.site / customer-support@oryzae.shop はエイリアス（実体無し）。
-  // ドメイン委任で impersonate できないため、実ユーザー受信箱から送信する。
-  const senderUser = 'yasuhide.koizumi@oryzae.site';
-  const visibleAlias = channel === 'email_support' ? 'support@oryzae.site' : 'support@oryzae.site';
+
+  const senderUser = getSenderEmail(env);
+  const visibleAlias = getVisibleAlias(channel);
   const subject = origSubject?.startsWith('Re: ') ? origSubject : `Re: ${origSubject ?? 'お問い合わせ'}`;
   const client = new GmailClient(sa, senderUser);
   const raw = buildRfc822({
@@ -476,7 +499,7 @@ cs.get('/api/cs/drafts', async (c) => {
     });
   } catch (e) {
     console.error('GET /api/cs/drafts error:', e);
-    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
+    return c.json({ success: false, error: `一覧取得失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -500,7 +523,7 @@ cs.get('/api/cs/chats/:id/draft', async (c) => {
     });
   } catch (e) {
     console.error('GET /api/cs/chats/:id/draft error:', e);
-    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
+    return c.json({ success: false, error: `取得失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -574,7 +597,7 @@ cs.post('/api/cs/drafts/:id/reject', async (c) => {
     return c.json({ success: true });
   } catch (e) {
     console.error('POST /api/cs/drafts/:id/reject error:', e);
-    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
+    return c.json({ success: false, error: `却下処理失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -616,7 +639,7 @@ cs.get('/api/cs/dashboard', async (c) => {
     });
   } catch (e) {
     console.error('GET /api/cs/dashboard error:', e);
-    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
+    return c.json({ success: false, error: `集計取得失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -626,7 +649,7 @@ cs.get('/api/cs/faqs', async (c) => {
     return c.json({ success: true, data: faqs });
   } catch (e) {
     console.error('GET /api/cs/faqs error:', e);
-    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
+    return c.json({ success: false, error: `FAQ取得失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -665,7 +688,7 @@ cs.post('/api/cs/gmail/watch', async (c) => {
     return c.json({ success: true, data: results });
   } catch (e) {
     console.error('POST /api/cs/gmail/watch error:', e);
-    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
+    return c.json({ success: false, error: `watch登録失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
 
@@ -704,6 +727,6 @@ cs.post('/api/cs/triage/:chatId', async (c) => {
     return c.json({ success: true });
   } catch (e) {
     console.error('POST /api/cs/triage/:chatId error:', e);
-    return c.json({ success: false, error: `送信失敗: ${String(e).slice(0, 400)}` }, 500);
+    return c.json({ success: false, error: `トリアージ失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });

@@ -136,6 +136,8 @@ export type Env = {
     CS_SLACK_CHANNEL_ID?: string;
     CS_FAQ_SHEET_ID?: string;
     CS_FAQ_SHEET_RANGE?: string;
+    /** Gmail 送信元アドレス（Gmail API で impersonate 可能な実ユーザー） */
+    CS_GMAIL_SENDER_EMAIL?: string;
     // CS Phase 2: 楽天 RMS
     RAKUTEN_SERVICE_SECRET?: string;
     RAKUTEN_LICENSE_KEY?: string;
@@ -308,14 +310,14 @@ async function scheduled(
 
   // FERMENT: cron 種別に応じた処理を追加
   // "*/5 * * * *"  → 5分毎（既存）
-  // "*/10 * * * *" → 10分毎: キャンペーン配信チェック + フロー配信
+  // "*/10 * * * *" → wrangler.toml 未定義のため到達しない（detectAnomalies は else で実行）
   // "0 * * * *"    → 1時間毎: セグメント再計算
   // "0 0 * * *"    → 毎日 0:00 UTC (9:00 JST): 日次サマリー
   const cronExpr = (_event as ScheduledEvent).cron;
   if (cronExpr === '*/10 * * * *') {
+    // wrangler.toml にこのcronがないため現在は到達しない。将来追加時に備えて保持
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
-    jobs.push(detectAnomalies(env).then(() => undefined));
   } else if (cronExpr === '0 * * * *') {
     jobs.push(recomputeAllSegments(env));
   } else if (cronExpr === '0 0 * * *') {
@@ -327,9 +329,11 @@ async function scheduled(
     // CS Phase 2: 楽天 licenseKey 期限チェック（30/14/7/1/0日前にSlack通知）
     jobs.push(checkRakutenLicenseExpiry(env).then(() => undefined).catch(() => undefined));
   } else {
-    // デフォルト（5分毎）でもキャンペーン・フロー処理を実行
+    // デフォルト（5分毎）
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
+    // 異常検知（軽量DBクエリのみ）
+    jobs.push(detectAnomalies(env).then(() => undefined));
     // CS Phase 1: FAQシート同期 + 下書き滞留チェック（5分毎）
     jobs.push(syncFaqFromSheets(env).then(() => undefined).catch(() => undefined));
     jobs.push(checkCsDraftBacklog(env).catch(() => undefined));
