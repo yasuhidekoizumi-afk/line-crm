@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAccount } from '@/contexts/account-context'
@@ -275,6 +275,8 @@ export default function Sidebar() {
   const [staffName, setStaffName] = useState<string | null>(null)
   const [staffRole, setStaffRole] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setStaffName(localStorage.getItem('lh_staff_name'))
@@ -287,7 +289,39 @@ export default function Sidebar() {
     return () => { document.body.style.overflow = '' }
   }, [isOpen])
 
+  // / キーで検索にフォーカス
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === '/' && document.activeElement !== searchRef.current) {
+        e.preventDefault()
+        searchRef.current?.focus()
+      }
+      if (e.key === 'Escape') {
+        setSearchQuery('')
+        searchRef.current?.blur()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   const isActive = (href: string) => href === '/' ? pathname === '/' : pathname.startsWith(href)
+
+  // 検索フィルタ
+  const q = searchQuery.toLowerCase().trim()
+  const filteredSections = useMemo(() => {
+    if (!q) return menuSections
+    return menuSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter(
+          (item) =>
+            item.label.toLowerCase().includes(q) ||
+            item.href.toLowerCase().includes(q),
+        ),
+      }))
+      .filter((section) => section.items.length > 0)
+  }, [q])
 
   const sidebarContent = (
     <>
@@ -307,12 +341,44 @@ export default function Sidebar() {
       {/* アカウント切替 */}
       <AccountSwitcher />
 
+      {/* 検索 */}
+      <div className="px-3 pt-3">
+        <div className="relative">
+          <svg
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            ref={searchRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="メニューを検索... ( / )"
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-200 transition-colors"
+            aria-label="メニューを検索"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(''); searchRef.current?.focus() }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              aria-label="検索をクリア"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* ナビゲーション */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {menuSections.map((section, si) => (
+      <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
+        {filteredSections.map((section, si) => (
           <div key={si}>
             {section.label && (
-              <div className="pt-5 pb-2 px-3">
+              <div className="pt-4 pb-1 px-3">
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">{section.label}</p>
               </div>
             )}
@@ -343,6 +409,12 @@ export default function Sidebar() {
             })}
           </div>
         ))}
+        {/* 検索結果が0件 */}
+        {filteredSections.length === 0 && (
+          <div className="px-3 py-8 text-center">
+            <p className="text-xs text-gray-400">「{searchQuery}」に一致するメニューがありません</p>
+          </div>
+        )}
       </nav>
 
       {/* フッター */}
