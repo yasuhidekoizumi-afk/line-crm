@@ -1,10 +1,11 @@
 /**
  * Shopify 注文 BI ルート
  *
- * - /api/shopify/orders/backfill         — 全期間バックフィル（1バッチずつ進める）
- * - /api/shopify/orders/backfill/status  — 進捗取得
- * - /api/shopify/orders/backfill/reset   — 進捗リセット
- * - /api/shopify/orders/stats            — 集計サマリ
+ * - /api/shopify/orders/backfill             — 全期間バックフィル（1バッチずつ進める）
+ * - /api/shopify/orders/backfill/status      — 進捗取得
+ * - /api/shopify/orders/backfill/reset       — 進捗リセット
+ * - /api/shopify/orders/stats                — 集計サマリ
+ * - /api/shopify/orders/timeseries           — 時系列集計（granularity/range または from/to 指定可）
  *
  * バックフィル設計:
  *   - Shopify Admin REST `/orders.json` を created_at 昇順で取得（100件/バッチ）
@@ -173,26 +174,41 @@ shopifyOrders.get('/api/shopify/orders/stats', async (c) => {
 });
 
 // ─── 時系列集計（日次・週次・月次）
-// granularity=day|week|month, range=7d|30d|90d|180d|1y|all
+// クエリパラメータ:
+//   granularity=day|week|month (デフォルト: day)
+//   range=7d|30d|90d|180d|1y|all (デフォルト: 30d)
+//   または from=YYYY-MM-DD&to=YYYY-MM-DD で完全カスタム範囲
+//   ※ from/to 指定時は range を指定しても無視される
 shopifyOrders.get('/api/shopify/orders/timeseries', async (c) => {
   const granularity = (c.req.query('granularity') ?? 'day') as 'day' | 'week' | 'month';
   const range = (c.req.query('range') ?? '30d') as '7d' | '30d' | '90d' | '180d' | '1y' | 'all';
+  const customFrom = c.req.query('from');
+  const customTo = c.req.query('to');
 
   // 期間計算
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   let fromDate: string | null = null;
+  let toDate: string | null = today;
   let prevFromDate: string | null = null;
   let prevToDate: string | null = null;
-  const rangeDays: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '1y': 365 };
-  if (range !== 'all') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - rangeDays[range]);
-    fromDate = d.toISOString().slice(0, 10);
-    const p1 = new Date(d);
-    p1.setDate(p1.getDate() - rangeDays[range]);
-    prevFromDate = p1.toISOString().slice(0, 10);
-    prevToDate = fromDate;
+
+  if (customFrom && customTo) {
+    // カスタム範囲: from/to が指定された場合
+    fromDate = customFrom;
+    toDate = customTo;
+    // カスタム範囲の場合は前後比較をしない
+  } else {
+    const rangeDays: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '1y': 365 };
+    if (range !== 'all') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - rangeDays[range]);
+      fromDate = d.toISOString().slice(0, 10);
+      const p1 = new Date(d);
+      p1.setDate(p1.getDate() - rangeDays[range]);
+      prevFromDate = p1.toISOString().slice(0, 10);
+      prevToDate = fromDate;
+    }
   }
 
   // バケット式
@@ -212,6 +228,10 @@ shopifyOrders.get('/api/shopify/orders/timeseries', async (c) => {
   if (fromDate) {
     seriesWhere += ` AND processed_at >= ?`;
     seriesBinds.push(fromDate);
+  }
+  if (toDate) {
+    seriesWhere += ` AND processed_at < ?`;
+    seriesBinds.push(toDate);
   }
 
   const seriesRes = await c.env.DB
@@ -245,9 +265,9 @@ shopifyOrders.get('/api/shopify/orders/timeseries', async (c) => {
     .bind(...seriesBinds)
     .first<{ total_orders: number; total_revenue: number; line_revenue: number; unique_customers: number }>();
 
-  // 前期間比較（range != 'all' のみ）
+  // 前期間比較（プリセット range 使用時のみ）
   let comparison: { prev_total_revenue: number; pct_change: number | null } | null = null;
-  if (prevFromDate && prevToDate) {
+  if (!customFrom && !customTo && prevFromDate && prevToDate) {
     const prev = await c.env.DB
       .prepare(
         `SELECT COALESCE(SUM(total_price), 0) AS prev_total_revenue, COUNT(*) AS prev_total_orders
@@ -270,7 +290,7 @@ shopifyOrders.get('/api/shopify/orders/timeseries', async (c) => {
       granularity,
       range,
       from: fromDate,
-      to: today,
+      to: toDate,
       series: seriesRes.results ?? [],
       summary: summary ?? { total_orders: 0, total_revenue: 0, line_revenue: 0, unique_customers: 0 },
       comparison,
@@ -366,7 +386,7 @@ shopifyOrders.get('/api/shopify/orders/kpi-bar', async (c) => {
         orders: r.month_orders,
         customers: r.month_customers,
         line_revenue: r.month_line_revenue,
-        line_share_pct: r.month_revenue > 0 ? Math.round((r.month_line_revenue / r.month_revenue) * 1000) / 10 : 0,
+        line_share_pct: r.month_revenue > 0 ? Math.round((r.month_revenue / r.month_revenue) * 1000) / 10 : 0,
         mom_pct: pct(r.month_revenue, r.prev_month_revenue),
       },
       d90: { revenue: r.d90_revenue, orders: r.d90_orders },
