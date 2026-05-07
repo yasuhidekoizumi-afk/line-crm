@@ -65,34 +65,20 @@ const PERIOD_OPTIONS = [
   { value: '180d', label: '過去180日' },
   { value: '1y',   label: '過去1年' },
   { value: 'all',  label: '全期間' },
+  { value: 'custom', label: 'カスタム' },
 ] as const
 
-function calcDateRange(period: string) {
-  const now = new Date()
-  const today = now.toISOString().slice(0, 10)
-  if (period === 'all') return { from: undefined, to: undefined, fromYs: undefined, toYs: undefined }
-
-  const days: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '1y': 365 }
-  const d = days[period] ?? 30
-  const from = new Date(now)
-  from.setDate(from.getDate() - d)
-  const fromStr = from.toISOString().slice(0, 10)
-
-  // 前年同期（コホート用に月単位）
-  const fromMonth = fromStr.slice(0, 7)
-  const toMonth = today.slice(0, 7)
-
-  return {
-    from: fromStr,
-    to: today,
-    // コホートは月単位（全範囲をカバー）
-    fromMonth,
-    toMonth,
-  }
+function todayStr() {
+  const d = new Date()
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0')
 }
 
 export default function ShopifyBiTopPage() {
   const [period, setPeriod] = useState('90d')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
   const [stats, setStats] = useState<OrderStats | null>(null)
   const [funnel, setFunnel] = useState<FunnelRow[]>([])
   const [cohort, setCohort] = useState<CohortRow[]>([])
@@ -101,16 +87,43 @@ export default function ShopifyBiTopPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [recomputing, setRecomputing] = useState(false)
+  const [dataKey, setDataKey] = useState(0)
 
-  const range = calcDateRange(period)
+  const calcRange = useCallback(() => {
+    const now = new Date()
+    const today = todayStr()
+    if (period === 'all') return { from: undefined as string | undefined, to: undefined, fromMonth: undefined, toMonth: undefined }
+    if (period === 'custom') {
+      if (!customFrom || !customTo) return null
+      return {
+        from: customFrom,
+        to: customTo,
+        fromMonth: customFrom.slice(0, 7),
+        toMonth: customTo.slice(0, 7),
+      }
+    }
+    const days: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '1y': 365 }
+    const d = days[period] ?? 30
+    const from = new Date(now)
+    from.setDate(from.getDate() - d)
+    const fromStr = from.toISOString().slice(0, 10)
+    return {
+      from: fromStr,
+      to: today,
+      fromMonth: fromStr.slice(0, 7),
+      toMonth: today.slice(0, 7),
+    }
+  }, [period, customFrom, customTo])
+
+  const range = calcRange()
 
   const fetchAll = useCallback(async () => {
+    if (!range) return
     setLoading(true)
     setError(null)
     try {
       const ps = new URLSearchParams()
       if (range.from && range.to) { ps.set('from', range.from); ps.set('to', range.to) }
-
       const cohortPs = new URLSearchParams()
       if (range.fromMonth && range.toMonth) { cohortPs.set('from', range.fromMonth); cohortPs.set('to', range.toMonth) }
 
@@ -131,11 +144,24 @@ export default function ShopifyBiTopPage() {
     } finally {
       setLoading(false)
     }
-  }, [period])
+  }, [dataKey])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => { if (range) fetchAll() }, [fetchAll, range])
+
+  const handlePeriodClick = (val: string) => {
+    setPeriod(val)
+    if (val !== 'custom') setDataKey((k) => k + 1)
+  }
+
+  const handleCustomApply = () => {
+    if (customFrom && customTo) {
+      setPeriod('custom')
+      setDataKey((k) => k + 1)
+    }
+  }
 
   const handleRecompute = async () => {
+    if (!range) return
     setRecomputing(true)
     try {
       await fetchApi<{ success: boolean }>(`/api/customer-journey/recompute`, { method: 'POST' })
@@ -143,7 +169,6 @@ export default function ShopifyBiTopPage() {
       if (range.fromMonth && range.toMonth) { cohortPs.set('from', range.fromMonth); cohortPs.set('to', range.toMonth) }
       const ps = new URLSearchParams()
       if (range.from && range.to) { ps.set('from', range.from); ps.set('to', range.to) }
-
       const [funnelRes, cohortRes] = await Promise.all([
         fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel?${ps}`),
         fetchApi<{ success: boolean; data: CohortRow[] }>(`/api/customer-journey/cohort?${cohortPs}`),
@@ -157,7 +182,6 @@ export default function ShopifyBiTopPage() {
     }
   }
 
-  // 異常検知: コホート別 LINE連携率 < 15%
   const anomalies = cohort
     .filter((c) => c.first_order_customers >= 200 && c.line_link_rate_pct < 15)
     .sort((a, b) => b.first_order_customers - a.first_order_customers)
@@ -165,70 +189,59 @@ export default function ShopifyBiTopPage() {
   const lineSeg = funnel.find((f) => f.segment === 'LINE連携あり')
   const noLineSeg = funnel.find((f) => f.segment === 'LINE連携なし')
 
-  const ltvDelta =
-    lineSeg && noLineSeg ? Math.max(0, lineSeg.ltv - noLineSeg.ltv) : 0
-  const lostCustomersInAnomalies = anomalies.reduce(
-    (s, c) => s + Math.round(c.first_order_customers * (0.5 - c.line_link_rate_pct / 100)),
-    0,
-  )
+  const ltvDelta = lineSeg && noLineSeg ? Math.max(0, lineSeg.ltv - noLineSeg.ltv) : 0
+  const lostCustomersInAnomalies = anomalies.reduce((s, c) => s + Math.round(c.first_order_customers * (0.5 - c.line_link_rate_pct / 100)), 0)
   const lostValue = ltvDelta * lostCustomersInAnomalies
 
-  const periodLabel = PERIOD_OPTIONS.find(p => p.value === period)?.label ?? ''
+  const periodLabelObj = PERIOD_OPTIONS.find(p => p.value === period)
+  const periodLabel = period === 'custom' && range
+    ? `${range.from} 〜 ${range.to}`
+    : (periodLabelObj?.label ?? '')
 
   return (
     <div>
       <Header title="売上分析" />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* ─── ヘッダー ─── */}
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">📊 売上分析（Shopify BI）</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              CRM活動 × Shopify購入 のアトリビューション。月次の経営判断起点。
-            </p>
+            <p className="text-sm text-gray-500 mt-1">CRM活動 × Shopify購入 のアトリビューション。月次の経営判断起点。</p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleRecompute}
-              disabled={recomputing}
-              className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
-            >
+            <button onClick={handleRecompute} disabled={recomputing || !range}
+              className="px-3 py-1.5 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50">
               {recomputing ? '再計算中…' : '🔄 再計算'}
             </button>
-            <Link
-              href="/shopify-bi/cohort"
-              className="px-3 py-1.5 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
-            >
-              コホート分析 →
-            </Link>
+            <Link href="/shopify-bi/cohort" className="px-3 py-1.5 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700">コホート分析 →</Link>
           </div>
         </div>
 
-        {error && (
-          <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+        {error && <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>}
 
         {/* ─── 期間フィルター ─── */}
         <div className="flex flex-wrap items-center gap-2">
           {PERIOD_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setPeriod(opt.value)}
-              className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
-                period === opt.value
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-              }`}
-            >
+            <button key={opt.value} onClick={() => handlePeriodClick(opt.value)}
+              className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${period === opt.value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
               {opt.label}
             </button>
           ))}
-          {range.from && (
-            <span className="text-xs text-gray-400 ml-1">
-              {range.from} 〜 {range.to}
-            </span>
+          {period === 'custom' && (
+            <div className="flex items-center gap-1 ml-1">
+              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+                className="px-2 py-1.5 text-sm border border-gray-300 rounded-md" />
+              <span className="text-gray-400">〜</span>
+              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+                className="px-2 py-1.5 text-sm border border-gray-300 rounded-md" />
+              <button onClick={handleCustomApply}
+                className="px-3 py-1.5 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700">適用</button>
+            </div>
+          )}
+          {range && range.from && (
+            <span className="text-xs text-gray-400 ml-1">{range.from} 〜 {range.to}</span>
+          )}
+          {period === 'custom' && !range && (
+            <span className="text-xs text-orange-500 ml-1">FROM/TO を入力して「適用」を押してください</span>
           )}
         </div>
 
@@ -236,62 +249,34 @@ export default function ShopifyBiTopPage() {
           <div className="text-center text-gray-400 py-12">読み込み中…</div>
         ) : (
           <>
-            {/* ─── KPIカード ─── */}
             {stats && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <KpiCard label={`${periodLabel} 注文数`} value={num(stats.order_count)} unit="件" color="blue" />
                 <KpiCard label={`${periodLabel} 売上`} value={yen(stats.total_revenue)} color="green" />
-                <KpiCard
-                  label={`${periodLabel} 顧客数`}
-                  value={num(stats.unique_customers)}
-                  unit="人"
-                  color="purple"
-                />
-                <KpiCard
-                  label={`${periodLabel} LINE連携比率`}
-                  value={
-                    stats.order_count > 0
-                      ? `${((stats.line_linked_orders / stats.order_count) * 100).toFixed(1)}%`
-                      : '—'
-                  }
-                  color="pink"
-                />
+                <KpiCard label={`${periodLabel} 顧客数`} value={num(stats.unique_customers)} unit="人" color="purple" />
+                <KpiCard label={`${periodLabel} LINE連携比率`} value={stats.order_count > 0 ? `${((stats.line_linked_orders / stats.order_count) * 100).toFixed(1)}%` : '—'} color="pink" />
               </div>
             )}
 
-            {/* ─── 異常検知アラート ─── */}
             {anomalies.length > 0 && (
               <div className="rounded-lg border-2 border-red-300 bg-red-50 p-4 sm:p-5">
                 <div className="flex items-start gap-3">
                   <div className="text-2xl">🚨</div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-bold text-red-900">
-                      LINE連携率が著しく低いコホートを {anomalies.length} 件検出
-                    </div>
-                    <div className="text-sm text-red-700 mt-1">
-                      新規顧客 200人以上の月で LINE連携率 15% 未満。獲得チャネルが LINE 連携導線を持っていない可能性。
-                    </div>
+                    <div className="font-bold text-red-900">LINE連携率が著しく低いコホートを {anomalies.length} 件検出</div>
+                    <div className="text-sm text-red-700 mt-1">新規顧客 200人以上の月で LINE連携率 15% 未満。</div>
                     <div className="mt-3 grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {anomalies.slice(0, 6).map((a) => (
-                        <div
-                          key={a.cohort_month}
-                          className="bg-white rounded-md border border-red-200 px-3 py-2 text-sm"
-                        >
+                        <div key={a.cohort_month} className="bg-white rounded-md border border-red-200 px-3 py-2 text-sm">
                           <div className="font-medium text-red-900">{a.cohort_month}</div>
-                          <div className="text-xs text-red-700 mt-0.5">
-                            {num(a.first_order_customers)}人 / 連携率 {a.line_link_rate_pct}%
-                          </div>
+                          <div className="text-xs text-red-700 mt-0.5">{num(a.first_order_customers)}人 / 連携率 {a.line_link_rate_pct}%</div>
                         </div>
                       ))}
                     </div>
                     {ltvDelta > 0 && (
                       <div className="mt-3 text-sm bg-white rounded-md border border-red-200 px-3 py-2">
-                        <span className="text-red-900 font-medium">
-                          推定機会損失：{yen(lostValue)}
-                        </span>
-                        <span className="text-red-700 ml-2">
-                          （LINE連携率 50% を達成していたら）
-                        </span>
+                        <span className="text-red-900 font-medium">推定機会損失：{yen(lostValue)}</span>
+                        <span className="text-red-700 ml-2">（LINE連携率 50% を達成していたら）</span>
                       </div>
                     )}
                   </div>
@@ -299,38 +284,28 @@ export default function ShopifyBiTopPage() {
               </div>
             )}
 
-            {/* ─── LINE連携の経済価値 ─── */}
             {lineSeg && noLineSeg && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
                   <h2 className="font-bold text-gray-900">LINE連携の経済価値</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {periodLabel} の初回購入顧客 {num(lineSeg.first_order_customers + noLineSeg.first_order_customers)}人 の比較
-                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">{periodLabel} の初回購入顧客 {num(lineSeg.first_order_customers + noLineSeg.first_order_customers)}人 の比較</p>
                 </div>
                 <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-200">
                   <SegmentBlock seg={lineSeg} variant="primary" />
                   <SegmentBlock seg={noLineSeg} variant="secondary" />
                 </div>
                 <div className="px-4 sm:px-5 py-3 bg-indigo-50 border-t border-indigo-100 text-sm">
-                  <span className="font-bold text-indigo-900">
-                    LINE連携1人 = 追加 {yen(ltvDelta)} のLTV
-                  </span>
-                  <span className="text-indigo-700 ml-2">
-                    （リピート率 {lineSeg.repeat_rate_pct}% vs {noLineSeg.repeat_rate_pct}%）
-                  </span>
+                  <span className="font-bold text-indigo-900">LINE連携1人 = 追加 {yen(ltvDelta)} のLTV</span>
+                  <span className="text-indigo-700 ml-2">（リピート率 {lineSeg.repeat_rate_pct}% vs {noLineSeg.repeat_rate_pct}%）</span>
                 </div>
               </div>
             )}
 
-            {/* ─── 流入チャネル別 ─── */}
             {trafficSource.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
                   <h2 className="font-bold text-gray-900">流入チャネル別 売上（{periodLabel}）</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Shopify注文の landing_site UTM パラメータから判定
-                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">Shopify注文の landing_site UTM パラメータから判定</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -373,43 +348,28 @@ export default function ShopifyBiTopPage() {
                         const lineRate = s.orders > 0 ? (s.line_linked_orders / s.orders) * 100 : 0
                         return (
                           <tr key={s.source}>
-                            <td className={`px-3 py-2 font-medium ${meta.color}`}>
-                              {meta.emoji} {meta.label}
-                            </td>
+                            <td className={`px-3 py-2 font-medium ${meta.color}`}>{meta.emoji} {meta.label}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{num(s.orders)}</td>
                             <td className="px-3 py-2 text-right font-medium tabular-nums">{yen(s.revenue)}</td>
                             <td className="px-3 py-2 text-right text-gray-700 tabular-nums">{yen(s.aov)}</td>
-                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden sm:table-cell">
-                              {yen(s.revenue_per_customer)}
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">
-                              {newRate.toFixed(1)}%
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">
-                              {lineRate.toFixed(1)}%
-                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden sm:table-cell">{yen(s.revenue_per_customer)}</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{newRate.toFixed(1)}%</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{lineRate.toFixed(1)}%</td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </table>
                 </div>
-                <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">
-                  💡 「不明」は landing_site が空の注文。「直接」は landing_site あるが UTM 無し。
-                </div>
+                <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">💡 「不明」は landing_site が空の注文。「直接」は landing_site あるが UTM 無し。</div>
               </div>
             )}
 
-            {/* ─── LINE × Email 4象限 ─── */}
             {channelMatrix.length > 0 && (
               <details className="bg-white border border-gray-200 rounded-lg">
-                <summary className="px-4 sm:px-5 py-3 cursor-pointer font-bold text-gray-900 hover:bg-gray-50">
-                  📋 LINE連携 × メール購読登録 4象限（{periodLabel}）
-                </summary>
+                <summary className="px-4 sm:px-5 py-3 cursor-pointer font-bold text-gray-900 hover:bg-gray-50">📋 LINE連携 × メール購読登録 4象限（{periodLabel}）</summary>
                 <div className="p-4 sm:p-5 border-t border-gray-100">
-                  <p className="text-xs text-gray-500 mb-3">
-                    customers.subscribed_email = 1 の登録ベース。実購入経路（UTM）とは別軸。
-                  </p>
+                  <p className="text-xs text-gray-500 mb-3">customers.subscribed_email = 1 の登録ベース。</p>
                   <div className="grid grid-cols-2 gap-3">
                     {[
                       { line: 1, email: 1, label: 'LINE有 × メール有', color: 'bg-purple-50 border-purple-300' },
@@ -417,24 +377,13 @@ export default function ShopifyBiTopPage() {
                       { line: 0, email: 1, label: 'LINE無 × メール有', color: 'bg-blue-50 border-blue-300' },
                       { line: 0, email: 0, label: 'LINE無 × メール無', color: 'bg-gray-50 border-gray-300' },
                     ].map((q) => {
-                      const row = channelMatrix.find(
-                        (r) => r.line_linked === q.line && r.email_subscribed === q.email,
-                      )
+                      const row = channelMatrix.find((r) => r.line_linked === q.line && r.email_subscribed === q.email)
                       return (
                         <div key={q.label} className={`border-2 rounded-lg p-3 ${q.color}`}>
                           <div className="text-xs font-bold text-gray-700">{q.label}</div>
                           {row ? (
-                            <>
-                              <div className="text-lg font-bold text-gray-900 mt-1 tabular-nums">
-                                LTV {yen(row.ltv)}
-                              </div>
-                              <div className="text-xs text-gray-600 mt-1 tabular-nums">
-                                {num(row.customers)}人 / {num(row.orders)}件
-                              </div>
-                            </>
-                          ) : (
-                            <div className="text-xs text-gray-400 mt-2">該当なし</div>
-                          )}
+                            <><div className="text-lg font-bold text-gray-900 mt-1 tabular-nums">LTV {yen(row.ltv)}</div><div className="text-xs text-gray-600 mt-1 tabular-nums">{num(row.customers)}人 / {num(row.orders)}件</div></>
+                          ) : <div className="text-xs text-gray-400 mt-2">該当なし</div>}
                         </div>
                       )
                     })}
@@ -443,22 +392,14 @@ export default function ShopifyBiTopPage() {
               </details>
             )}
 
-            {/* ─── コホート連携率推移 ─── */}
             {cohort.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
                   <div>
                     <h2 className="font-bold text-gray-900">月別 LINE連携率（コホート）</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      初回購入月別。LINE連携率の推移と異常検知。
-                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">初回購入月別。LINE連携率の推移と異常検知。</p>
                   </div>
-                  <Link
-                    href="/shopify-bi/cohort"
-                    className="text-sm text-indigo-600 hover:text-indigo-800"
-                  >
-                    詳細 →
-                  </Link>
+                  <Link href="/shopify-bi/cohort" className="text-sm text-indigo-600 hover:text-indigo-800">詳細 →</Link>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -477,43 +418,16 @@ export default function ShopifyBiTopPage() {
                         const isAnomaly = c.first_order_customers >= 200 && c.line_link_rate_pct < 15
                         return (
                           <tr key={c.cohort_month} className={isAnomaly ? 'bg-red-50' : ''}>
-                            <td className="px-3 py-2 font-medium text-gray-900">
-                              {c.cohort_month} {isAnomaly && '⚠️'}
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-700">
-                              {num(c.first_order_customers)}
-                            </td>
-                            <td
-                              className={`px-3 py-2 text-right font-medium ${
-                                c.line_link_rate_pct >= 40
-                                  ? 'text-green-700'
-                                  : c.line_link_rate_pct >= 20
-                                  ? 'text-yellow-700'
-                                  : 'text-red-700'
-                              }`}
-                            >
-                              {c.line_link_rate_pct}%
-                            </td>
+                            <td className="px-3 py-2 font-medium text-gray-900">{c.cohort_month} {isAnomaly && '⚠️'}</td>
+                            <td className="px-3 py-2 text-right text-gray-700">{num(c.first_order_customers)}</td>
+                            <td className={`px-3 py-2 text-right font-medium ${c.line_link_rate_pct >= 40 ? 'text-green-700' : c.line_link_rate_pct >= 20 ? 'text-yellow-700' : 'text-red-700'}`}>{c.line_link_rate_pct}%</td>
                             <td className="px-3 py-2 hidden sm:table-cell">
                               <div className="w-full bg-gray-200 rounded-full h-2 max-w-[200px]">
-                                <div
-                                  className={`h-2 rounded-full ${
-                                    c.line_link_rate_pct >= 40
-                                      ? 'bg-green-500'
-                                      : c.line_link_rate_pct >= 20
-                                      ? 'bg-yellow-500'
-                                      : 'bg-red-500'
-                                  }`}
-                                  style={{ width: `${Math.min(100, c.line_link_rate_pct)}%` }}
-                                />
+                                <div className={`h-2 rounded-full ${c.line_link_rate_pct >= 40 ? 'bg-green-500' : c.line_link_rate_pct >= 20 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${Math.min(100, c.line_link_rate_pct)}%` }} />
                               </div>
                             </td>
-                            <td className="px-3 py-2 text-right text-gray-700 hidden md:table-cell">
-                              {c.line_repeat_rate_pct ?? '—'}%
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-700 hidden md:table-cell">
-                              {c.noline_repeat_rate_pct ?? '—'}%
-                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700 hidden md:table-cell">{c.line_repeat_rate_pct ?? '—'}%</td>
+                            <td className="px-3 py-2 text-right text-gray-700 hidden md:table-cell">{c.noline_repeat_rate_pct ?? '—'}%</td>
                           </tr>
                         )
                       })}
@@ -523,43 +437,15 @@ export default function ShopifyBiTopPage() {
               </div>
             )}
 
-            {/* ─── 関連ページ ─── */}
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <NavCard
-                href="/shopify-bi/timeseries"
-                emoji="📅"
-                title="時系列分析"
-                desc="日次・週次・月次 売上推移と前期比較"
-              />
-              <NavCard
-                href="/shopify-bi/cohort"
-                emoji="📈"
-                title="コホート分析"
-                desc="月別 × LINE連携 のリピート率比較"
-              />
-              <NavCard
-                href="/shopify-bi/segment"
-                emoji="🎯"
-                title="ロイヤルティランク"
-                desc="ランク別 LTV / 昇格速度"
-              />
-              <NavCard
-                href="/shopify-bi/products"
-                emoji="🛒"
-                title="商品分析"
-                desc="商品別売上 × LINE経由比率"
-              />
+              <NavCard href="/shopify-bi/timeseries" emoji="📅" title="時系列分析" desc="日次・週次・月次 売上推移と前期比較" />
+              <NavCard href="/shopify-bi/cohort" emoji="📈" title="コホート分析" desc="月別 × LINE連携 のリピート率比較" />
+              <NavCard href="/shopify-bi/segment" emoji="🎯" title="ロイヤルティランク" desc="ランク別 LTV / 昇格速度" />
+              <NavCard href="/shopify-bi/products" emoji="🛒" title="商品分析" desc="商品別売上 × LINE経由比率" />
             </div>
 
             <div className="text-sm text-gray-500 text-center pt-2">
-              メールマーケ・AI施策の意思決定は{' '}
-              <Link
-                href="/email/cockpit"
-                className="text-indigo-600 hover:text-indigo-800 underline"
-              >
-                FERMENT Cockpit
-              </Link>
-              {' '}を参照。
+              メールマーケ・AI施策の意思決定は <Link href="/email/cockpit" className="text-indigo-600 hover:text-indigo-800 underline">FERMENT Cockpit</Link> を参照。
             </div>
           </>
         )}
@@ -568,96 +454,27 @@ export default function ShopifyBiTopPage() {
   )
 }
 
-function KpiCard({
-  label,
-  value,
-  unit,
-  color,
-}: {
-  label: string
-  value: string
-  unit?: string
-  color: 'blue' | 'green' | 'purple' | 'pink'
-}) {
-  const colorMap = {
-    blue: 'bg-blue-50 border-blue-200 text-blue-900',
-    green: 'bg-green-50 border-green-200 text-green-900',
-    purple: 'bg-purple-50 border-purple-200 text-purple-900',
-    pink: 'bg-pink-50 border-pink-200 text-pink-900',
-  }
-  return (
-    <div className={`rounded-lg border-2 px-4 py-3 ${colorMap[color]}`}>
-      <div className="text-xs font-medium opacity-70">{label}</div>
-      <div className="mt-1 text-xl sm:text-2xl font-bold tabular-nums">
-        {value}
-        {unit && <span className="text-sm font-normal opacity-70 ml-1">{unit}</span>}
-      </div>
-    </div>
-  )
+function KpiCard({ label, value, unit, color }: { label: string; value: string; unit?: string; color: 'blue' | 'green' | 'purple' | 'pink' }) {
+  const colorMap = { blue: 'bg-blue-50 border-blue-200 text-blue-900', green: 'bg-green-50 border-green-200 text-green-900', purple: 'bg-purple-50 border-purple-200 text-purple-900', pink: 'bg-pink-50 border-pink-200 text-pink-900' }
+  return (<div className={`rounded-lg border-2 px-4 py-3 ${colorMap[color]}`}><div className="text-xs font-medium opacity-70">{label}</div><div className="mt-1 text-xl sm:text-2xl font-bold tabular-nums">{value}{unit && <span className="text-sm font-normal opacity-70 ml-1">{unit}</span>}</div></div>)
 }
 
-function SegmentBlock({
-  seg,
-  variant,
-}: {
-  seg: FunnelRow
-  variant: 'primary' | 'secondary'
-}) {
+function SegmentBlock({ seg, variant }: { seg: FunnelRow; variant: 'primary' | 'secondary' }) {
   const accent = variant === 'primary' ? 'text-indigo-700' : 'text-gray-600'
   return (
     <div className="px-4 sm:px-5 py-4">
       <div className={`text-sm font-bold ${accent}`}>{seg.segment}</div>
-      <div className="text-xs text-gray-500 mt-0.5">
-        初回購入 {num(seg.first_order_customers)}人
-      </div>
+      <div className="text-xs text-gray-500 mt-0.5">初回購入 {num(seg.first_order_customers)}人</div>
       <div className="grid grid-cols-2 gap-3 mt-3">
-        <div>
-          <div className="text-xs text-gray-500">LTV</div>
-          <div className="text-lg font-bold text-gray-900 tabular-nums">{yen(seg.ltv)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500">リピート率</div>
-          <div className="text-lg font-bold text-gray-900 tabular-nums">{seg.repeat_rate_pct}%</div>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500">30日内リピート</div>
-          <div className="text-base font-medium text-gray-700 tabular-nums">
-            {seg.first_order_customers > 0
-              ? ((seg.repeat_within_30d / seg.first_order_customers) * 100).toFixed(1)
-              : '—'}
-            %
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-gray-500">平均日数</div>
-          <div className="text-base font-medium text-gray-700 tabular-nums">
-            {seg.avg_days_to_second}日
-          </div>
-        </div>
+        <div><div className="text-xs text-gray-500">LTV</div><div className="text-lg font-bold text-gray-900 tabular-nums">{yen(seg.ltv)}</div></div>
+        <div><div className="text-xs text-gray-500">リピート率</div><div className="text-lg font-bold text-gray-900 tabular-nums">{seg.repeat_rate_pct}%</div></div>
+        <div><div className="text-xs text-gray-500">30日内リピート</div><div className="text-base font-medium text-gray-700 tabular-nums">{seg.first_order_customers > 0 ? ((seg.repeat_within_30d / seg.first_order_customers) * 100).toFixed(1) : '—'}%</div></div>
+        <div><div className="text-xs text-gray-500">平均日数</div><div className="text-base font-medium text-gray-700 tabular-nums">{seg.avg_days_to_second}日</div></div>
       </div>
     </div>
   )
 }
 
-function NavCard({
-  href,
-  emoji,
-  title,
-  desc,
-}: {
-  href: string
-  emoji: string
-  title: string
-  desc: string
-}) {
-  return (
-    <Link
-      href={href}
-      className="block bg-white border border-gray-200 rounded-lg p-4 hover:border-indigo-300 hover:shadow-sm transition"
-    >
-      <div className="text-2xl">{emoji}</div>
-      <div className="mt-2 font-bold text-gray-900">{title}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
-    </Link>
-  )
+function NavCard({ href, emoji, title, desc }: { href: string; emoji: string; title: string; desc: string }) {
+  return (<Link href={href} className="block bg-white border border-gray-200 rounded-lg p-4 hover:border-indigo-300 hover:shadow-sm transition"><div className="text-2xl">{emoji}</div><div className="mt-2 font-bold text-gray-900">{title}</div><div className="text-xs text-gray-500 mt-0.5">{desc}</div></Link>)
 }
