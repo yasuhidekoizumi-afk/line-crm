@@ -213,18 +213,13 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
     onChange(JSON.stringify({ ...parsed, contents: contents.slice(0, -1) }, null, 2))
   }, [parsed, onChange])
 
-  // Remove the currently selected component from its parent contents array
-  const removeComponent = useCallback(() => {
-    if (!selectedEntry || !parsed) return
-    // path example: "root.body.contents.2"
-    const parts = selectedEntry.path.replace(/^root\.?/, '').split('.')
-    // Last part must be a numeric index inside a contents array
-    const lastPart = parts[parts.length - 1]
-    const idx = parseInt(lastPart)
-    if (isNaN(idx)) return // cannot remove structural nodes (box, bubble sections)
-
+  // Remove a component by path
+  const removeByPath = useCallback((path: string) => {
+    if (!parsed) return
+    const parts = path.replace(/^root\.?/, '').split('.')
+    const idx = parseInt(parts[parts.length - 1])
+    if (isNaN(idx)) return
     const updated = JSON.parse(JSON.stringify(parsed))
-    // Walk to the parent array
     let target: unknown = updated
     for (let i = 0; i < parts.length - 2; i++) {
       const part = parts[i]
@@ -232,16 +227,19 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
         target = (target as Record<string, unknown>)[part]
       }
     }
-    // parts[parts.length - 2] should be 'contents'
     const parentKey = parts[parts.length - 2]
     if (!target || typeof target !== 'object' || parentKey !== 'contents') return
     const parentArr = (target as Record<string, unknown>)[parentKey]
     if (!Array.isArray(parentArr)) return
-
     parentArr.splice(idx, 1)
     setSelectedPath('')
     onChange(JSON.stringify(updated, null, 2))
-  }, [selectedEntry, parsed, onChange])
+  }, [parsed, onChange])
+
+  const removeComponent = useCallback(() => {
+    if (!selectedEntry) return
+    removeByPath(selectedEntry.path)
+  }, [selectedEntry, removeByPath])
 
   // Is editing disabled because of carousel?
   const editingDisabled = selectedPath.startsWith('root.carousel')
@@ -362,20 +360,41 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
                   const sectionMatch = entry.path.match(/\.(body|header|footer|hero)/)
                   const sectionLabel = sectionMatch ? sectionLabels[sectionMatch[1]] || sectionMatch[1] : ''
 
+                  const isDeletable = !isNaN(parseInt(entry.path.split('.').at(-1) ?? ''))
+
                   return (
-                    <button
+                    <div
                       key={entry.path}
-                      type="button"
-                      onClick={() => setSelectedPath(isSelected ? '' : entry.path)}
-                      className={`w-full text-left px-3 py-1.5 text-xs border-b border-gray-100 last:border-b-0 transition-colors flex items-center gap-2 ${
-                        isSelected ? 'bg-green-50 text-green-800 font-medium' : 'hover:bg-gray-50 text-gray-700'
-                      }`}
+                      className={`flex items-center border-b border-gray-100 last:border-b-0 ${isSelected ? 'bg-green-50' : 'hover:bg-gray-50'}`}
                     >
-                      {sectionLabel && (
-                        <span className="text-[10px] text-gray-400 bg-gray-100 rounded px-1 py-0.5 shrink-0">{sectionLabel}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPath(isSelected ? '' : entry.path)}
+                        className={`flex-1 text-left px-3 py-1.5 text-xs transition-colors flex items-center gap-2 ${
+                          isSelected ? 'text-green-800 font-medium' : 'text-gray-700'
+                        }`}
+                      >
+                        {sectionLabel && (
+                          <span className="text-[10px] text-gray-400 bg-gray-100 rounded px-1 py-0.5 shrink-0">{sectionLabel}</span>
+                        )}
+                        <span className="truncate">{entry.label}</span>
+                      </button>
+                      {isDeletable && (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); removeByPath(entry.path) }}
+                          className="p-1.5 mr-1 text-gray-300 hover:text-red-500 transition-colors rounded shrink-0"
+                          title="削除"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                          </svg>
+                        </button>
                       )}
-                      <span className="truncate">{entry.label}</span>
-                    </button>
+                    </div>
                   )
                 })}
               </div>
@@ -395,9 +414,15 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
                   <button
                     type="button"
                     onClick={removeComponent}
-                    className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-0.5 rounded transition-colors"
+                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                    title="この要素を削除"
                   >
-                    削除
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                    </svg>
                   </button>
                 )}
               </div>
