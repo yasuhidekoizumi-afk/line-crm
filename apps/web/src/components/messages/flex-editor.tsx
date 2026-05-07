@@ -213,6 +213,36 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
     onChange(JSON.stringify({ ...parsed, contents: contents.slice(0, -1) }, null, 2))
   }, [parsed, onChange])
 
+  // Remove the currently selected component from its parent contents array
+  const removeComponent = useCallback(() => {
+    if (!selectedEntry || !parsed) return
+    // path example: "root.body.contents.2"
+    const parts = selectedEntry.path.replace(/^root\.?/, '').split('.')
+    // Last part must be a numeric index inside a contents array
+    const lastPart = parts[parts.length - 1]
+    const idx = parseInt(lastPart)
+    if (isNaN(idx)) return // cannot remove structural nodes (box, bubble sections)
+
+    const updated = JSON.parse(JSON.stringify(parsed))
+    // Walk to the parent array
+    let target: unknown = updated
+    for (let i = 0; i < parts.length - 2; i++) {
+      const part = parts[i]
+      if (target && typeof target === 'object') {
+        target = (target as Record<string, unknown>)[part]
+      }
+    }
+    // parts[parts.length - 2] should be 'contents'
+    const parentKey = parts[parts.length - 2]
+    if (!target || typeof target !== 'object' || parentKey !== 'contents') return
+    const parentArr = (target as Record<string, unknown>)[parentKey]
+    if (!Array.isArray(parentArr)) return
+
+    parentArr.splice(idx, 1)
+    setSelectedPath('')
+    onChange(JSON.stringify(updated, null, 2))
+  }, [selectedEntry, parsed, onChange])
+
   // Is editing disabled because of carousel?
   const editingDisabled = selectedPath.startsWith('root.carousel')
 
@@ -357,9 +387,20 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
           {/* ── Property editor for selected component ────────── */}
           {selectedEntry && (
             <div className="border border-gray-200 rounded-lg p-3 bg-white space-y-2">
-              <p className="text-xs font-medium text-green-700">
-                {selectedEntry.label}
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-green-700">
+                  {selectedEntry.label}
+                </p>
+                {!isNaN(parseInt(selectedEntry.path.split('.').at(-1) ?? '')) && (
+                  <button
+                    type="button"
+                    onClick={removeComponent}
+                    className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-0.5 rounded transition-colors"
+                  >
+                    削除
+                  </button>
+                )}
+              </div>
 
               {selectedEntry.type === 'text' && (
                 <div className="space-y-1.5">
