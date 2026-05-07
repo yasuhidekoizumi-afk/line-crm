@@ -1,0 +1,5 @@
+import GlobalErrorFallback from './error'
+
+export default function FriendsError({ error, reset }: { error: Error; reset: () => void }) {
+  return <GlobalErrorFallback error={error} reset={reset} />
+}
