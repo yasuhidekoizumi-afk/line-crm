@@ -55,7 +55,7 @@ export async function getLineAccountById(
 
 export async function getLineAccounts(db: D1Database): Promise<LineAccount[]> {
   const result = await db
-    .prepare(`SELECT * FROM line_accounts ORDER BY created_at DESC`)
+    .prepare(`SELECT * FROM line_accounts ORDER BY is_active DESC, created_at ASC`)
     .all<LineAccount>();
   return result.results;
 }

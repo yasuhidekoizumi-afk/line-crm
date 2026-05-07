@@ -53,18 +53,19 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         const list = res.data as AccountWithStats[]
         setAccounts(list)
 
-        // If current selection is invalid (e.g. deleted), fall back to first
+        // If current selection is invalid (e.g. deleted), fall back to stored or first active
         setSelectedAccountIdState((prev) => {
           if (prev && list.some((a) => a.id === prev)) return prev
-          // Restore from localStorage or default to first
           let stored: string | null = null
           try {
             stored = localStorage.getItem(STORAGE_KEY)
           } catch {
             // localStorage unavailable
           }
-          const valid = stored && list.some((a) => a.id === stored)
-          return valid ? stored : list[0].id
+          if (stored && list.some((a) => a.id === stored)) return stored
+          // Default to the first active account
+          const active = list.find((a) => a.isActive)
+          return active ? active.id : list[0].id
         })
       } else {
         setAccounts([])
