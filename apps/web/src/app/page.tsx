@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { api, fetchApi } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
@@ -8,6 +8,7 @@ import { useAccount } from '@/contexts/account-context'
 import { ORYZAE_BENCHMARK, compareToBenchmark } from '@/lib/benchmarks'
 import AiCockpit from '@/components/dashboard/AiCockpit'
 import ShopifyKpiBar from '@/components/dashboard/ShopifyKpiBar'
+import { useToast } from '@/lib/toast'
 
 const ccPrompts = [
   {
@@ -83,7 +84,7 @@ function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }
             <div className="h-8 w-20 bg-gray-100 rounded animate-pulse" />
           ) : (
             <p className="text-3xl font-bold text-gray-900">
-              {value !== null ? value.toLocaleString('ja-JP') : '-'}
+              {value !== null ? value.toLocaleString('ja-JP') : '—'}
             </p>
           )}
         </div>
@@ -101,7 +102,66 @@ function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }
   )
 }
 
+/** 折りたたみ可能なセクションラッパー */
+function CollapsibleSection({
+  title,
+  subtitle,
+  defaultOpen = false,
+  detailHref,
+  detailLabel,
+  children,
+}: {
+  title: React.ReactNode
+  subtitle?: string
+  defaultOpen?: boolean
+  detailHref?: string
+  detailLabel?: string
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div className="mb-8">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between mb-4 group"
+      >
+        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+          {title}
+          {subtitle && <span className="text-xs font-normal text-gray-400">{subtitle}</span>}
+        </h2>
+        <div className="flex items-center gap-3">
+          {detailHref && detailLabel && open && (
+            <Link
+              prefetch={false}
+              href={detailHref}
+              className="text-xs text-green-600 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {detailLabel} →
+            </Link>
+          )}
+          <svg
+            className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+      {open && (
+        <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DashboardPage() {
+  const toast = useToast()
   const { selectedAccountId, selectedAccount } = useAccount()
   const [stats, setStats] = useState<DashboardStats>({
     friendCount: null,
@@ -136,6 +196,7 @@ export default function DashboardPage() {
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [loadCount, setLoadCount] = useState(0)
 
   useEffect(() => {
     const load = async () => {
@@ -177,10 +238,12 @@ export default function DashboardPage() {
               ? scoringRes.value.data.length
               : null,
         })
-      } catch {
+      } catch (e) {
         setError('データの読み込みに失敗しました')
+        toast.addToast('データの読み込みに失敗しました', 'error')
       } finally {
         setLoading(false)
+        setLoadCount((c) => c + 1)
       }
     }
 
@@ -391,37 +454,34 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* 💎 ロイヤルティ セクション */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            💎 <span>ロイヤルティ会員</span>
-            <span className="text-xs font-normal text-gray-400">今月実績</span>
-          </h2>
-          <Link prefetch={false} href="/loyalty" className="text-xs text-yellow-600 hover:underline">詳細管理 →</Link>
-        </div>
-
+      {/* 💎 ロイヤルティ セクション — 初期は折りたたみ */}
+      <CollapsibleSection
+        title={<><span>💎</span><span>ロイヤルティ会員</span></>}
+        subtitle="今月実績"
+        detailHref="/loyalty"
+        detailLabel="詳細管理"
+      >
         {/* KPI 4枚 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">総会員数</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{loyalty.totalMembers?.toLocaleString() ?? '-'}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{loyalty.totalMembers?.toLocaleString() ?? '—'}</p>
             <p className="text-xs text-gray-400 mt-1">名</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">付与ポイント (今月)</p>
-            <p className="text-2xl font-bold text-green-600 mt-1">{loyalty.thisMonthAwarded?.toLocaleString() ?? '-'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p>
-            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthAwarded?.toLocaleString() ?? '-'} pt</p>
+            <p className="text-2xl font-bold text-green-600 mt-1">{loyalty.thisMonthAwarded?.toLocaleString() ?? '—'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p>
+            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthAwarded?.toLocaleString() ?? '—'} pt</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">利用ポイント (今月)</p>
-            <p className="text-2xl font-bold text-red-600 mt-1">{loyalty.thisMonthRedeemed?.toLocaleString() ?? '-'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p>
-            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthRedeemed?.toLocaleString() ?? '-'} pt</p>
+            <p className="text-2xl font-bold text-red-600 mt-1">{loyalty.thisMonthRedeemed?.toLocaleString() ?? '—'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p>
+            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthRedeemed?.toLocaleString() ?? '—'} pt</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">新規会員 (今月)</p>
-            <p className="text-2xl font-bold text-blue-600 mt-1">{loyalty.thisMonthNewMembers?.toLocaleString() ?? '-'}<span className="text-sm font-normal text-gray-400 ml-1">名</span></p>
-            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthNewMembers?.toLocaleString() ?? '-'} 名</p>
+            <p className="text-2xl font-bold text-blue-600 mt-1">{loyalty.thisMonthNewMembers?.toLocaleString() ?? '—'}<span className="text-sm font-normal text-gray-400 ml-1">名</span></p>
+            <p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthNewMembers?.toLocaleString() ?? '—'} 名</p>
           </div>
         </div>
 
@@ -462,32 +522,29 @@ export default function DashboardPage() {
             📊 取引履歴
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      {/* FERMENT メールマーケティング セクション */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            🌾 <span>FERMENT メール</span>
-            <span className="text-xs font-normal text-gray-400">過去30日</span>
-          </h2>
-          <Link prefetch={false} href="/email/analytics" className="text-xs text-green-600 hover:underline">分析詳細 →</Link>
-        </div>
-
+      {/* 🌾 FERMENT メール セクション — 初期は折りたたみ */}
+      <CollapsibleSection
+        title={<><span>🌾</span><span>FERMENT メール</span></>}
+        subtitle="過去30日"
+        detailHref="/email/analytics"
+        detailLabel="分析詳細"
+      >
         {/* KPI 4枚 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">統合顧客数</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalCustomers?.toLocaleString() ?? '-'}</p>
-            <p className="text-xs text-gray-400 mt-1">メール購読: {ferment.emailSubscribers?.toLocaleString() ?? '-'}人</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalCustomers?.toLocaleString() ?? '—'}</p>
+            <p className="text-xs text-gray-400 mt-1">メール購読: {ferment.emailSubscribers?.toLocaleString() ?? '—'}人</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">送信数 (30日)</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalSent30d?.toLocaleString() ?? '-'}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalSent30d?.toLocaleString() ?? '—'}</p>
             <p className="text-xs text-gray-400 mt-1">
               開封率: {ferment.totalSent30d && ferment.totalSent30d > 0
                 ? ((ferment.totalOpened30d ?? 0) / ferment.totalSent30d * 100).toFixed(1) + '%'
-                : '-'}
+                : '—'}
             </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -497,7 +554,7 @@ export default function DashboardPage() {
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">高購入意欲</p>
-            <p className="text-2xl font-bold text-purple-600 mt-1">{ferment.highIntent?.toLocaleString() ?? '-'}</p>
+            <p className="text-2xl font-bold text-purple-600 mt-1">{ferment.highIntent?.toLocaleString() ?? '—'}</p>
             <p className="text-xs text-gray-400 mt-1">30日内 50%以上</p>
           </div>
         </div>
@@ -568,7 +625,7 @@ export default function DashboardPage() {
             📋 フォーム管理
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* 🤖 AI コックピット — 上記の数字を見て、AI が今日やるべきことを提案 */}
       <AiCockpit />
