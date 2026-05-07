@@ -1,37 +1,11 @@
 @import "tailwindcss";
 
-/* ───── ダークモードを class ベースに切り替え（Tailwind v4 正規構文） ───── */
-@variant dark (&:is(.dark *));
-
-/* ───── カスタムプロパティ ───── */
-:root {
-  --color-bg-primary: #f9fafb;
-  --color-bg-card: #ffffff;
-  --color-bg-sidebar: #ffffff;
-  --color-border: #e5e7eb;
-  --color-text-primary: #111827;
-  --color-text-secondary: #6b7280;
-  --color-text-muted: #9ca3af;
-}
-
-.dark {
-  --color-bg-primary: #0f172a;
-  --color-bg-card: #1e293b;
-  --color-bg-sidebar: #1e293b;
-  --color-border: #334155;
-  --color-text-primary: #f1f5f9;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-}
-
-/* ───── ベーススタイル ───── */
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
+/* ───── ダークモード ───── */
+:root.dark {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --border: #334155;
+  --txt: #f1f5f9;
 }
 
 /* ============================================================
