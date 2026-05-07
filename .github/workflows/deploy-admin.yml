@@ -40,8 +40,8 @@ jobs:
       - name: 管理画面ビルド
         working-directory: apps/web
         env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
           GITHUB_PAGES: 'true'
-          NEXT_PUBLIC_API_URL: 'https://oryzae-line-crm.oryzae.workers.dev'
         run: pnpm build
 
       - name: GitHub Pages 設定
