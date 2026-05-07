@@ -16,6 +16,7 @@ interface BroadcastFormProps {
   onCancel: () => void
   initialDraft?: Partial<FormState> | null
   segments?: Segment[]
+  editId?: string | null
 }
 
 const messageTypeLabels: Record<ApiBroadcast['messageType'], string> = {
@@ -37,7 +38,7 @@ interface FormState {
   sendMode: SendMode
 }
 
-export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft, segments = [] }: BroadcastFormProps) {
+export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft, segments = [], editId }: BroadcastFormProps) {
   const { selectedAccountId } = useAccount()
   const [form, setForm] = useState<FormState>({
     title: initialDraft?.title ?? '',
@@ -66,26 +67,34 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     setSaving(true)
     setError('')
     try {
-      const res = await api.broadcasts.create({
+      const payload = {
         title: form.title,
         messageType: form.messageType,
         messageContent: form.messageContent,
         targetType: form.targetType,
         targetTagId: form.targetType === 'tag' ? form.targetTagId || null : null,
         targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId || null : null,
-        status: form.sendMode === 'now' ? 'sending' : 'draft',
         scheduledAt: form.sendMode === 'scheduled' && form.scheduledAt
           ? form.scheduledAt + ':00.000+09:00'
           : null,
-        lineAccountId: selectedAccountId || null,
-      })
+      }
+      const res = editId
+        ? await api.broadcasts.update(editId, payload)
+        : await api.broadcasts.create({
+            ...payload,
+            status: form.sendMode === 'now' ? 'sending' : 'draft',
+            lineAccountId: selectedAccountId || null,
+          })
       if (res.success) {
+        if (form.sendMode === 'now' && editId) {
+          await api.broadcasts.send(editId)
+        }
         onSuccess()
       } else {
         setError(res.error)
       }
     } catch {
-      setError('作成に失敗しました')
+      setError(editId ? '更新に失敗しました' : '作成に失敗しました')
     } finally {
       setSaving(false)
     }
@@ -93,7 +102,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-      <h2 className="text-sm font-semibold text-gray-800 mb-5">新規配信を作成</h2>
+      <h2 className="text-sm font-semibold text-gray-800 mb-5">{editId ? '配信を編集' : '新規配信を作成'}</h2>
 
       <div className={`space-y-4 ${form.messageType === 'flex' ? 'max-w-3xl' : 'max-w-lg'}`}>
         {/* Title */}
@@ -351,7 +360,10 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
             style={{ backgroundColor: '#06C755' }}
           >
-            {saving ? '処理中...' : form.sendMode === 'draft' ? '下書き保存' : form.sendMode === 'now' ? '今すぐ送信' : '予約配信'}
+            {saving ? '処理中...' : editId
+            ? (form.sendMode === 'now' ? '送信する' : '変更を保存')
+            : (form.sendMode === 'draft' ? '下書き保存' : form.sendMode === 'now' ? '今すぐ送信' : '予約配信')
+          }
           </button>
           <button
             onClick={onCancel}

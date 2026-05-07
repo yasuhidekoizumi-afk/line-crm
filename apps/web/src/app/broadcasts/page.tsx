@@ -116,6 +116,7 @@ function BroadcastsPageInner() {
       ?? (aiAction ? skeletonDraftFromAction(aiAction) : null),
   )
   const [showCreate, setShowCreate] = useState(!!initialDraft || !!aiAction)
+  const [editingBroadcast, setEditingBroadcast] = useState<ApiBroadcast | null>(null)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [aiDrafting, setAiDrafting] = useState(false)
   const [aiDraftError, setAiDraftError] = useState<string | null>(null)
@@ -281,8 +282,29 @@ function BroadcastsPageInner() {
         </div>
       )}
 
+      {/* Edit form */}
+      {editingBroadcast && (
+        <BroadcastForm
+          key={editingBroadcast.id}
+          tags={tags}
+          segments={segments}
+          editId={editingBroadcast.id}
+          initialDraft={{
+            title: editingBroadcast.title,
+            messageType: editingBroadcast.messageType,
+            messageContent: editingBroadcast.messageContent,
+            targetType: editingBroadcast.targetType,
+            targetTagId: editingBroadcast.targetTagId ?? '',
+            targetSegmentId: editingBroadcast.targetSegmentId ?? '',
+            scheduledAt: editingBroadcast.scheduledAt ?? '',
+          }}
+          onSuccess={() => { setEditingBroadcast(null); load() }}
+          onCancel={() => setEditingBroadcast(null)}
+        />
+      )}
+
       {/* Create form */}
-      {showCreate && (
+      {showCreate && !editingBroadcast && (
         <>
           {aiDrafting && (
             <div className="mb-3 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-800 flex items-center gap-3">
@@ -412,6 +434,14 @@ function BroadcastsPageInner() {
                     {/* Actions */}
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {broadcast.status === 'draft' && (
+                          <button
+                            onClick={() => { setEditingBroadcast(broadcast); setShowCreate(false) }}
+                            className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                          >
+                            編集
+                          </button>
+                        )}
                         {broadcast.status === 'draft' && (
                           <button
                             onClick={() => handleSend(broadcast.id)}
