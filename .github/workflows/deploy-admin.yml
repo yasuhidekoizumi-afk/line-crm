@@ -33,6 +33,12 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
+      - name: Debug info
+        run: |
+          node --version
+          pnpm --version
+          cat apps/web/package.json
+
       - name: 依存関係インストール
         run: pnpm install --frozen-lockfile
 
@@ -44,7 +50,8 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: 'https://oryzae-line-crm.oryzae.workers.dev'
           GITHUB_PAGES: 'true'
-        run: pnpm build
+          NODE_OPTIONS: '--max-old-space-size=4096'
+        run: pnpm build 2>&1
 
       - name: GitHub Pages 設定
         run: |
