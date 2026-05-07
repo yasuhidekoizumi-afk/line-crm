@@ -31,17 +31,13 @@ import { notifyApiError } from '@/lib/api-error'
 /** Broadcast type from API (now camelCase after worker serialization) */
 export type ApiBroadcast = Broadcast
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL
-if (!API_URL) {
-  throw new Error(
-    'NEXT_PUBLIC_API_URL is not set. Build cannot proceed without a valid API URL. ' +
-    'Set it in .env.production (local) or GitHub Secrets (CI).'
-  )
-}
+const API_URL =
+  typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL
+    ? process.env.NEXT_PUBLIC_API_URL
+    : ''
 
 /**
  * Read the API key from localStorage (set during login).
- * Never embed secrets in the client bundle via NEXT_PUBLIC_* env vars.
  */
 function getApiKey(): string {
   if (typeof window !== 'undefined') {
@@ -50,8 +46,18 @@ function getApiKey(): string {
   return ''
 }
 
+function getBaseUrl(): string {
+  if (!API_URL && typeof window !== 'undefined') {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not set. Build cannot proceed without a valid API URL.'
+    )
+  }
+  return API_URL
+}
+
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const base = getBaseUrl()
+  const res = await fetch(`${base}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -76,11 +82,10 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
 
 /**
  * Fetch an authenticated binary endpoint and convert to an object URL
- * (suitable for <img src=...>). The caller should revoke the URL via
- * URL.revokeObjectURL() when no longer needed.
  */
 export async function fetchApiObjectUrl(path: string): Promise<string> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const base = getBaseUrl()
+  const res = await fetch(`${base}${path}`, {
     headers: { Authorization: `Bearer ${getApiKey()}` },
   })
   if (!res.ok) throw new Error(`API error: ${res.status}`)
@@ -90,12 +95,12 @@ export async function fetchApiObjectUrl(path: string): Promise<string> {
 
 /**
  * Fetch an authenticated binary endpoint and return as base64 + content-type.
- * Used when we need to round-trip an image (e.g. duplicating a rich menu).
  */
 export async function fetchApiBase64(
   path: string,
 ): Promise<{ base64: string; contentType: 'image/png' | 'image/jpeg' }> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const base = getBaseUrl()
+  const res = await fetch(`${base}${path}`, {
     headers: { Authorization: `Bearer ${getApiKey()}` },
   })
   if (!res.ok) throw new Error(`API error: ${res.status}`)
@@ -577,7 +582,8 @@ export const api = {
         reader.onerror = () => reject(new Error('Failed to read file'))
         reader.readAsDataURL(file)
       })
-      const res = await fetch(`${API_URL}/api/images`, {
+      const base = getBaseUrl()
+      const res = await fetch(`${base}/api/images`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -643,7 +649,6 @@ export interface RichMenuAlias {
 }
 
 // ─── Rich Menu types ──────────────────────────────────────────────────────────
-// Matches LINE API spec: https://developers.line.biz/en/reference/messaging-api/#rich-menu-object
 
 export type RichMenuActionPayload =
   | { type: 'postback'; data: string; displayText?: string; label?: string }
