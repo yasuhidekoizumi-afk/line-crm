@@ -24,6 +24,8 @@ const messageTypeLabels: Record<ApiBroadcast['messageType'], string> = {
   flex: 'Flexメッセージ',
 }
 
+type SendMode = 'draft' | 'now' | 'scheduled'
+
 interface FormState {
   title: string
   messageType: ApiBroadcast['messageType']
@@ -32,7 +34,7 @@ interface FormState {
   targetTagId: string
   targetSegmentId: string
   scheduledAt: string
-  sendNow: boolean
+  sendMode: SendMode
 }
 
 export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft, segments = [] }: BroadcastFormProps) {
@@ -45,7 +47,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     targetTagId: initialDraft?.targetTagId ?? '',
     targetSegmentId: initialDraft?.targetSegmentId ?? '',
     scheduledAt: initialDraft?.scheduledAt ?? '',
-    sendNow: initialDraft?.sendNow ?? true,
+    sendMode: 'draft',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -56,7 +58,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     if (form.messageType === 'flex') {
       try { JSON.parse(form.messageContent) } catch { setError('FlexメッセージのJSONが無効です'); return }
     }
-    if (!form.sendNow && !form.scheduledAt) {
+    if (form.sendMode === 'scheduled' && !form.scheduledAt) {
       setError('予約配信の場合は配信日時を指定してください')
       return
     }
@@ -71,10 +73,10 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
         targetType: form.targetType,
         targetTagId: form.targetType === 'tag' ? form.targetTagId || null : null,
         targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId || null : null,
-        status: 'draft',
-        scheduledAt: form.sendNow || !form.scheduledAt
-          ? null
-          : form.scheduledAt + ':00.000+09:00',
+        status: form.sendMode === 'now' ? 'sending' : 'draft',
+        scheduledAt: form.sendMode === 'scheduled' && form.scheduledAt
+          ? form.scheduledAt + ':00.000+09:00'
+          : null,
         lineAccountId: selectedAccountId || null,
       })
       if (res.success) {
@@ -309,30 +311,26 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-2">配信タイミング</label>
           <div className="flex flex-wrap gap-2 mb-2">
-            <button
-              type="button"
-              onClick={() => setForm({ ...form, sendNow: true, scheduledAt: '' })}
-              className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
-                form.sendNow
-                  ? 'border-green-500 text-green-700 bg-green-50'
-                  : 'border-gray-300 text-gray-600 bg-white hover:border-gray-400'
-              }`}
-            >
-              下書きとして保存
-            </button>
-            <button
-              type="button"
-              onClick={() => setForm({ ...form, sendNow: false })}
-              className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
-                !form.sendNow
-                  ? 'border-green-500 text-green-700 bg-green-50'
-                  : 'border-gray-300 text-gray-600 bg-white hover:border-gray-400'
-              }`}
-            >
-              予約配信
-            </button>
+            {([
+              { mode: 'draft', label: '下書き保存' },
+              { mode: 'now',   label: '今すぐ送信' },
+              { mode: 'scheduled', label: '予約配信' },
+            ] as { mode: SendMode; label: string }[]).map(({ mode, label }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setForm({ ...form, sendMode: mode, scheduledAt: mode !== 'scheduled' ? '' : form.scheduledAt })}
+                className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
+                  form.sendMode === mode
+                    ? 'border-green-500 text-green-700 bg-green-50'
+                    : 'border-gray-300 text-gray-600 bg-white hover:border-gray-400'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          {!form.sendNow && (
+          {form.sendMode === 'scheduled' && (
             <input
               type="datetime-local"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -353,7 +351,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
             style={{ backgroundColor: '#06C755' }}
           >
-            {saving ? '作成中...' : '作成'}
+            {saving ? '処理中...' : form.sendMode === 'draft' ? '下書き保存' : form.sendMode === 'now' ? '今すぐ送信' : '予約配信'}
           </button>
           <button
             onClick={onCancel}
