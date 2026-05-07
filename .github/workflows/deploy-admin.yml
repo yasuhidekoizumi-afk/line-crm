@@ -37,7 +37,8 @@ jobs:
         run: |
           node --version
           pnpm --version
-          cat apps/web/package.json
+          which node
+          ls -la /home/runner/work/line-crm/line-crm
 
       - name: 依存関係インストール
         run: pnpm install --frozen-lockfile
@@ -51,7 +52,22 @@ jobs:
           NEXT_PUBLIC_API_URL: 'https://oryzae-line-crm.oryzae.workers.dev'
           GITHUB_PAGES: 'true'
           NODE_OPTIONS: '--max-old-space-size=4096'
-        run: pnpm build 2>&1
+        run: |
+          pnpm build 2>&1 | tee /tmp/build-log.txt || true
+          echo "=== BUILD LOG ==="
+          cat /tmp/build-log.txt
+          echo "=== END BUILD LOG ==="
+
+      - run: |
+          if grep -i 'error' /tmp/build-log.txt; then
+            echo "FOUND ERRORS:"
+            grep -i 'error' /tmp/build-log.txt
+            exit 1
+          fi
+          if ! [ -d apps/web/out ]; then
+            echo "BUILD FAILED - no output directory"
+            exit 1
+          fi
 
       - name: GitHub Pages 設定
         run: |

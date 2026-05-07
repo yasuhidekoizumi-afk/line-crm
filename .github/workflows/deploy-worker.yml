@@ -30,18 +30,29 @@ jobs:
         run: |
           node --version
           pnpm --version
-          cat apps/worker/package.json
+          which node
 
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm --filter @line-crm/shared --filter @line-crm/line-sdk --filter @line-crm/db build
 
-      - name: Worker build verbose
-        run: pnpm --filter worker build 2>&1
+      - name: Worker build with log capture
+        run: |
+          pnpm --filter worker build 2>&1 | tee /tmp/worker-build-log.txt
         env:
           VITE_LIFF_ID: ${{ vars.VITE_LIFF_ID }}
           VITE_BOT_BASIC_ID: ${{ vars.VITE_BOT_BASIC_ID }}
           VITE_CALENDAR_CONNECTION_ID: ${{ vars.VITE_CALENDAR_CONNECTION_ID }}
+
+      - run: |
+          echo "=== BUILD LOG ==="
+          cat /tmp/worker-build-log.txt
+          echo "=== END BUILD LOG ==="
+          if grep -i 'error' /tmp/worker-build-log.txt; then
+            echo "FOUND ERRORS:"
+            grep -i 'error' /tmp/worker-build-log.txt
+            exit 1
+          fi
 
       - uses: cloudflare/wrangler-action@v3
         with:
