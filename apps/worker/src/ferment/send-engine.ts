@@ -181,7 +181,7 @@ export async function executeCampaign(
         accessToken = (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
       }
       const lineClient = new LineClient(accessToken);
-      const { processBroadcastSend } = await import('../../services/broadcast.js');
+      const { processBroadcastSend } = await import('../services/broadcast.js');
       await processBroadcastSend(
         env.DB,
         lineClient,
@@ -293,7 +293,7 @@ export async function executeFlowStep(
         accessToken = (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
       }
       const lineClient = new LineClient(accessToken);
-      const { buildMessage } = await import('../../services/step-delivery.js');
+      const { buildMessage } = await import('../services/step-delivery.js');
       await lineClient.pushMessage(customer.line_user_id, [buildMessage(step.message_type, step.message_content)]);
       return { ok: true };
     } catch (err) {
