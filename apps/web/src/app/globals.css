@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* ───── ダークモードを class ベースに切り替え ───── */
-@custom-variant dark (&:where(.dark, .dark *));
+/* ───── ダークモードを class ベースに切り替え（Tailwind v4 正規構文） ───── */
+@variant dark (&:is(.dark *));
 
 /* ───── カスタムプロパティ ───── */
 :root {
