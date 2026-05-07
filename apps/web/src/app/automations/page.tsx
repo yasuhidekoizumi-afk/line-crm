@@ -7,12 +7,7 @@ import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 
-type AutomationEventType = "friend_add" | "tag_change" | "score_threshold" | "cv_fire" | "message_received" | "calendar_booked" | "segment_enter"
-
-interface AutomationAction {
-  type: "add_tag" | "remove_tag" | "start_scenario" | "send_message" | "send_webhook" | "switch_rich_menu"
-  params: Record<string, unknown>
-}
+import type { AutomationEventType, AutomationAction } from '@line-crm/shared'
 
 interface Automation {
   id: string
@@ -44,6 +39,7 @@ const eventTypeLabelMap: Record<AutomationEventType, string> = {
   cv_fire: 'CV発火',
   message_received: 'メッセージ受信',
   calendar_booked: 'カレンダー予約',
+  segment_enter: 'セグメント参入',
 }
 
 const eventTypeBadgeColor: Record<AutomationEventType, string> = {

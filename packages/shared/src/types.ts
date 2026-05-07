@@ -622,7 +622,8 @@ export type AutomationEventType =
   | "score_threshold"
   | "cv_fire"
   | "message_received"
-  | "calendar_booked";
+  | "calendar_booked"
+  | "segment_enter";
 
 export interface AutomationAction {
   type: "add_tag" | "remove_tag" | "start_scenario" | "send_message" | "send_webhook" | "switch_rich_menu";
