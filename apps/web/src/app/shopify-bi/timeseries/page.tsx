@@ -27,6 +27,13 @@ interface TimeseriesData {
 const yen = (n: number) => '¥' + Math.round(n).toLocaleString('ja-JP')
 const num = (n: number) => Math.round(n).toLocaleString('ja-JP')
 
+const todayStr = () => new Date().toISOString().slice(0, 10)
+const daysAgo = (n: number) => {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
 type Preset = {
   key: string
   label: string
@@ -40,22 +47,41 @@ const PRESETS: Preset[] = [
   { key: 'month', label: '今月', granularity: 'day', range: '30d' },
   { key: '3m', label: '直近90日', granularity: 'week', range: '90d' },
   { key: '1y', label: '1年', granularity: 'month', range: '1y' },
+  { key: 'all', label: '全期間', granularity: 'month', range: 'all' },
 ]
+
+type Granularity = 'day' | 'week' | 'month'
 
 export default function TimeseriesPage() {
   const [preset, setPreset] = useState<Preset>(PRESETS[2]) // 今月（デフォルト）
+  const [isCustom, setIsCustom] = useState(false)
+  const [customFrom, setCustomFrom] = useState(daysAgo(90))
+  const [customTo, setCustomTo] = useState(todayStr())
+  const [customGranularity, setCustomGranularity] = useState<Granularity>('day')
+
   const [data, setData] = useState<TimeseriesData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // クエリ構築
+  const buildQuery = () => {
+    if (isCustom) {
+      const params = new URLSearchParams()
+      params.set('granularity', customGranularity)
+      params.set('from', customFrom)
+      params.set('to', customTo)
+      return `/api/shopify/orders/timeseries?${params.toString()}`
+    }
+    return `/api/shopify/orders/timeseries?granularity=${preset.granularity}&range=${preset.range}`
+  }
+
+  // カスタム or preset 変更時に再フェッチ
   useEffect(() => {
     let cancelled = false
     void (async () => {
       setLoading(true)
       try {
-        const res = await fetchApi<{ success: boolean; data: TimeseriesData }>(
-          `/api/shopify/orders/timeseries?granularity=${preset.granularity}&range=${preset.range}`,
-        )
+        const res = await fetchApi<{ success: boolean; data: TimeseriesData }>(buildQuery())
         if (cancelled) return
         if (res.success) setData(res.data)
       } catch (e) {
@@ -67,20 +93,35 @@ export default function TimeseriesPage() {
     return () => {
       cancelled = true
     }
-  }, [preset])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset, isCustom, customFrom, customTo, customGranularity])
 
   // グラフ最大値
   const maxRevenue = data ? Math.max(...data.series.map((s) => s.revenue), 1) : 1
 
-  // 直近期間（preset によって表示切替）
+  // 直近期間
   const filteredSeries = data?.series ?? []
-  const recent = preset.key === 'today' ? filteredSeries.slice(-1) : filteredSeries.slice(-30)
 
   // LINE経由比率
   const lineSharePct =
     data && data.summary.total_revenue > 0
       ? (data.summary.line_revenue / data.summary.total_revenue) * 100
       : 0
+
+  // 日付選択ハンドラ
+  const handleSelectPreset = (p: Preset) => {
+    setIsCustom(false)
+    setPreset(p)
+  }
+
+  const handleCustomSearch = () => {
+    setIsCustom(true)
+  }
+
+  // 表示用期間ラベル
+  const periodLabel = isCustom
+    ? `${customFrom} 〜 ${customTo}`
+    : preset.label
 
   return (
     <div>
@@ -96,14 +137,14 @@ export default function TimeseriesPage() {
           </p>
         </div>
 
-        {/* プリセット切替 */}
-        <div className="flex flex-wrap gap-2">
+        {/* プリセット切替 + カスタム */}
+        <div className="flex flex-wrap items-center gap-2">
           {PRESETS.map((p) => (
             <button
               key={p.key}
-              onClick={() => setPreset(p)}
+              onClick={() => handleSelectPreset(p)}
               className={`px-3 py-1.5 text-sm rounded-md border ${
-                preset.key === p.key
+                !isCustom && preset.key === p.key
                   ? 'bg-indigo-600 text-white border-indigo-600'
                   : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
               }`}
@@ -111,7 +152,59 @@ export default function TimeseriesPage() {
               {p.label}
             </button>
           ))}
+          <button
+            onClick={() => setIsCustom(true)}
+            className={`px-3 py-1.5 text-sm rounded-md border ${
+              isCustom
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            📅 範囲指定
+          </button>
         </div>
+
+        {/* カスタム日付入力 */}
+        {isCustom && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">開始日</label>
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <div className="text-gray-400 pb-2">〜</div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">終了日</label>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">粒度</label>
+                <select
+                  value={customGranularity}
+                  onChange={(e) => setCustomGranularity(e.target.value as Granularity)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
+                >
+                  <option value="day">日次</option>
+                  <option value="week">週次</option>
+                  <option value="month">月次</option>
+                </select>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">
+              ※ 日付を変更すると自動で再読み込みされます
+            </p>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -130,6 +223,7 @@ export default function TimeseriesPage() {
                 <div className="text-xl font-bold mt-1 tabular-nums">
                   {yen(data.summary.total_revenue)}
                 </div>
+                <div className="text-xs text-gray-400 mt-0.5">{periodLabel}</div>
                 {data.comparison?.pct_change !== null && data.comparison?.pct_change !== undefined && (
                   <div
                     className={`text-xs mt-0.5 ${
@@ -213,6 +307,13 @@ export default function TimeseriesPage() {
                 </div>
               </div>
             </div>
+
+            {/* 期間情報 */}
+            {data.from && (
+              <div className="text-xs text-gray-400 text-right">
+                データ範囲: {data.from} 〜 {data.to}（{data.series.length}期間）
+              </div>
+            )}
 
             {/* 詳細テーブル */}
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
