@@ -439,7 +439,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
       orderAmount: number;
       orderId?: string;
       shopifyCustomerId?: string;
-      currency?: string;          // 通貨コード（例: "JPY", "USD"）
+      currency?: string;          // 通貨コード（例: \"JPY\", \"USD\"）
       isSubscription?: boolean;   // サブスクリプション注文フラグ
       customerTags?: string[];
       productTags?: string[];
@@ -950,7 +950,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
       .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? ORDER BY created_at DESC LIMIT 1`)
       .bind(point.friend_id, `%コード: ${code}%`)
       .first<{ reason: string }>();
-    const m = latestRedeem?.reason?.match(/¥(\d+)割引/);
+    const m = latestRedeem?.reason?.match(/¥(\\d+)割引/);
     const refundPoints = m ? parseInt(m[1], 10) : 0;
 
     if (refundPoints <= 0) {
@@ -1071,6 +1071,55 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/backfill-pending', async (
     return c.json({ success: true, data: backfill });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to backfill' }, 500);
+  }
+});
+
+// POST /api/loyalty/admin/link-by-name — 管理用：名前で友だちを検索してShopify連携
+loyalty.post('/api/loyalty/admin/link-by-name', async (c) => {
+  try {
+    const body = await c.req.json<{ displayName: string; shopifyCustomerId: string }>();
+    if (!body.displayName || !body.shopifyCustomerId) {
+      return c.json({ success: false, error: 'displayName と shopifyCustomerId は必須です' }, 400);
+    }
+
+    // 名前で友だちを検索
+    const friend = await c.env.DB
+      .prepare('SELECT id, display_name FROM friends WHERE display_name LIKE ? LIMIT 1')
+      .bind(`%${body.displayName}%`)
+      .first<{ id: string; display_name: string }>();
+
+    if (!friend) {
+      return c.json({ success: false, error: `名前 "${body.displayName}" に一致する友だちが見つかりません` }, 404);
+    }
+
+    // 既存の紐付けをチェック
+    const existing = await getLoyaltyPointByShopifyCustomerId(c.env.DB, body.shopifyCustomerId);
+    if (existing && existing.friend_id !== friend.id) {
+      return c.json({
+        success: false,
+        error: `このShopify顧客IDは既に別の友だち(ID: ${existing.friend_id})に紐付いています`,
+      }, 409);
+    }
+
+    // 紐付け実行
+    const current = await getLoyaltyPoint(c.env.DB, friend.id);
+    await upsertLoyaltyPoint(c.env.DB, friend.id, {
+      balance: current?.balance ?? 0,
+      totalSpent: current?.total_spent ?? 0,
+      rank: current?.rank ?? 'レギュラー',
+      shopifyCustomerId: body.shopifyCustomerId,
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        friendId: friend.id,
+        displayName: friend.display_name,
+        shopifyCustomerId: body.shopifyCustomerId,
+      },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to link by name' }, 500);
   }
 });
 
