@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { fetchApi } from '@/lib/api'
 
 export default function TodayTasks() {
@@ -65,14 +66,14 @@ export default function TodayTasks() {
       </div>
       <div className="space-y-2">
         {items.map((item) => (
-          <a key={item.label} href={item.href}
+          <Link key={item.label} href={item.href}
             className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100 hover:border-gray-200 hover:bg-gray-50 transition-colors group">
             <div className={`w-2 h-2 rounded-full ${item.color} shrink-0`} />
             <span className="flex-1 text-sm text-gray-700 group-hover:text-gray-900">
               {item.emoji} {item.label}
             </span>
             <span className="text-sm font-bold text-gray-900">{item.count}</span>
-          </a>
+          </Link>
         ))}
       </div>
     </div>
