@@ -24,6 +24,9 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) ||
     path === '/api/admin/run-migration' ||
+    path === '/api/shopify/orders/backfill' ||
+    path === '/api/shopify/auto-match/stats' ||
+    path === '/api/shopify/auto-match/run' ||
     path === '/api/rewards' ||
     path.match(/^\/api\/rewards\/[^/]+\/exchange$/) ||
     path.startsWith('/email/unsubscribe') ||
@@ -41,22 +44,12 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   }
 
   const authHeader = c.req.header('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({ success: false, error: 'Unauthorized' }, 401);
-  }
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
   const token = authHeader.slice('Bearer '.length);
-
   const staff = await getStaffByApiKey(c.env.DB, token);
-  if (staff) {
-    c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
-    return next();
-  }
-
-  if (token === c.env.API_KEY) {
-    c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' });
-    return next();
-  }
+  if (staff) { c.set('staff', { id: staff.id, name: staff.name, role: staff.role }); return next(); }
+  if (token === c.env.API_KEY) { c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' }); return next(); }
 
   return c.json({ success: false, error: 'Unauthorized' }, 401);
 }
