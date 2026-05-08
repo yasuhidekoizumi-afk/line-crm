@@ -578,7 +578,9 @@ export const api = {
         }),
       })
       if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-      return res.json()
+      const json = await res.json() as { success: boolean; data: { id: string; key: string; url: string; mimeType: string; size: number }; error?: string }
+      if (!json.success) throw new Error(json.error || 'Upload failed')
+      return json.data
     },
   },
   richMenus: {

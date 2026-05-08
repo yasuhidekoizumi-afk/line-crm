@@ -32,8 +32,10 @@ export default function ImageUploader({ onUploaded }: ImageUploaderProps) {
     setUploading(true)
     try {
       const result = await api.images.upload(file)
+      setPreview(result.url)
       onUploaded(result.url)
     } catch {
+      setPreview(null)
       setError('アップロードに失敗しました')
     } finally {
       setUploading(false)
