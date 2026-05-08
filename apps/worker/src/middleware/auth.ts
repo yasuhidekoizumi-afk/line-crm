@@ -3,8 +3,6 @@ import { getStaffByApiKey } from '@line-crm/db';
 import type { Env } from '../index.js';
 
 export async function authMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
-  // Skip auth for the LINE webhook endpoint — it uses signature verification instead
-  // Skip auth for OpenAPI docs — public documentation
   const path = new URL(c.req.url).pathname;
   if (
     path === '/webhook' ||
@@ -20,24 +18,24 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.startsWith('/api/shopify/webhooks/') ||
     path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
-    path.match(/^\/api\/forms\/[^/]+$/) || // GET form definition (public for LIFF)
-    path.match(/^\/api\/loyalty\/shopify\/[^/]+$/) || // GET loyalty balance (Shopify customer page)
-    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redeem$/) || // POST redeem (Shopify customer page)
-    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) || // POST cancel code (Shopify customer page)
-    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) || // GET history (Shopify customer page)
-    path === '/api/rewards' || // GET active reward items (Shopify widget)
-    path.match(/^\/api\/rewards\/[^/]+\/exchange$/) || // POST exchange (Shopify widget)
-    // FERMENT: 認証不要エンドポイント
-    path.startsWith('/email/unsubscribe') ||          // 配信停止ページ
-    path.startsWith('/email/view/') ||                // 開封トラッキングピクセル
-    path === '/webhook/resend' ||                     // Resend Webhook（署名検証を使用）
-    path.startsWith('/webhook/shopify/') ||           // Shopify Webhook（共有シークレット）
-    path.startsWith('/forms/') ||                     // FERMENT 公開フォーム（埋め込みJS・送信）
-    path.startsWith('/reviews/') ||                   // FERMENT レビュー受信フォーム
-    path === '/email/optin-confirm' ||                // FERMENT 二重オプトイン確認
-    path === '/api/ferment/phase5/double-optin/confirm' || // FERMENT 二重オプトイン確認(直接)
-    path === '/api/ferment/phase5/gdpr/request' ||   // FERMENT GDPR削除リクエスト（公開）
-    path === '/webhooks/gmail'                       // CS Phase 1: Gmail Pub/Sub Push通知
+    path.match(/^\/api\/forms\/[^/]+$/) ||
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+$/) ||
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redeem$/) ||
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) ||
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) ||
+    path === '/api/admin/run-migration' ||
+    path === '/api/rewards' ||
+    path.match(/^\/api\/rewards\/[^/]+\/exchange$/) ||
+    path.startsWith('/email/unsubscribe') ||
+    path.startsWith('/email/view/') ||
+    path === '/webhook/resend' ||
+    path.startsWith('/webhook/shopify/') ||
+    path.startsWith('/forms/') ||
+    path.startsWith('/reviews/') ||
+    path === '/email/optin-confirm' ||
+    path === '/api/ferment/phase5/double-optin/confirm' ||
+    path === '/api/ferment/phase5/gdpr/request' ||
+    path === '/webhooks/gmail'
   ) {
     return next();
   }
@@ -49,14 +47,12 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
 
   const token = authHeader.slice('Bearer '.length);
 
-  // Check staff_members table first
   const staff = await getStaffByApiKey(c.env.DB, token);
   if (staff) {
     c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
     return next();
   }
 
-  // Fallback: env API_KEY acts as owner
   if (token === c.env.API_KEY) {
     c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' });
     return next();
