@@ -6,11 +6,43 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAccount } from '@/contexts/account-context'
 import type { AccountWithStats } from '@/contexts/account-context'
 
-// ─── メニュー定義（ユーザー目線のカテゴリ） ───
+type RoleMode = 'cs' | 'marketing' | 'admin'
+
+const ROLE_LABELS: Record<RoleMode, string> = {
+  cs: 'CS対応',
+  marketing: 'マーケティング',
+  admin: '管理（全機能）',
+}
+
+// CSモードで表示するメニューのhrefリスト
+const CS_MENU_HREFS = new Set([
+  '/', '/friends', '/chats', '/cs', '/loyalty',
+  '/staff', '/accounts', '/emergency',
+])
+
+// マーケティングモードで表示するメニューのhrefリスト
+const MARKETING_MENU_HREFS = new Set([
+  '/', '/scenarios', '/broadcasts', '/templates', '/rich-menus', '/reminders',
+  '/loyalty', '/shopify-bi', '/affiliates', '/conversions', '/scoring',
+  '/automations', '/webhooks',
+  '/email/campaigns', '/email/flows', '/email/templates', '/customers', '/segments',
+  '/email/forms', '/email/reviews', '/email/sms', '/email/insights', '/email/analytics',
+  '/email/settings', '/email/logs',
+])
+
+function filterMenuByRole(sections: typeof menuSections, role: RoleMode) {
+  if (role === 'admin') return sections
+  const allowed = role === 'cs' ? CS_MENU_HREFS : MARKETING_MENU_HREFS
+  return sections
+    .map((s) => ({ ...s, items: s.items.filter((i) => allowed.has(i.href)) }))
+    .filter((s) => s.items.length > 0)
+}
+
+// ─── メニュー定義 ───
 
 const menuSections = [
   {
-    label: null, // セクションラベルなし（メイン）
+    label: null,
     items: [
       { href: '/', label: 'ダッシュボード', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
       { href: '/friends', label: '友だち管理', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
@@ -84,19 +116,14 @@ function AccountAvatar({ account, size = 32 }: { account: AccountWithStats; size
   const displayName = account.displayName || account.name
   if (account.pictureUrl) {
     return (
-      <img
-        src={account.pictureUrl}
-        alt={displayName}
+      <img src={account.pictureUrl} alt={displayName}
         className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size }}
-      />
+        style={{ width: size, height: size }} />
     )
   }
   return (
-    <div
-      className="rounded-full flex items-center justify-center text-white font-bold shrink-0"
-      style={{ width: size, height: size, backgroundColor: '#06C755', fontSize: size * 0.4 }}
-    >
+    <div className="rounded-full flex items-center justify-center text-white font-bold shrink-0"
+      style={{ width: size, height: size, backgroundColor: '#06C755', fontSize: size * 0.4 }}>
       {displayName.charAt(0)}
     </div>
   )
@@ -121,48 +148,30 @@ function AccountSwitcher() {
 
   return (
     <div ref={ref} className="px-3 py-3 border-b border-gray-200">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-50 transition-colors"
-      >
+      <button onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-50 transition-colors">
         {selectedAccount && <AccountAvatar account={selectedAccount} size={28} />}
         <div className="flex-1 text-left min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
         </div>
-        <svg
-          className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
+        <svg className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-
       {open && (
         <div className="mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
           {accounts.map((account) => {
             const isSelected = account.id === selectedAccount?.id
             const name = account.displayName || account.name
             return (
-              <button
-                key={account.id}
-                onClick={() => {
-                  setSelectedAccountId(account.id)
-                  setOpen(false)
-                }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
-                  isSelected ? 'bg-green-50' : 'hover:bg-gray-50'
-                }`}
-              >
+              <button key={account.id}
+                onClick={() => { setSelectedAccountId(account.id); setOpen(false) }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${isSelected ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
                 <AccountAvatar account={account} size={24} />
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm truncate ${isSelected ? 'font-semibold text-green-700' : 'text-gray-700'}`}>
-                    {name}
-                  </p>
-                  {account.basicId && (
-                    <p className="text-xs text-gray-400 truncate">{account.basicId}</p>
-                  )}
+                  <p className={`text-sm truncate ${isSelected ? 'font-semibold text-green-700' : 'text-gray-700'}`}>{name}</p>
+                  {account.basicId && <p className="text-xs text-gray-400 truncate">{account.basicId}</p>}
                 </div>
                 {isSelected && (
                   <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -227,12 +236,21 @@ export default function Sidebar() {
   const [staffRole, setStaffRole] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [roleMode, setRoleMode] = useState<RoleMode>('admin')
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setStaffName(localStorage.getItem('lh_staff_name'))
     setStaffRole(localStorage.getItem('lh_staff_role'))
+    try {
+      const saved = localStorage.getItem('lh_role_mode') as RoleMode | null
+      if (saved && ['cs', 'marketing', 'admin'].includes(saved)) setRoleMode(saved)
+    } catch {}
   }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem('lh_role_mode', roleMode) } catch {}
+  }, [roleMode])
 
   useEffect(() => { setIsOpen(false) }, [pathname])
   useEffect(() => {
@@ -242,10 +260,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === '/' && document.activeElement !== searchRef.current) {
-        e.preventDefault()
-        searchRef.current?.focus()
-      }
+      if (e.key === '/' && document.activeElement !== searchRef.current) { e.preventDefault(); searchRef.current?.focus() }
       if (e.key === 'Escape') { setSearchQuery(''); searchRef.current?.blur() }
     }
     window.addEventListener('keydown', handler)
@@ -255,10 +270,11 @@ export default function Sidebar() {
   const isActive = (href: string) => href === '/' ? pathname === '/' : pathname.startsWith(href)
 
   const q = searchQuery.toLowerCase().trim()
-  const filteredSections = useMemo(() => {
-    if (!q) return menuSections
-    return menuSections.map((s) => ({ ...s, items: s.items.filter((i) => i.label.toLowerCase().includes(q) || i.href.toLowerCase().includes(q)) })).filter((s) => s.items.length > 0)
-  }, [q])
+  const displayedSections = useMemo(() => {
+    const roleFiltered = filterMenuByRole(menuSections, roleMode)
+    if (!q) return roleFiltered
+    return roleFiltered.map((s) => ({ ...s, items: s.items.filter((i) => i.label.toLowerCase().includes(q) || i.href.toLowerCase().includes(q)) })).filter((s) => s.items.length > 0)
+  }, [q, roleMode])
 
   const sidebarContent = (
     <>
@@ -268,16 +284,33 @@ export default function Sidebar() {
           <div><p className="text-sm font-bold text-gray-900 leading-tight">LINE Harness</p><p className="text-xs text-gray-400">管理画面</p></div>
         </div>
       </div>
+
+      {/* ─── ロールモード切替 ─── */}
+      <div className="px-3 pt-3 pb-1 border-b border-gray-200">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+          {(['cs', 'marketing', 'admin'] as RoleMode[]).map((mode) => (
+            <button key={mode} onClick={() => setRoleMode(mode)}
+              className={`flex-1 text-xs py-1.5 rounded-md font-medium transition-colors ${
+                roleMode === mode ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}>
+              {mode === 'cs' ? '🎧 CS' : mode === 'marketing' ? '📈 マーケ' : '⚙️ 管理'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <AccountSwitcher />
       <div className="px-3 pt-3">
         <div className="relative">
           <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          <input ref={searchRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="メニューを検索... ( / )" className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-200 transition-colors" aria-label="メニューを検索" />
+          <input ref={searchRef} type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="メニューを検索... ( / )"
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-200 transition-colors" aria-label="メニューを検索" />
           {searchQuery && <button onClick={() => { setSearchQuery(''); searchRef.current?.focus() }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" aria-label="検索をクリア"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>}
         </div>
+        <p className="text-[10px] text-gray-400 mt-1 px-1">{ROLE_LABELS[roleMode]}</p>
       </div>
       <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
-        {filteredSections.map((section, si) => (
+        {displayedSections.map((section, si) => (
           <div key={si}>
             {section.label && <div className="pt-4 pb-1 px-3"><p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">{section.label}</p></div>}
             {section.items.filter((item) => {
@@ -298,7 +331,7 @@ export default function Sidebar() {
             })}
           </div>
         ))}
-        {filteredSections.length === 0 && <div className="px-3 py-8 text-center"><p className="text-xs text-gray-400">「{searchQuery}」に一致するメニューがありません</p></div>}
+        {displayedSections.length === 0 && <div className="px-3 py-8 text-center"><p className="text-xs text-gray-400">「{searchQuery}」に一致するメニューがありません</p></div>}
       </nav>
       <div className="border-t border-gray-200">
         {staffName && (
