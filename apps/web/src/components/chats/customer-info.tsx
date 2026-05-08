@@ -29,11 +29,35 @@ interface LoyaltyData {
   total_spent: number
 }
 
+interface OrderSummary {
+  total_orders: number
+  total_spent: number
+  first_order_at: string | null
+  last_order_at: string | null
+  completed_orders: number
+}
+
+interface RecentItem {
+  title: string
+  quantity: number
+  price: number
+  processed_at: string
+}
+
 const yen = (n: number) => '¥' + Math.round(n).toLocaleString('ja-JP')
+const daysAgo = (iso: string | null): string => {
+  if (!iso) return '—'
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+  if (days === 0) return '今日'
+  if (days === 1) return '昨日'
+  return `${days}日前`
+}
 
 export default function CustomerInfoPanel({ friendId, friendName, friendPictureUrl, friendEmail, chatStatus, onClose }: CustomerInfoProps) {
   const [friend, setFriend] = useState<FriendDetail | null>(null)
   const [loyalty, setLoyalty] = useState<LoyaltyData | null>(null)
+  const [orders, setOrders] = useState<OrderSummary | null>(null)
+  const [recentItems, setRecentItems] = useState<RecentItem[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -41,13 +65,15 @@ export default function CustomerInfoPanel({ friendId, friendName, friendPictureU
     setLoading(true)
     const load = async () => {
       try {
-        const [friendRes, loyaltyRes] = await Promise.all([
+        const [friendRes, loyaltyRes, orderRes] = await Promise.all([
           fetchApi<{ success: boolean; data: FriendDetail }>(`/api/friends/${friendId}`),
           fetchApi<{ success: boolean; data: LoyaltyData }>(`/api/loyalty/${friendId}`).catch(() => ({ success: false as const, data: null })),
+          fetchApi<{ success: boolean; data: { summary: OrderSummary; recent_items: RecentItem[] } }>(`/api/shopify/orders/customer-summary/${friendId}`).catch(() => ({ success: false as const, data: null })),
         ])
         if (cancelled) return
         if (friendRes.success) setFriend(friendRes.data)
         if (loyaltyRes.success && loyaltyRes.data) setLoyalty(loyaltyRes.data)
+        if (orderRes.success && orderRes.data) { setOrders(orderRes.data.summary); setRecentItems(orderRes.data.recent_items) }
       } catch { /* silent */ }
       setLoading(false)
     }
@@ -73,9 +99,10 @@ export default function CustomerInfoPanel({ friendId, friendName, friendPictureU
 
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-4 space-y-3">{[...Array(4)].map((_, i) => (<div key={i} className="h-4 bg-gray-200 rounded animate-pulse" />))}</div>
+          <div className="p-4 space-y-3">{[...Array(6)].map((_, i) => (<div key={i} className="h-4 bg-gray-200 rounded animate-pulse" />))}</div>
         ) : (
           <>
+            {/* プロフィール */}
             <div className="px-4 py-4 border-b border-gray-200 bg-white">
               <div className="flex items-center gap-3">
                 {friendPictureUrl ? (
@@ -91,8 +118,10 @@ export default function CustomerInfoPanel({ friendId, friendName, friendPictureU
                 </div>
               </div>
               {friendEmail && <p className="text-xs text-gray-600 mt-2 truncate">✉️ {friendEmail}</p>}
+              {friend && <p className="text-xs text-gray-500 mt-1">登録 {daysAgo(friend.createdAt)}</p>}
             </div>
 
+            {/* タグ */}
             <div className="px-4 py-3 border-b border-gray-200">
               <p className="text-xs font-bold text-gray-700 mb-2">🏷️ タグ</p>
               {friend && friend.tags.length > 0 ? (
@@ -106,6 +135,51 @@ export default function CustomerInfoPanel({ friendId, friendName, friendPictureU
               )}
             </div>
 
+            {/* Shopify購入サマリー */}
+            <div className="px-4 py-3 border-b border-gray-200">
+              <p className="text-xs font-bold text-gray-700 mb-2">🛒 購入履歴</p>
+              {orders && orders.total_orders > 0 ? (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-blue-100 border border-blue-200 rounded p-2 text-center">
+                      <p className="text-lg font-extrabold text-blue-800">{orders.total_orders}</p>
+                      <p className="text-[10px] text-blue-700 font-medium">注文数</p>
+                    </div>
+                    <div className="bg-green-100 border border-green-200 rounded p-2 text-center">
+                      <p className="text-lg font-extrabold text-green-800">{yen(orders.total_spent)}</p>
+                      <p className="text-[10px] text-green-700 font-medium">合計金額</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">初回注文</span>
+                    <span className="text-gray-800 font-medium">{orders.first_order_at ? daysAgo(orders.first_order_at) : '—'}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">最終注文</span>
+                    <span className="text-gray-800 font-medium">{orders.last_order_at ? daysAgo(orders.last_order_at) : '—'}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">Shopifyの購入データはまだありません</p>
+              )}
+            </div>
+
+            {/* 直近の購入商品 */}
+            {recentItems.length > 0 && (
+              <div className="px-4 py-3 border-b border-gray-200">
+                <p className="text-xs font-bold text-gray-700 mb-2">📦 最近買ったもの</p>
+                <div className="space-y-1.5">
+                  {recentItems.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-800 truncate flex-1">{item.title}</span>
+                      <span className="text-gray-500 ml-2 shrink-0">{daysAgo(item.processed_at)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ポイント */}
             {loyalty && (
               <div className="px-4 py-3 border-b border-gray-200">
                 <p className="text-xs font-bold text-gray-700 mb-2">💎 ポイント</p>
@@ -126,36 +200,13 @@ export default function CustomerInfoPanel({ friendId, friendName, friendPictureU
               </div>
             )}
 
-            {friend && (
-              <div className="px-4 py-3 border-b border-gray-200">
-                <p className="text-xs font-bold text-gray-700 mb-2">📋 基本情報</p>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-gray-500">友だちID</span>
-                    <span className="text-gray-800 font-mono text-[10px] font-medium">{friend.id.slice(0, 16)}...</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-gray-500">フォロー状態</span>
-                    <span className={friend.isFollowing ? 'text-green-700 font-semibold' : 'text-red-600 font-semibold'}>{friend.isFollowing ? '✅ している' : '❌ していない'}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-gray-500">言語</span>
-                    <span className="text-gray-800 font-medium">{friend.language ?? '未設定'}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-gray-500">登録日</span>
-                    <span className="text-gray-800 font-medium">{new Date(friend.createdAt).toLocaleDateString('ja-JP')}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
+            {/* CSヒント */}
             <div className="px-4 py-3 bg-gradient-to-br from-yellow-100 to-orange-100 border-b border-yellow-200">
               <p className="text-xs font-bold text-yellow-800 mb-2">💡 CS対応のヒント</p>
               <ul className="text-xs text-yellow-900 space-y-1">
                 <li>• タグを確認して過去対応履歴を把握</li>
-                <li>• 高ランク顧客は優先対応するとGood</li>
-                <li>• 初回対応は24時間以内を目標に</li>
+                <li>• 高ランク/高額顧客は優先対応</li>
+                <li>• 最終注文からの日数でフォローアップ判断</li>
                 <li>• 親しみやすく丁寧な対応が◎</li>
               </ul>
             </div>
