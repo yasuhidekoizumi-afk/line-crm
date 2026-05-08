@@ -1,11 +1,5 @@
 /**
  * Shopify → LINE 友だち 自動マッチングサービス
- *
- * 戦略:
- * 1. shopify_customer_id 経由の既存紐付け確認
- * 2. 名前正規化マッチ（姓名の順序入れ替え・スペース除去）
- * 3. メールアドレスマッチ（Shopify email ↔ users.email → friends.user_id）
- * 4. 電話番号マッチ（Shopify phone ↔ friends.metadata.phone）
  */
 
 export interface ShopifyOrderForMatch {
@@ -146,4 +140,50 @@ export async function batchMatchAll(db: D1Database, options: { limit?: number; u
     }
     return { totalUnmatchedOrders: unmatchOrders.results.length, matched, skipped, errors, results };
   } catch { return { totalUnmatchedOrders: 0, matched: 0, skipped: 0, errors: 1, results: [] }; }
+}
+
+/**
+ * raw_payload から customer_name を抽出して shopify_orders テーブルを更新
+ */
+export async function extractNamesFromPayload(db: D1Database): Promise<{ scanned: number; updated: number; errors: number }> {
+  let scanned = 0, updated = 0, errors = 0;
+  const BATCH = 100;
+  let offset = 0;
+  
+  while (true) {
+    const rows = await db.prepare(
+      `SELECT shopify_order_id, raw_payload FROM shopify_orders WHERE customer_name IS NULL AND raw_payload IS NOT NULL ORDER BY shopify_order_id LIMIT ? OFFSET ?`
+    ).bind(BATCH, offset).all<{ shopify_order_id: string; raw_payload: string }>();
+    
+    if (rows.results.length === 0) break;
+    scanned += rows.results.length;
+    
+    for (const row of rows.results) {
+      try {
+        const payload = JSON.parse(row.raw_payload);
+        // billing_address.name 優先、なければ customer の first_name + last_name
+        let name: string | null = null;
+        const billing = payload.billing_address || payload.billingAddress;
+        if (billing?.name && typeof billing.name === 'string' && billing.name.trim()) {
+          name = billing.name.trim();
+        } else {
+          const cust = payload.customer;
+          if (cust) {
+            const first = cust.first_name || cust.firstName || '';
+            const last = cust.last_name || cust.lastName || '';
+            const full = `${last} ${first}`.trim();
+            if (full) name = full;
+          }
+        }
+        
+        if (name) {
+          await db.prepare(`UPDATE shopify_orders SET customer_name = ? WHERE shopify_order_id = ?`).bind(name, row.shopify_order_id).run();
+          updated++;
+        }
+      } catch { errors++; }
+    }
+    offset += BATCH;
+  }
+  
+  return { scanned, updated, errors };
 }
