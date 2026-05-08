@@ -43,6 +43,7 @@ import { shopifyWebhooks } from './routes/shopify-webhooks.js';
 import { shopifyOrders } from './routes/shopify-orders.js';
 import { shopifyProducts } from './routes/shopify-products.js';
 import { shopifyAutoMatch } from './routes/shopify-auto-match.js';
+import { migrationRunner } from './routes/migration-runner.js';
 import { customerJourney } from './routes/customer-journey.js';
 import { help } from './routes/help.js';
 import { aiDraft } from './routes/ai-draft.js';
@@ -186,6 +187,7 @@ app.route('/', shopifyWebhooks);
 app.route('/', shopifyOrders);
 app.route('/', shopifyProducts);
 app.route('/', shopifyAutoMatch);
+app.route('/', migrationRunner);
 app.route('/', customerJourney);
 app.route('/', help);
 // CS Phase 1
@@ -257,7 +259,6 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     jobs.push(processFlowDeliveries(env));
   } else if (cronExpr === '0 * * * *') {
     jobs.push(recomputeAllSegments(env));
-    // Shopify 自動マッチング（毎時）
     jobs.push(
       import('./services/shopify-matching.js')
         .then(({ batchMatchAll }) => batchMatchAll(env.DB, { limit: 100 }))
