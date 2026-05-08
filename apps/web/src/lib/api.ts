@@ -204,6 +204,7 @@ export const api = {
       targetType: ApiBroadcast['targetType']
       targetTagId?: string | null
       targetSegmentId?: string | null
+      targetFriendIds?: string[] | null
       scheduledAt?: string | null
       status?: ApiBroadcast['status']
       lineAccountId?: string | null
@@ -221,6 +222,7 @@ export const api = {
         targetType?: ApiBroadcast['targetType']
         targetTagId?: string | null
         targetSegmentId?: string | null
+        targetFriendIds?: string[] | null
         scheduledAt?: string | null
       }
     ) =>

@@ -1,5 +1,5 @@
 import { jstNow } from './utils.js';
-export type BroadcastTargetType = 'all' | 'tag' | 'segment';
+export type BroadcastTargetType = 'all' | 'tag' | 'segment' | 'individual';
 export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent';
 export type BroadcastMessageType = 'text' | 'image' | 'flex';
 
@@ -11,6 +11,7 @@ export interface Broadcast {
   target_type: BroadcastTargetType;
   target_tag_id: string | null;
   target_segment_id: string | null;
+  target_friend_ids: string | null;
   status: BroadcastStatus;
   scheduled_at: string | null;
   sent_at: string | null;
@@ -43,6 +44,7 @@ export interface CreateBroadcastInput {
   targetType: BroadcastTargetType;
   targetTagId?: string | null;
   targetSegmentId?: string | null;
+  targetFriendIds?: string[] | null;
   scheduledAt?: string | null;
 }
 
@@ -58,7 +60,7 @@ export async function createBroadcast(
   await db
     .prepare(
       `INSERT INTO broadcasts
-         (id, title, message_type, message_content, target_type, target_tag_id, target_segment_id, status, scheduled_at, sent_at, total_count, success_count, created_at)
+         (id, title, message_type, message_content, target_type, target_tag_id, target_segment_id, target_friend_ids, status, scheduled_at, sent_at, total_count, success_count, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)`,
     )
     .bind(
@@ -69,6 +71,7 @@ export async function createBroadcast(
       input.targetType,
       input.targetTagId ?? null,
       input.targetSegmentId ?? null,
+      input.targetFriendIds ? JSON.stringify(input.targetFriendIds) : null,
       initialStatus,
       input.scheduledAt ?? null,
       now,
@@ -87,6 +90,7 @@ export type UpdateBroadcastInput = Partial<
     | 'target_type'
     | 'target_tag_id'
     | 'target_segment_id'
+    | 'target_friend_ids'
     | 'status'
     | 'scheduled_at'
   >
@@ -123,6 +127,10 @@ export async function updateBroadcast(
   if (updates.target_segment_id !== undefined) {
     fields.push('target_segment_id = ?');
     values.push(updates.target_segment_id);
+  }
+  if (updates.target_friend_ids !== undefined) {
+    fields.push('target_friend_ids = ?');
+    values.push(updates.target_friend_ids);
   }
   if (updates.status !== undefined) {
     fields.push('status = ?');

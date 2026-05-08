@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Tag } from '@line-crm/shared'
-import { api, type ApiBroadcast } from '@/lib/api'
+import { api, type ApiBroadcast, type FriendWithTags } from '@/lib/api'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
 import FlexPreviewComponent from '@/components/flex-preview'
 import ImageUploader from '@/components/messages/image-uploader'
@@ -34,6 +34,7 @@ interface FormState {
   targetType: ApiBroadcast['targetType']
   targetTagId: string
   targetSegmentId: string
+  targetFriendIds: string[]
   scheduledAt: string
   sendMode: SendMode
 }
@@ -47,17 +48,49 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     targetType: initialDraft?.targetType ?? 'all',
     targetTagId: initialDraft?.targetTagId ?? '',
     targetSegmentId: initialDraft?.targetSegmentId ?? '',
+    targetFriendIds: (initialDraft as FormState | undefined)?.targetFriendIds ?? [],
     scheduledAt: initialDraft?.scheduledAt ?? '',
     sendMode: 'draft',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // 個別指定: 友だち検索
+  const [friendSearchTag, setFriendSearchTag] = useState('')
+  const [friendSearchInput, setFriendSearchInput] = useState('')
+  const [friendSearchQuery, setFriendSearchQuery] = useState('')
+  const [friendCandidates, setFriendCandidates] = useState<FriendWithTags[]>([])
+  const [friendLoading, setFriendLoading] = useState(false)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadFriendCandidates = useCallback(async () => {
+    setFriendLoading(true)
+    try {
+      const params: Record<string, string> = { offset: '0', limit: '50' }
+      if (friendSearchTag) params.tagId = friendSearchTag
+      if (selectedAccountId) params.accountId = selectedAccountId
+      if (friendSearchQuery.trim()) params.search = friendSearchQuery.trim()
+      const res = await api.friends.list(params)
+      if (res.success) setFriendCandidates(res.data.items)
+    } catch { /* ignore */ } finally {
+      setFriendLoading(false)
+    }
+  }, [friendSearchTag, friendSearchQuery, selectedAccountId])
+
+  useEffect(() => {
+    if (form.targetType !== 'individual') return
+    loadFriendCandidates()
+  }, [form.targetType, loadFriendCandidates])
+
   const handleSave = async () => {
     if (!form.title.trim()) { setError('配信タイトルを入力してください'); return }
     if (!form.messageContent.trim()) { setError('メッセージ内容を入力してください'); return }
     if (form.messageType === 'flex') {
       try { JSON.parse(form.messageContent) } catch { setError('FlexメッセージのJSONが無効です'); return }
+    }
+    if (form.targetType === 'individual' && form.targetFriendIds.length === 0) {
+      setError('送信先の友だちを1人以上選択してください')
+      return
     }
     if (form.sendMode === 'scheduled' && !form.scheduledAt) {
       setError('予約配信の場合は配信日時を指定してください')
@@ -74,6 +107,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
         targetType: form.targetType,
         targetTagId: form.targetType === 'tag' ? form.targetTagId || null : null,
         targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId || null : null,
+        targetFriendIds: form.targetType === 'individual' ? form.targetFriendIds : null,
         scheduledAt: form.sendMode === 'scheduled' && form.scheduledAt
           ? form.scheduledAt + ':00.000+09:00'
           : null,
@@ -287,6 +321,17 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             >
               🎯 セグメントで絞り込み
             </button>
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, targetType: 'individual', targetTagId: '', targetFriendIds: [] })}
+              className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
+                form.targetType === 'individual'
+                  ? 'border-blue-500 text-blue-700 bg-blue-50'
+                  : 'border-gray-300 text-gray-600 bg-white hover:border-gray-400'
+              }`}
+            >
+              個別指定
+            </button>
           </div>
           {form.targetType === 'tag' && (
             <select
@@ -313,6 +358,75 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
                 </option>
               ))}
             </select>
+          )}
+          {form.targetType === 'individual' && (
+            <div className="space-y-2">
+              {/* 選択済み表示 */}
+              {form.targetFriendIds.length > 0 && (
+                <p className="text-xs text-blue-700 font-medium">
+                  {form.targetFriendIds.length} 人を選択中
+                </p>
+              )}
+              {/* タグフィルター + 検索 */}
+              <div className="flex gap-2">
+                <select
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1"
+                  value={friendSearchTag}
+                  onChange={(e) => setFriendSearchTag(e.target.value)}
+                >
+                  <option value="">タグで絞り込み（任意）</option>
+                  {tags.map((tag) => (
+                    <option key={tag.id} value={tag.id}>{tag.name}</option>
+                  ))}
+                </select>
+                <input
+                  type="search"
+                  placeholder="名前で検索"
+                  value={friendSearchInput}
+                  onChange={(e) => {
+                    setFriendSearchInput(e.target.value)
+                    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+                    searchTimerRef.current = setTimeout(() => setFriendSearchQuery(e.target.value), 400)
+                  }}
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1"
+                />
+              </div>
+              {/* 候補リスト */}
+              <div className="border border-gray-200 rounded-lg overflow-y-auto max-h-48 bg-white">
+                {friendLoading ? (
+                  <p className="text-xs text-gray-400 p-3">読み込み中...</p>
+                ) : friendCandidates.length === 0 ? (
+                  <p className="text-xs text-gray-400 p-3">該当する友だちがいません</p>
+                ) : (
+                  friendCandidates.map((f) => {
+                    const checked = form.targetFriendIds.includes(f.id)
+                    return (
+                      <label
+                        key={f.id}
+                        className={`flex items-center gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-0 ${checked ? 'bg-blue-50' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            const ids = checked
+                              ? form.targetFriendIds.filter((id) => id !== f.id)
+                              : [...form.targetFriendIds, f.id]
+                            setForm({ ...form, targetFriendIds: ids })
+                          }}
+                          className="accent-blue-500"
+                        />
+                        <span className="font-medium text-gray-800">{f.displayName || f.lineUserId}</span>
+                        {!f.isFollowing && <span className="text-gray-400 text-[10px]">（ブロック済）</span>}
+                      </label>
+                    )
+                  })
+                )}
+              </div>
+              {friendCandidates.length >= 50 && (
+                <p className="text-[11px] text-gray-400">表示は最大50件。絞り込みで対象を絞ってください。</p>
+              )}
+            </div>
           )}
         </div>
 

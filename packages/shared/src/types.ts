@@ -139,7 +139,7 @@ export interface FriendScenario {
 // -----------------------------------------------------------------------------
 
 /** 配信対象種別 */
-export type BroadcastTargetType = "all" | "tag" | "segment";
+export type BroadcastTargetType = "all" | "tag" | "segment" | "individual";
 
 /** 配信ステータス */
 export type BroadcastStatus = "draft" | "scheduled" | "sending" | "sent";
@@ -159,6 +159,8 @@ export interface Broadcast {
   targetTagId: string | null;
   /** 対象セグメントID (targetType が 'segment' の場合のみ使用) */
   targetSegmentId: string | null;
+  /** 対象友だちIDリスト (targetType が 'individual' の場合のみ使用、JSON配列) */
+  targetFriendIds: string[] | null;
   /** 配信ステータス */
   status: BroadcastStatus;
   /** 予約配信日時 (ISO 8601、即時配信の場合は null) */

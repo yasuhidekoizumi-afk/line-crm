@@ -98,6 +98,45 @@ export async function processBroadcastSend(
           // Continue with next batch; failed batch is not logged
         }
       }
+    } else if (broadcast.target_type === 'individual') {
+      const raw = (broadcast as unknown as Record<string, unknown>).target_friend_ids as string | null;
+      if (!raw) {
+        throw new Error('target_friend_ids is required for individual-targeted broadcasts');
+      }
+      const friendIds: string[] = JSON.parse(raw);
+
+      // Fetch line_user_id for each friend
+      const result = await db
+        .prepare(
+          `SELECT id, line_user_id FROM friends WHERE id IN (${friendIds.map(() => '?').join(',')}) AND is_following = 1`,
+        )
+        .bind(...friendIds)
+        .all<{ id: string; line_user_id: string }>();
+      const friends = result.results;
+      totalCount = friends.length;
+
+      const now = jstNow();
+      const lineUserIds = friends.map((f) => f.line_user_id);
+      for (let i = 0; i < lineUserIds.length; i += MULTICAST_BATCH_SIZE) {
+        const batch = friends.slice(i, i + MULTICAST_BATCH_SIZE);
+        const batchUserIds = batch.map((f) => f.line_user_id);
+        try {
+          await lineClient.multicast(batchUserIds, [message]);
+          successCount += batch.length;
+          for (const friend of batch) {
+            const logId = crypto.randomUUID();
+            await db
+              .prepare(
+                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+                 VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
+              )
+              .bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now)
+              .run();
+          }
+        } catch (err) {
+          console.error(`Individual multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
+        }
+      }
     } else if (broadcast.target_type === 'segment') {
       if (!broadcast.target_segment_id) {
         throw new Error('target_segment_id is required for segment-targeted broadcasts');

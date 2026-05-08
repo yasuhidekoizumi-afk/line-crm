@@ -17,6 +17,10 @@ import type { Env } from '../index.js';
 const broadcasts = new Hono<Env>();
 
 function serializeBroadcast(row: DbBroadcast) {
+  let targetFriendIds: string[] | null = null;
+  if (row.target_friend_ids) {
+    try { targetFriendIds = JSON.parse(row.target_friend_ids); } catch { /* ignore */ }
+  }
   return {
     id: row.id,
     title: row.title,
@@ -25,6 +29,7 @@ function serializeBroadcast(row: DbBroadcast) {
     targetType: row.target_type,
     targetTagId: row.target_tag_id,
     targetSegmentId: row.target_segment_id,
+    targetFriendIds,
     status: row.status,
     scheduledAt: row.scheduled_at,
     sentAt: row.sent_at,
@@ -82,6 +87,7 @@ broadcasts.post('/api/broadcasts', async (c) => {
       targetType: BroadcastTargetType;
       targetTagId?: string | null;
       targetSegmentId?: string | null;
+      targetFriendIds?: string[] | null;
       scheduledAt?: string | null;
       lineAccountId?: string | null;
       altText?: string | null;
@@ -108,6 +114,13 @@ broadcasts.post('/api/broadcasts', async (c) => {
       );
     }
 
+    if (body.targetType === 'individual' && (!body.targetFriendIds || body.targetFriendIds.length === 0)) {
+      return c.json(
+        { success: false, error: 'targetFriendIds is required when targetType is "individual"' },
+        400,
+      );
+    }
+
     const broadcast = await createBroadcast(c.env.DB, {
       title: body.title,
       messageType: body.messageType,
@@ -115,6 +128,7 @@ broadcasts.post('/api/broadcasts', async (c) => {
       targetType: body.targetType,
       targetTagId: body.targetTagId ?? null,
       targetSegmentId: body.targetSegmentId ?? null,
+      targetFriendIds: body.targetFriendIds ?? null,
       scheduledAt: body.scheduledAt ?? null,
     });
 
@@ -157,6 +171,7 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
       targetType?: BroadcastTargetType;
       targetTagId?: string | null;
       targetSegmentId?: string | null;
+      targetFriendIds?: string[] | null;
       scheduledAt?: string | null;
     }>();
 
@@ -172,6 +187,10 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
       message_content: body.messageContent,
       target_type: body.targetType,
       target_tag_id: body.targetTagId,
+      target_segment_id: body.targetSegmentId,
+      target_friend_ids: body.targetFriendIds !== undefined
+        ? (body.targetFriendIds ? JSON.stringify(body.targetFriendIds) : null)
+        : undefined,
       scheduled_at: body.scheduledAt,
       ...(statusUpdate !== undefined ? { status: statusUpdate } : {}),
     });
