@@ -18,7 +18,7 @@ aiDraft.post('/api/ai-draft/generate', async (c) => {
     }
 
     const contextLines = (chatHistory ?? []).slice(-10).map((m) =>
-      `${m.direction === 'incoming' ? '顧客' : 'オペレーター'}: ${m.content.slice(0, 200)}`
+      `${m.direction === 'incoming' ? '顧客' : 'オペレーター'}: ${m.content.slice(0, 500)}`
     ).join('\n');
 
     const prompt = `あなたはECサイト「ORYZAE（オリゼ）」のカスタマーサポート担当です。
@@ -28,10 +28,11 @@ aiDraft.post('/api/ai-draft/generate', async (c) => {
 
 ルール:
 - 丁寧だが堅すぎない、親しみやすい敬語
-- 100文字以内で簡潔に
+- 150〜300文字程度で、自然な会話として完結させる
 - 質問がある場合は回答を含める
 - 商品案内が必要な場合は自然に提案
 - 謝罪が必要な場合は誠実に対応
+- 改行を使わず1メッセージとして完結させる
 
 会話履歴:
 ${contextLines}
@@ -47,7 +48,7 @@ ${contextLines}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 200 },
+          generationConfig: { temperature: 0.7, maxOutputTokens: 800 },
         }),
       }
     );
