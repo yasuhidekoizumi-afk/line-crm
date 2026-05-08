@@ -5,22 +5,18 @@ import type { Env } from '../index.js';
 const aiDraft = new Hono<Env>();
 aiDraft.use('/api/ai-draft/*', authMiddleware);
 
-// POST /api/ai-draft/generate — チャットの返信文をGeminiで生成
 aiDraft.post('/api/ai-draft/generate', async (c) => {
   try {
-    const { chatId, friendName, chatHistory, customerEmail } = await c.req.json<{
+    const { chatId, chatHistory } = await c.req.json<{
       chatId?: string;
-      friendName?: string;
       chatHistory?: { direction: string; content: string }[];
-      customerEmail?: string;
     }>();
 
     const apiKey = c.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return c.json({ success: false, error: 'Gemini API key not configured' }, 500);
+      return c.json({ success: false, error: 'GEMINI_API_KEYが設定されていません。Workerの環境変数を確認してください。' });
     }
 
-    // 会話履歴をプロンプトに変換
     const contextLines = (chatHistory ?? []).slice(-10).map((m) =>
       `${m.direction === 'incoming' ? '顧客' : 'オペレーター'}: ${m.content.slice(0, 200)}`
     ).join('\n');
@@ -56,7 +52,7 @@ ${contextLines}
 
     if (!res.ok) {
       const errText = await res.text();
-      return c.json({ success: false, error: `Gemini API error: ${res.status} ${errText.slice(0, 300)}` }, 502);
+      return c.json({ success: false, error: `Gemini API error (${res.status}): ${errText.slice(0, 200)}` });
     }
 
     const data = (await res.json()) as {
@@ -65,13 +61,13 @@ ${contextLines}
     const draftText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
 
     if (!draftText) {
-      return c.json({ success: false, error: 'Empty response from Gemini' }, 502);
+      return c.json({ success: false, error: 'Geminiからの返答が空でした。' });
     }
 
     return c.json({ success: true, data: { draft: draftText } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return c.json({ success: false, error: msg }, 500);
+    return c.json({ success: false, error: `サーバーエラー: ${msg}` });
   }
 });
 
