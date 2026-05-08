@@ -32,7 +32,7 @@ aiDraft.post('/api/ai-draft/generate', async (c) => {
 - 質問がある場合は回答を含める
 - 商品案内が必要な場合は自然に提案
 - 謝罪が必要な場合は誠実に対応
-- 改行を使わず1メッセージとして完結させる
+- 必ず最後まで書き切ること。途中で切らない。
 
 会話履歴:
 ${contextLines}
@@ -48,7 +48,13 @@ ${contextLines}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 800 },
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2000,
+          },
+          thinkingConfig: {
+            thinking_level: 'minimal',
+          },
         }),
       }
     );
