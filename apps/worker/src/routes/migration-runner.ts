@@ -49,6 +49,15 @@ migrationRunner.post('/api/admin/run-migration', async (c) => {
     }
   }
 
+  // 4. raw_payload から customer_name を抽出してバックフィル
+  try {
+    const { extractNamesFromPayload } = await import('../services/shopify-matching.js');
+    const result = await extractNamesFromPayload(c.env.DB);
+    results.push(`OK: Extracted ${result.updated} customer_names from raw_payload (${result.errors} errors, ${result.scanned} scanned)`);
+  } catch (e: any) {
+    errors.push(`FAIL: extract names: ${e.message}`);
+  }
+
   return c.json({
     success: errors.length === 0,
     results,
