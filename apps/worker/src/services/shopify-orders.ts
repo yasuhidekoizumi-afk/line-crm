@@ -34,7 +34,13 @@ export interface ShopifyOrderPayload {
     id?: number | string;
     email?: string | null;
     phone?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
     orders_count?: number;
+  } | null;
+  billing_address?: {
+    name?: string | null;
+    phone?: string | null;
   } | null;
   line_items?: Array<{
     id: number | string;
@@ -57,6 +63,7 @@ export interface PersistOrderResult {
   shopifyOrderId: string;
   customerId: string | null;
   friendId: string | null;
+  customerName: string | null;
   inserted: boolean;
   itemCount: number;
 }
@@ -101,6 +108,23 @@ async function resolveLinkedIds(
 }
 
 /**
+ * 顧客名を Shopify ペイロードから抽出
+ * 優先順位: billing_address.name > customer.last_name + customer.first_name
+ */
+function extractCustomerName(order: ShopifyOrderPayload): string | null {
+  const billingName = order.billing_address?.name?.trim();
+  if (billingName) return billingName;
+  
+  const first = order.customer?.first_name?.trim();
+  const last = order.customer?.last_name?.trim();
+  if (last && first) return `${last} ${first}`;
+  if (first) return first;
+  if (last) return last;
+  
+  return null;
+}
+
+/**
  * Shopify 注文を shopify_orders / shopify_order_items に UPSERT する。
  *
  * line_items は SQLite の bind variable 上限 (~1000) を超えないよう
@@ -115,18 +139,22 @@ export async function persistShopifyOrder(
   const shopifyOrderId = String(order.id);
   const shopifyCustomerId = order.customer?.id != null ? String(order.customer.id) : null;
   const email = order.email ?? order.customer?.email ?? null;
-  const phone = order.phone ?? order.customer?.phone ?? null;
+  const phone = order.phone ?? order.customer?.phone ?? order.billing_address?.phone ?? null;
+  const customerName = extractCustomerName(order);
 
   const { customer_id, friend_id } = await resolveLinkedIds(db, shopifyCustomerId, email);
 
   const existing = await db
-    .prepare(`SELECT shopify_order_id FROM shopify_orders WHERE shopify_order_id = ? LIMIT 1`)
+    .prepare(`SELECT shopify_order_id, customer_name FROM shopify_orders WHERE shopify_order_id = ? LIMIT 1`)
     .bind(shopifyOrderId)
-    .first();
+    .first<{ shopify_order_id: string; customer_name: string | null }>();
 
   const totalShipping = toNum(order.total_shipping_price_set?.shop_money?.amount) ?? null;
   const processedAt = order.processed_at ?? order.created_at ?? new Date().toISOString();
   const createdAtShopify = order.created_at ?? processedAt;
+
+  // 既存があって名前が欠けている場合は補完
+  const effectiveName = customerName ?? existing?.customer_name ?? null;
 
   await db
     .prepare(
@@ -137,8 +165,9 @@ export async function persistShopifyOrder(
          financial_status, fulfillment_status, cancelled_at,
          source_name, landing_site, referring_site, tags,
          customer_orders_count,
-         processed_at, created_at_shopify, updated_at_shopify, ingested_via
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         processed_at, created_at_shopify, updated_at_shopify, ingested_via,
+         customer_name
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(shopify_order_id) DO UPDATE SET
          shopify_order_number  = excluded.shopify_order_number,
          customer_id           = COALESCE(excluded.customer_id, shopify_orders.customer_id),
@@ -146,6 +175,7 @@ export async function persistShopifyOrder(
          shopify_customer_id   = excluded.shopify_customer_id,
          email                 = excluded.email,
          phone                 = excluded.phone,
+         customer_name         = COALESCE(excluded.customer_name, shopify_orders.customer_name),
          total_price           = excluded.total_price,
          subtotal_price        = excluded.subtotal_price,
          total_tax             = excluded.total_tax,
@@ -190,6 +220,7 @@ export async function persistShopifyOrder(
       createdAtShopify,
       order.updated_at ?? null,
       ingestedVia,
+      effectiveName,
     )
     .run();
 
@@ -238,6 +269,7 @@ export async function persistShopifyOrder(
     shopifyOrderId,
     customerId: customer_id,
     friendId: friend_id,
+    customerName: effectiveName,
     inserted: !existing,
     itemCount: items.length,
   };
