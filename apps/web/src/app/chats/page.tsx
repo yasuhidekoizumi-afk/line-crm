@@ -7,6 +7,8 @@ import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 import FlexPreviewComponent from '@/components/flex-preview'
 import { AiDraftBanner } from '@/components/cs/ai-draft-banner'
+import QuickReplyTemplates from '@/components/chats/quick-reply'
+import CustomerInfoPanel from '@/components/chats/customer-info'
 
 interface Chat {
   id: string
@@ -162,7 +164,6 @@ function DirectMessagePanel({ friendId, friend, onBack, onSent }: {
     if (msg.messageType === 'flex') {
       try {
         const parsed = JSON.parse(msg.content)
-        // Extract ALL text from flex (up to 200 chars)
         const texts: string[] = []
         const collectText = (obj: Record<string, unknown>) => {
           if (texts.join(' ').length > 200) return
@@ -270,6 +271,7 @@ export default function ChatsPage() {
   const [loadingSeconds, setLoadingSeconds] = useState(5)
   const lastLoadingTriggerAtRef = useRef<Record<string, number>>({})
   const [isMessageInputFocused, setIsMessageInputFocused] = useState(false)
+  const [showCustomerInfo, setShowCustomerInfo] = useState(false)
 
   useEffect(() => {
     try {
@@ -343,6 +345,7 @@ export default function ChatsPage() {
       loadChatDetail(selectedChatId)
     } else {
       setChatDetail(null)
+      setShowCustomerInfo(false)
     }
   }, [selectedChatId, loadChatDetail])
 
@@ -353,12 +356,10 @@ export default function ChatsPage() {
 
   const triggerLoadingAnimation = useCallback(async (chatId: string) => {
     if (!showLoadingIndicator) return
-
     const now = Date.now()
     const last = lastLoadingTriggerAtRef.current[chatId] ?? 0
     if (now - last < LOADING_REFRESH_INTERVAL_MS) return
     lastLoadingTriggerAtRef.current[chatId] = now
-
     try {
       await fetchApi<{ success: boolean }>(`/api/chats/${chatId}/loading`, {
         method: 'POST',
@@ -418,21 +419,23 @@ export default function ChatsPage() {
     }
   }
 
+  const handleTemplateSelect = (text: string) => {
+    setMessageContent(text)
+  }
+
   return (
     <div>
       <Header title="オペレーターチャット" />
 
-      {/* Error */}
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
           {error}
         </div>
       )}
 
-      <div className="flex gap-4 h-[calc(100vh-120px)] lg:h-[calc(100vh-180px)]">
+      <div className="flex gap-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-180px)]">
         {/* Left Panel: Chat List */}
         <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
-          {/* Channel Filter Tabs (LINE / メール) */}
           <div className="flex border-b border-gray-200 bg-gray-50">
             {channelFilters.map((filter) => (
               <button
@@ -449,7 +452,6 @@ export default function ChatsPage() {
             ))}
           </div>
 
-          {/* Status Filter Tabs */}
           <div className="flex border-b border-gray-200">
             {statusFilters.map((filter) => (
               <button
@@ -467,7 +469,6 @@ export default function ChatsPage() {
             ))}
           </div>
 
-          {/* Chat List */}
           <div className="flex-1 overflow-y-auto">
             {loading ? (
               <div>
@@ -520,244 +521,230 @@ export default function ChatsPage() {
           </div>
         </div>
 
-        {/* Right Panel: Chat Detail */}
-        <div className={`flex-1 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId || selectedFriendId ? 'flex' : 'hidden lg:flex'}`}>
-          {selectedFriendId && !selectedChatId ? (
-            /* Direct message to friend without existing chat */
-            <DirectMessagePanel
-              friendId={selectedFriendId}
-              friend={allFriends.find((f) => f.id === selectedFriendId) || null}
-              onBack={() => setSelectedFriendId(null)}
-              onSent={() => { setSelectedFriendId(null); loadChats(); }}
-            />
-          ) : !selectedChatId ? (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-gray-400 text-sm">チャットを選択してください</p>
-            </div>
-          ) : detailLoading ? (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-gray-400 text-sm">読み込み中...</p>
-            </div>
-          ) : chatDetail ? (
-            <>
-              {/* Chat Header */}
-              <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <button
-                    onClick={() => setSelectedChatId(null)}
-                    className="lg:hidden flex-shrink-0 p-1 -ml-1 text-gray-500 hover:text-gray-700"
-                    aria-label="戻る"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  {chatDetail.friendPictureUrl && (
-                    <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {chatDetail.friendName}
-                    </p>
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${statusConfig[chatDetail.status].className}`}
-                    >
-                      {statusConfig[chatDetail.status].label}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {chatDetail.status !== 'unread' && (
-                    <button
-                      onClick={() => handleStatusUpdate('unread')}
-                      className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
-                    >
-                      未読に戻す
-                    </button>
-                  )}
-                  {chatDetail.status !== 'in_progress' && (
-                    <button
-                      onClick={() => handleStatusUpdate('in_progress')}
-                      className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-md transition-colors"
-                    >
-                      対応中にする
-                    </button>
-                  )}
-                  {chatDetail.status !== 'resolved' && (
-                    <button
-                      onClick={() => handleStatusUpdate('resolved')}
-                      className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md transition-colors"
-                    >
-                      解決済にする
-                    </button>
-                  )}
-                </div>
+        {/* Center Panel: Chat Detail + Customer Info (flex) */}
+        <div className={`flex-1 flex overflow-hidden ${selectedChatId || selectedFriendId ? 'flex' : 'hidden lg:flex'}`}>
+          <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden flex">
+            {selectedFriendId && !selectedChatId ? (
+              <DirectMessagePanel
+                friendId={selectedFriendId}
+                friend={allFriends.find((f) => f.id === selectedFriendId) || null}
+                onBack={() => setSelectedFriendId(null)}
+                onSent={() => { setSelectedFriendId(null); loadChats(); }}
+              />
+            ) : !selectedChatId ? (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-gray-400 text-sm">チャットを選択してください</p>
               </div>
-
-              {/* Messages — LINE-style chat bubbles */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ backgroundColor: '#7494C0' }}>
-                {(!chatDetail.messages || chatDetail.messages.length === 0) ? (
-                  <div className="text-center py-8">
-                    <p className="text-white/60 text-sm">メッセージはまだありません。</p>
+            ) : detailLoading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-gray-400 text-sm">読み込み中...</p>
+              </div>
+            ) : chatDetail ? (
+              <>
+                {/* Chat Header */}
+                <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      onClick={() => setSelectedChatId(null)}
+                      className="lg:hidden flex-shrink-0 p-1 -ml-1 text-gray-500 hover:text-gray-700"
+                      aria-label="戻る"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    {chatDetail.friendPictureUrl && (
+                      <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {chatDetail.friendName}
+                      </p>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${statusConfig[chatDetail.status].className}`}>
+                        {statusConfig[chatDetail.status].label}
+                      </span>
+                    </div>
                   </div>
-                ) : (
-                  (chatDetail.messages ?? []).map((msg) => {
-                    const isOutgoing = msg.direction === 'outgoing'
-
-                    // メッセージ表示の分岐
-                    let bubbleContent: React.ReactNode
-                    if (msg.messageType === 'flex') {
-                      bubbleContent = (
-                        <div className="max-w-[300px]">
-                          <FlexPreviewComponent content={msg.content} maxWidth={280} />
-                        </div>
-                      )
-                    } else if (msg.messageType === 'image') {
-                      try {
-                        const parsed = JSON.parse(msg.content)
-                        bubbleContent = (
-                          <img src={parsed.originalContentUrl || parsed.previewImageUrl} alt="" className="max-w-[200px] rounded" />
-                        )
-                      } catch {
-                        bubbleContent = <span>🖼️ [画像]</span>
-                      }
-                    } else if (msg.messageType === 'email') {
-                      bubbleContent = (
-                        <div className="max-w-[420px]">
-                          {msg.meta?.subject && (
-                            <div className="text-xs font-bold mb-1 opacity-80">
-                              ✉️ {msg.meta.subject}
-                            </div>
-                          )}
-                          <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
-                        </div>
-                      )
-                    } else {
-                      bubbleContent = <span>{msg.content}</span>
-                    }
-
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'}`}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setShowCustomerInfo(!showCustomerInfo)}
+                      className={`px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium rounded-md transition-colors ${
+                        showCustomerInfo
+                          ? 'bg-indigo-100 text-indigo-700'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {showCustomerInfo ? '📋 閉じる' : '📋 顧客情報'}
+                    </button>
+                    {chatDetail.status !== 'unread' && (
+                      <button
+                        onClick={() => handleStatusUpdate('unread')}
+                        className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
                       >
-                        {/* 相手のアイコン（incoming のみ） */}
-                        {!isOutgoing && (
-                          chatDetail.friendPictureUrl ? (
-                            <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0 mb-1" />
-                          ) : (
-                            <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 mb-1" />
-                          )
-                        )}
+                        未読に戻す
+                      </button>
+                    )}
+                    {chatDetail.status !== 'in_progress' && (
+                      <button
+                        onClick={() => handleStatusUpdate('in_progress')}
+                        className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-md transition-colors"
+                      >
+                        対応中にする
+                      </button>
+                    )}
+                    {chatDetail.status !== 'resolved' && (
+                      <button
+                        onClick={() => handleStatusUpdate('resolved')}
+                        className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md transition-colors"
+                      >
+                        解決済にする
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-                        <div className={`flex flex-col ${isOutgoing ? 'items-end' : 'items-start'}`}>
-                          {/* メッセージバブル */}
-                          <div
-                            className={`max-w-[320px] px-3 py-2 text-sm break-words whitespace-pre-wrap ${
-                              isOutgoing
-                                ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white'
-                                : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'
-                            }`}
-                            style={isOutgoing ? { backgroundColor: '#06C755' } : undefined}
-                          >
-                            {bubbleContent}
+                {/* Messages — LINE-style chat bubbles */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ backgroundColor: '#7494C0' }}>
+                  {(!chatDetail.messages || chatDetail.messages.length === 0) ? (
+                    <div className="text-center py-8">
+                      <p className="text-white/60 text-sm">メッセージはまだありません。</p>
+                    </div>
+                  ) : (
+                    (chatDetail.messages ?? []).map((msg) => {
+                      const isOutgoing = msg.direction === 'outgoing'
+
+                      let bubbleContent: React.ReactNode
+                      if (msg.messageType === 'flex') {
+                        bubbleContent = (
+                          <div className="max-w-[300px]">
+                            <FlexPreviewComponent content={msg.content} maxWidth={280} />
                           </div>
-                          {/* 時刻 */}
-                          <span className="text-xs text-white/50 mt-0.5 px-1">
-                            {new Date(msg.createdAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                        )
+                      } else if (msg.messageType === 'image') {
+                        try {
+                          const parsed = JSON.parse(msg.content)
+                          bubbleContent = (
+                            <img src={parsed.originalContentUrl || parsed.previewImageUrl} alt="" className="max-w-[200px] rounded" />
+                          )
+                        } catch { bubbleContent = <span>🖼️ [画像]</span> }
+                      } else if (msg.messageType === 'email') {
+                        bubbleContent = (
+                          <div className="max-w-[420px]">
+                            {msg.meta?.subject && (
+                              <div className="text-xs font-bold mb-1 opacity-80">✉️ {msg.meta.subject}</div>
+                            )}
+                            <div className="whitespace-pre-wrap text-sm">{msg.content}</div>
+                          </div>
+                        )
+                      } else { bubbleContent = <span>{msg.content}</span> }
+
+                      return (
+                        <div key={msg.id} className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
+                          {!isOutgoing && (
+                            chatDetail.friendPictureUrl ? (
+                              <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0 mb-1" />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 mb-1" />
+                            )
+                          )}
+                          <div className={`flex flex-col ${isOutgoing ? 'items-end' : 'items-start'}`}>
+                            <div
+                              className={`max-w-[320px] px-3 py-2 text-sm break-words whitespace-pre-wrap ${
+                                isOutgoing
+                                  ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white'
+                                  : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'
+                              }`}
+                              style={isOutgoing ? { backgroundColor: '#06C755' } : undefined}
+                            >
+                              {bubbleContent}
+                            </div>
+                            <span className="text-xs text-white/50 mt-0.5 px-1">
+                              {new Date(msg.createdAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })
+                      )
+                    })
+                  )}
+                </div>
+
+                {/* AI Draft Banner */}
+                {selectedChatId && (
+                  <AiDraftBanner chatId={selectedChatId} onChange={() => loadChatDetail(selectedChatId)} />
                 )}
-              </div>
 
-              {/* AI下書き承認バナー（CS Phase 1） */}
-              {selectedChatId && (
-                <AiDraftBanner
-                  chatId={selectedChatId}
-                  onChange={() => loadChatDetail(selectedChatId)}
-                />
-              )}
-
-              {/* Notes */}
-              <div className="px-4 py-2 border-t border-gray-200 bg-gray-50">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="メモを入力..."
-                    className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
-                  />
-                  <button
-                    onClick={handleSaveNotes}
-                    disabled={savingNotes}
-                    className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50"
-                  >
-                    {savingNotes ? '保存中...' : 'メモ保存'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Send Message Form */}
-              <div className="px-4 py-3 border-t border-gray-200">
-                <div className="mb-2 flex items-center gap-3 text-xs text-gray-600">
-                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                {/* Notes */}
+                <div className="px-4 py-2 border-t border-gray-200 bg-gray-50">
+                  <div className="flex items-center gap-2">
                     <input
-                      type="checkbox"
-                      checked={showLoadingIndicator}
-                      onChange={(e) => setShowLoadingIndicator(e.target.checked)}
-                      className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                      type="text"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="メモを入力..."
+                      className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
                     />
-                    入力中ローディングを表示
-                  </label>
-                  <select
-                    value={loadingSeconds}
-                    onChange={(e) => setLoadingSeconds(Number.parseInt(e.target.value, 10))}
-                    disabled={!showLoadingIndicator}
-                    className="border border-gray-300 rounded-md px-2 py-1 bg-white disabled:bg-gray-100 disabled:text-gray-400"
-                  >
-                    {[5, 10, 15, 20, 30, 45, 60].map((sec) => (
-                      <option key={sec} value={sec}>{sec}秒</option>
-                    ))}
-                  </select>
+                    <button
+                      onClick={handleSaveNotes}
+                      disabled={savingNotes}
+                      className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50"
+                    >
+                      {savingNotes ? '保存中...' : 'メモ保存'}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={messageContent}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      setMessageContent(value)
-                      if (selectedChatId && isMessageInputFocused && value.trim()) {
-                        void triggerLoadingAnimation(selectedChatId)
-                      }
-                    }}
-                    onFocus={() => {
-                      setIsMessageInputFocused(true)
-                      if (selectedChatId) {
-                        void triggerLoadingAnimation(selectedChatId)
-                      }
-                    }}
-                    onBlur={() => setIsMessageInputFocused(false)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="メッセージを入力..."
-                    className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
-                  />
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={sending || !messageContent.trim()}
-                    className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: '#06C755' }}
-                  >
-                    {sending ? '送信中...' : '送信'}
-                  </button>
+
+                {/* Quick Reply + Send Message */}
+                <div className="px-4 py-3 border-t border-gray-200">
+                  {selectedChatId && (
+                    <QuickReplyTemplates onSelect={handleTemplateSelect} />
+                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={messageContent}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        setMessageContent(value)
+                        if (selectedChatId && isMessageInputFocused && value.trim()) {
+                          void triggerLoadingAnimation(selectedChatId)
+                        }
+                      }}
+                      onFocus={() => {
+                        setIsMessageInputFocused(true)
+                        if (selectedChatId) void triggerLoadingAnimation(selectedChatId)
+                      }}
+                      onBlur={() => setIsMessageInputFocused(false)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="メッセージを入力..."
+                      className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={sending || !messageContent.trim()}
+                      className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ backgroundColor: '#06C755' }}
+                    >
+                      {sending ? '送信中...' : '送信'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </>
-          ) : null}
+              </>
+            ) : null}
+          </div>
+
+          {/* Customer Info Panel (slide from right) */}
+          {selectedChatId && chatDetail && showCustomerInfo && (
+            <div className="hidden lg:flex">
+              <CustomerInfoPanel
+                friendId={chatDetail.friendId}
+                friendName={chatDetail.friendName}
+                friendPictureUrl={chatDetail.friendPictureUrl}
+                friendEmail={chatDetail.customerEmail}
+                chatStatus={chatDetail.status}
+                onClose={() => setShowCustomerInfo(false)}
+              />
+            </div>
+          )}
         </div>
       </div>
       <CcPromptButton prompts={ccPrompts} />
