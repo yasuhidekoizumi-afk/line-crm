@@ -44,6 +44,7 @@ import { shopifyOrders } from './routes/shopify-orders.js';
 import { shopifyProducts } from './routes/shopify-products.js';
 import { customerJourney } from './routes/customer-journey.js';
 import { help } from './routes/help.js';
+import { aiDraft } from './routes/ai-draft.js';
 // CS Phase 1: 統合受信箱 + AIトリアージ
 import { cs } from './routes/cs.js';
 import { syncFaqFromSheets } from './services/cs-faq-sync.js';
@@ -119,11 +120,8 @@ export type Env = {
     SLACK_WEBHOOK_URL?: string;
     FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
     FERMENT_HMAC_SECRET?: string;
-    // 緊急停止フラグ: '1' で /api/liff/link-shopify を 503 にする
     LINK_SHOPIFY_DISABLED?: string;
-    // Shopify Liquid 側で HMAC 署名生成に使う共有シークレット
     LINK_SHOPIFY_SIGNING_SECRET?: string;
-    // FERMENT 追加 vars
     FERMENT_FROM_EMAIL_JP?: string;
     FERMENT_FROM_EMAIL_US?: string;
     FERMENT_FROM_NAME_JP?: string;
@@ -136,7 +134,6 @@ export type Env = {
     CS_SLACK_CHANNEL_ID?: string;
     CS_FAQ_SHEET_ID?: string;
     CS_FAQ_SHEET_RANGE?: string;
-    /** Gmail 送信元アドレス（Gmail API で impersonate 可能な実ユーザー） */
     CS_GMAIL_SENDER_EMAIL?: string;
     // CS Phase 2: 楽天 RMS
     RAKUTEN_SERVICE_SECRET?: string;
@@ -149,16 +146,11 @@ export type Env = {
 
 const app = new Hono<Env>();
 
-// CORS — allow all origins for MVP
 app.use('*', cors({ origin: '*' }));
-
-// Rate limiting — runs before auth to block abuse early
 app.use('*', rateLimitMiddleware);
-
-// Auth middleware — skips /webhook and /docs automatically
 app.use('*', authMiddleware);
 
-// Mount route groups — MVP & Round 2
+// MVP & Round 2
 app.route('/', webhook);
 app.route('/', friends);
 app.route('/', tags);
@@ -171,7 +163,7 @@ app.route('/', affiliates);
 app.route('/', openapi);
 app.route('/', liffRoutes);
 
-// Mount route groups — Round 3
+// Round 3
 app.route('/', webhooks);
 app.route('/', calendar);
 app.route('/', reminders);
@@ -184,7 +176,6 @@ app.route('/', health);
 app.route('/', automations);
 app.route('/', richMenus);
 app.route('/', trackedLinks);
-// app.route('/', forms); // DEPRECATED: 統合先 → ferment/routes/forms.ts
 app.route('/', adPlatforms);
 app.route('/', staff);
 app.route('/', images);
@@ -195,13 +186,14 @@ app.route('/', shopifyOrders);
 app.route('/', shopifyProducts);
 app.route('/', customerJourney);
 app.route('/', help);
-// CS Phase 1: Gmail webhook + AI下書き承認API
+// CS Phase 1
 app.route('/', cs);
-// CS Phase 2: 楽天 RMS 管理API
+// CS Phase 2: 楽天RMS
 app.route('/', rakuten);
+// CS Phase 2: AI下書き生成
+app.route('/', aiDraft);
 
-// FERMENT ルート登録
-// 認証が必要な API エンドポイント
+// FERMENT
 app.route('/api/email', emailApiRouter);
 app.route('/api/segments', segmentRoutes);
 app.route('/api/customers', customerRoutes);
@@ -216,56 +208,24 @@ app.route('/api/ferment/cockpit', cockpitRoutes);
 app.route('/api/ferment/ai', aiRoutes);
 app.route('/api/ferment/analytics', analyticsRoutes);
 app.route('/api/sms/campaign', smsCampaignRoutes);
-// 認証不要の公開エンドポイント（auth middleware は内部でスキップ済み）
 app.route('/forms', formPublicRoutes);
 app.route('/reviews', reviewRoutes);
 app.route('/webhook/shopify', cartWebhookRoutes);
 app.route('/webhook/ferment-attribution', attributionRoutes);
 app.route('/email', publicEmailRoutes);
-// Webhook（署名検証を使用するため Bearer 認証はスキップ）
 app.route('/webhook', fermentWebhookRoutes);
 
-// Short link: /r/:ref → landing page with LINE open button
+// Short link
 app.get('/r/:ref', (c) => {
   const ref = c.req.param('ref');
   const liffUrl = c.env.LIFF_URL;
-  if (!liffUrl) {
-    return c.json({ error: 'LIFF_URL is not configured. Set it via wrangler secret put LIFF_URL.' }, 500);
-  }
+  if (!liffUrl) return c.json({ error: 'LIFF_URL not configured' }, 500);
   const target = `${liffUrl}?ref=${encodeURIComponent(ref)}`;
-
-  return c.html(`<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LINE Harness</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Hiragino Sans',system-ui,sans-serif;background:#0d1117;color:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh}
-.card{text-align:center;max-width:400px;width:90%;padding:48px 24px}
-h1{font-size:28px;font-weight:800;margin-bottom:8px}
-.sub{font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:40px}
-.btn{display:block;width:100%;padding:18px;border:none;border-radius:12px;font-size:18px;font-weight:700;text-decoration:none;text-align:center;color:#fff;background:#06C755;transition:opacity .15s}
-.btn:active{opacity:.85}
-.note{font-size:12px;color:rgba(255,255,255,0.3);margin-top:24px;line-height:1.6}
-</style>
-</head>
-<body>
-<div class="card">
-<h1>LINE Harness</h1>
-<p class="sub">L社 / U社 の無料代替 OSS</p>
-<a href="${target}" class="btn">LINE で体験する</a>
-<p class="note">友だち追加するだけで<br>ステップ配信・フォーム・自動返信を体験できます</p>
-</div>
-</body>
-</html>`);
+  return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LINE Harness</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Hiragino Sans',system-ui,sans-serif;background:#0d1117;color:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh}.card{text-align:center;max-width:400px;width:90%;padding:48px 24px}h1{font-size:28px;font-weight:800;margin-bottom:8px}.sub{font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:40px}.btn{display:block;width:100%;padding:18px;border:none;border-radius:12px;font-size:18px;font-weight:700;text-decoration:none;text-align:center;color:#fff;background:#06C755;transition:opacity .15s}.btn:active{opacity:.85}.note{font-size:12px;color:rgba(255,255,255,0.3);margin-top:24px;line-height:1.6}</style></head><body><div class="card"><h1>LINE Harness</h1><p class="sub">L社 / U社 の無料代替 OSS</p><a href="${target}" class="btn">LINE で体験する</a><p class="note">友だち追加するだけで<br>ステップ配信・フォーム・自動返信を体験できます</p></div></body></html>`);
 });
 
-// Convenience redirect for /book path
 app.get('/book', (c) => c.redirect('/?page=book'));
 
-// 404 fallback — JSON for API paths, plain for others (Workers Assets SPA fallback handles it)
 app.notFound((c) => {
   const path = new URL(c.req.url).pathname;
   if (path.startsWith('/api/') || path === '/webhook' || path === '/docs' || path === '/openapi.json') {
@@ -274,88 +234,47 @@ app.notFound((c) => {
   return c.notFound();
 });
 
-// Scheduled handler for cron triggers — runs for all active LINE accounts
-async function scheduled(
-  _event: ScheduledEvent,
-  env: Env['Bindings'],
-  _ctx: ExecutionContext,
-): Promise<void> {
-  // Get all active accounts from DB, plus the default env account
+async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: ExecutionContext): Promise<void> {
   const dbAccounts = await getLineAccounts(env.DB);
   const activeTokens = new Set<string>();
-
-  // Default account from env
   activeTokens.add(env.LINE_CHANNEL_ACCESS_TOKEN);
-
-  // DB accounts
-  for (const account of dbAccounts) {
-    if (account.is_active) {
-      activeTokens.add(account.channel_access_token);
-    }
-  }
-
-  // Run delivery for each account
-  const jobs = [];
+  for (const account of dbAccounts) { if (account.is_active) activeTokens.add(account.channel_access_token); }
+  const jobs: Promise<void>[] = [];
   for (const token of activeTokens) {
     const lineClient = new LineClient(token);
-    jobs.push(
-      processStepDeliveries(env.DB, lineClient, env.WORKER_URL),
-      processScheduledBroadcasts(env.DB, lineClient, env.WORKER_URL),
-      processReminderDeliveries(env.DB, lineClient),
-    );
+    jobs.push(processStepDeliveries(env.DB, lineClient, env.WORKER_URL));
+    jobs.push(processScheduledBroadcasts(env.DB, lineClient, env.WORKER_URL));
+    jobs.push(processReminderDeliveries(env.DB, lineClient));
   }
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
   jobs.push(processLoyaltyExpirations(env.DB));
-
-  // FERMENT: cron 種別に応じた処理を追加
-  // "*/5 * * * *"  → 5分毎（既存）
-  // "*/10 * * * *" → wrangler.toml 未定義のため到達しない（detectAnomalies は else で実行）
-  // "0 * * * *"    → 1時間毎: セグメント再計算
-  // "0 0 * * *"    → 毎日 0:00 UTC (9:00 JST): 日次サマリー
   const cronExpr = (_event as ScheduledEvent).cron;
   if (cronExpr === '*/10 * * * *') {
-    // wrangler.toml にこのcronがないため現在は到達しない。将来追加時に備えて保持
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
   } else if (cronExpr === '0 * * * *') {
     jobs.push(recomputeAllSegments(env));
   } else if (cronExpr === '0 0 * * *') {
     jobs.push(sendDailySummary(env));
-    // 日次：顧客インサイト（CLV / 購入確率 / 最適送信時刻）の再計算
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
-    // 注: Gemini 新モデル検知は全社版 Watcher に寄せたため、FERMENT 内 cron は無効化
-    // 手動チェック API は残してある: POST /api/ferment/cockpit/models/check-now
-    // CS Phase 2: 楽天 licenseKey 期限チェック（30/14/7/1/0日前にSlack通知）
     jobs.push(checkRakutenLicenseExpiry(env).then(() => undefined).catch(() => undefined));
   } else {
-    // デフォルト（5分毎）
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
-    // 異常検知（軽量DBクエリのみ）
     jobs.push(detectAnomalies(env).then(() => undefined));
-    // CS Phase 1: FAQシート同期 + 下書き滞留チェック（5分毎）
     jobs.push(syncFaqFromSheets(env).then(() => undefined).catch(() => undefined));
     jobs.push(checkCsDraftBacklog(env).catch(() => undefined));
   }
-
   await Promise.allSettled(jobs);
 }
 
-// CS Phase 1: 30分以上滞留している下書きをSlack通知
 async function checkCsDraftBacklog(env: Env['Bindings']): Promise<void> {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  const result = await env.DB.prepare(
-    `SELECT COUNT(*) as cnt, MIN(created_at) as oldest FROM ai_drafts WHERE status = 'pending' AND created_at < ?`,
-  )
-    .bind(cutoff)
-    .first<{ cnt: number; oldest: string | null }>();
+  const result = await env.DB.prepare(`SELECT COUNT(*) as cnt, MIN(created_at) as oldest FROM ai_drafts WHERE status = 'pending' AND created_at < ?`).bind(cutoff).first<{ cnt: number; oldest: string | null }>();
   if (!result || result.cnt === 0) return;
   const oldestMs = result.oldest ? Date.now() - new Date(result.oldest).getTime() : 0;
   await notifyDraftBacklog(env, result.cnt, Math.floor(oldestMs / 60000));
 }
 
-export default {
-  fetch: app.fetch,
-  scheduled,
-};
+export default { fetch: app.fetch, scheduled };
