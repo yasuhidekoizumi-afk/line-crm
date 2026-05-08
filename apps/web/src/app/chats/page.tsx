@@ -3,8 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api, fetchApi } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
-import Header from '@/components/layout/header'
-import CcPromptButton from '@/components/cc-prompt-button'
 import QuickReplyTemplates from '@/components/chats/quick-reply'
 import CustomerInfoPanel from '@/components/chats/customer-info'
 import AiDraftButton from '@/components/chats/ai-draft-button'
@@ -19,7 +17,7 @@ export default function ChatsPage() {
   const [chats, setChats] = useState<any[]>([]); const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
   const [chatDetail, setChatDetail] = useState<any>(null); const [statusFilter, setStatusFilter] = useState('all'); const [channelFilter, setChannelFilter] = useState('all')
   const [loading, setLoading] = useState(true); const [detailLoading, setDetailLoading] = useState(false); const [error, setError] = useState(''); const [messageContent, setMessageContent] = useState(''); const [sending, setSending] = useState(false)
-  const [notes, setNotes] = useState(''); const [savingNotes, setSavingNotes] = useState(false); const [showCustomerInfo, setShowCustomerInfo] = useState(false)
+  const [notes, setNotes] = useState(''); const [savingNotes, setSavingNotes] = useState(false); const [showCustomerInfo, setShowCustomerInfo] = useState(false); const [showNotes, setShowNotes] = useState(false)
 
   const loadChats = useCallback(async () => {
     setLoading(true); setError('')
@@ -44,33 +42,62 @@ export default function ChatsPage() {
   return (<div>
     {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
     <div className="flex gap-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-180px)]">
+      {/* Left: Chat List */}
       <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
         <div className="flex border-b border-gray-200 bg-gray-50">{channelFilters.map((f) => (<button key={f.key} onClick={() => { setChannelFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2 min-h-[40px] text-xs font-medium transition-colors ${channelFilter === f.key ? 'bg-white text-gray-900 border-b-2 border-purple-600' : 'text-gray-500 hover:bg-white'}`}>{f.label}</button>))}</div>
         <div className="flex border-b border-gray-200">{statusFilters.map((f) => (<button key={f.key} onClick={() => { setStatusFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2.5 min-h-[44px] text-xs font-medium transition-colors ${statusFilter === f.key ? 'text-white' : 'text-gray-600 hover:bg-gray-50'}`} style={statusFilter === f.key ? { backgroundColor: '#06C755' } : undefined}>{f.label}</button>))}</div>
         <div className="flex-1 overflow-y-auto">{loading ? (<div>{[...Array(5)].map((_, i) => (<div key={i} className="px-4 py-3 border-b border-gray-100 animate-pulse"><div className="h-3 bg-gray-200 rounded w-32" /><div className="h-2 bg-gray-100 rounded w-20 mt-2" /></div>))}</div>) : (<>{chats.map((chat: any) => { const st = statusConfig[chat.status] || { label: chat.status, className: 'bg-gray-100 text-gray-600' }; const isSelected = selectedChatId === chat.id; return (<button key={chat.id} onClick={() => handleSelectChat(chat.id)} className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${isSelected ? 'bg-green-50' : 'hover:bg-gray-50'}`}><div className="flex items-center gap-3">{chat.friendPictureUrl ? <img src={chat.friendPictureUrl} alt="" className="w-10 h-10 rounded-full flex-shrink-0" /> : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-gray-500 text-sm">{(chat.friendName || '?').charAt(0)}</span></div>}<div className="min-w-0 flex-1"><p className="text-sm font-medium text-gray-900 truncate">{chat.friendName}</p><p className="text-xs text-gray-400 mt-0.5">{formatDatetime(chat.lastMessageAt)}</p></div><span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${st.className}`}>{st.label}</span></div></button>)})}</>)}</div></div>
+
+      {/* Right: Chat Detail */}
       <div className={`flex-1 flex overflow-hidden ${selectedChatId ? 'flex' : 'hidden lg:flex'}`}>
         <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden flex">
           {!selectedChatId ? (<div className="flex-1 flex items-center justify-center"><p className="text-gray-400 text-sm">チャットを選択してください</p></div>)
           : detailLoading ? (<div className="flex-1 flex items-center justify-center"><p className="text-gray-400 text-sm">読み込み中...</p></div>)
           : chatDetail ? (<>
-            <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0"><button onClick={() => setSelectedChatId(null)} className="lg:hidden flex-shrink-0 p-1 -ml-1 text-gray-500 hover:text-gray-700"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>{chatDetail.friendPictureUrl && <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />}<div className="min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{chatDetail.friendName}</p><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${(statusConfig[chatDetail.status] || {}).className}`}>{(statusConfig[chatDetail.status] || {}).label || chatDetail.status}</span></div></div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button onClick={() => setShowCustomerInfo(!showCustomerInfo)} className={`px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium rounded-md ${showCustomerInfo ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{showCustomerInfo ? '📋 閉じる' : '📋 顧客情報'}</button>
-                {chatDetail.status !== 'unread' && <button onClick={() => handleStatusUpdate('unread')} className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md">未読</button>}
-                {chatDetail.status !== 'in_progress' && <button onClick={() => handleStatusUpdate('in_progress')} className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-md">対応中</button>}
-                {chatDetail.status !== 'resolved' && <button onClick={() => handleStatusUpdate('resolved')} className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md">解決済</button>}
+            {/* Header */}
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <button onClick={() => setSelectedChatId(null)} className="lg:hidden flex-shrink-0 p-1 -ml-1 text-gray-500 hover:text-gray-700"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
+                {chatDetail.friendPictureUrl && <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />}
+                <div className="min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{chatDetail.friendName}</p><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-0.5 ${(statusConfig[chatDetail.status] || {}).className}`}>{(statusConfig[chatDetail.status] || {}).label || chatDetail.status}</span></div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => setShowNotes(!showNotes)} className={`px-2.5 py-1.5 text-xs font-medium rounded-md ${showNotes ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>📝 メモ</button>
+                <button onClick={() => setShowCustomerInfo(!showCustomerInfo)} className={`px-2.5 py-1.5 text-xs font-medium rounded-md ${showCustomerInfo ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>📋 顧客情報</button>
+                {chatDetail.status !== 'in_progress' && <button onClick={() => handleStatusUpdate('in_progress')} className="px-2.5 py-1.5 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-md">対応中</button>}
+                {chatDetail.status !== 'resolved' && <button onClick={() => handleStatusUpdate('resolved')} className="px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md">解決済</button>}
               </div>
             </div>
+
+            {/* Collapsible Notes */}
+            {showNotes && (
+              <div className="px-4 py-2 border-b border-gray-200 bg-yellow-50/50 shrink-0">
+                <div className="flex items-center gap-2"><input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="メモを入力..." className="flex-1 text-xs border border-yellow-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-green-500" /><button onClick={handleSaveNotes} disabled={savingNotes} className="px-2.5 py-1.5 text-xs font-medium text-yellow-800 bg-yellow-100 hover:bg-yellow-200 rounded-md">{savingNotes ? '...' : '保存'}</button></div>
+              </div>
+            )}
+
+            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ backgroundColor: '#7494C0' }}>
               {(!chatDetail.messages || chatDetail.messages.length === 0) ? (<p className="text-center text-white/60 text-sm py-8">メッセージはまだありません。</p>)
               : (chatDetail.messages ?? []).map((msg: any) => { const isOut = msg.direction === 'outgoing'; let content: React.ReactNode = <span>{msg.content}</span>; if (msg.messageType === 'email') content = <div>{msg.meta?.subject && <div className="text-xs font-bold mb-1 opacity-80">✉️ {msg.meta.subject}</div>}<div className="whitespace-pre-wrap text-sm">{msg.content}</div></div>; return (<div key={msg.id} className={`flex items-end gap-2 ${isOut ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[75%] px-3 py-2 text-sm break-words whitespace-pre-wrap ${isOut ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white' : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'}`} style={isOut ? { backgroundColor: '#06C755' } : undefined}>{content}</div></div>)})}
             </div>
-            <div className="px-4 py-2 border-t border-gray-200 bg-gray-50"><div className="flex items-center gap-2"><input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="メモ..." className="flex-1 text-xs border rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-green-500" /><button onClick={handleSaveNotes} disabled={savingNotes} className="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md">{savingNotes ? '保存中...' : '保存'}</button></div></div>
-            <div className="px-4 py-3 border-t border-gray-200">
-              {chatDetail && <AiDraftButton chatId={selectedChatId!} messages={(chatDetail.messages ?? []).map((m: any) => ({ direction: m.direction, messageType: m.messageType, content: m.content, meta: m.meta }))} onSelect={handleDraftSelect} />}
-              {<QuickReplyTemplates onSelect={(text: string) => setMessageContent(text)} />}
-              <div className="flex items-center gap-2 mt-2"><input type="text" value={messageContent} onChange={(e) => setMessageContent(e.target.value)} onKeyDown={handleKeyDown} placeholder="メッセージを入力..." className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500" /><button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50" style={{ backgroundColor: '#06C755' }}>{sending ? '...' : '送信'}</button></div>
+
+            {/* Bottom Input Area - Clean layout */}
+            <div className="border-t border-gray-200 bg-white shrink-0">
+              {/* Toolbar: AI Draft + Quick Reply */}
+              <div className="px-3 py-1.5 border-b border-gray-100 flex items-center gap-1">
+                {chatDetail && <AiDraftButton chatId={selectedChatId!} messages={(chatDetail.messages ?? []).map((m: any) => ({ direction: m.direction, messageType: m.messageType, content: m.content, meta: m.meta }))} onSelect={handleDraftSelect} />}
+              </div>
+              <div className="border-b border-gray-100">
+                <QuickReplyTemplates onSelect={(text: string) => setMessageContent(text)} />
+              </div>
+              {/* Message Input */}
+              <div className="px-3 py-2.5 flex items-center gap-2">
+                <input type="text" value={messageContent} onChange={(e) => setMessageContent(e.target.value)} onKeyDown={handleKeyDown} placeholder="メッセージを入力..." className="flex-1 text-sm border border-gray-300 rounded-full px-4 py-2 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500 focus:bg-white" />
+                <button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="w-9 h-9 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity" style={{ backgroundColor: '#06C755' }}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
+                </button>
+              </div>
             </div>
           </>) : null}
           {selectedChatId && chatDetail && showCustomerInfo && (<div className="hidden lg:flex"><CustomerInfoPanel friendId={chatDetail.friendId} friendName={chatDetail.friendName} friendPictureUrl={chatDetail.friendPictureUrl} friendEmail={chatDetail.customerEmail} chatStatus={chatDetail.status} onClose={() => setShowCustomerInfo(false)} /></div>)}
