@@ -39,7 +39,9 @@ ${contextLines}
 
 オペレーターの返信文のみを書いてください。`;
 
-    const MODEL = 'gemini-3-flash-preview';
+    // gemini-3-flash-preview は思考モードがデフォルトでhighのため
+    // 出力が削られる。gemini-2.5-flash は思考モード不要で安定
+    const MODEL = 'gemini-2.5-flash';
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
@@ -51,9 +53,6 @@ ${contextLines}
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 2000,
-          },
-          thinkingConfig: {
-            thinking_level: 'minimal',
           },
         }),
       }
