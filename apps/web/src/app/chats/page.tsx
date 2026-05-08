@@ -14,9 +14,6 @@ import AiDraftButton from '@/components/chats/ai-draft-button'
 const statusConfig: Record<string, { label: string; className: string }> = { unread: { label: '未読', className: 'bg-red-100 text-red-700' }, in_progress: { label: '対応中', className: 'bg-yellow-100 text-yellow-700' }, resolved: { label: '解決済', className: 'bg-green-100 text-green-700' } }
 const statusFilters = [{ key: 'all' as const, label: '全て' }, { key: 'unread' as const, label: '未読' }, { key: 'in_progress' as const, label: '対応中' }, { key: 'resolved' as const, label: '解決済' }]
 const channelFilters = [{ key: 'all' as const, label: '全チャネル' }, { key: 'line' as const, label: 'LINE' }, { key: 'email' as const, label: '✉️ メール' }]
-const SHOW_LOADING_PREF_KEY = 'lh_chat_show_loading_indicator'
-const LOADING_SECONDS_PREF_KEY = 'lh_chat_loading_seconds'
-const LOADING_REFRESH_INTERVAL_MS = 4000
 function formatDatetime(iso: string | null): string { if (!iso) return '-'; return new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 
 export default function ChatsPage() {
@@ -24,11 +21,7 @@ export default function ChatsPage() {
   const [chats, setChats] = useState<any[]>([]); const [allFriends, setAllFriends] = useState<any[]>([]); const [selectedChatId, setSelectedChatId] = useState<string | null>(null); const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null)
   const [chatDetail, setChatDetail] = useState<any>(null); const [statusFilter, setStatusFilter] = useState('all'); const [channelFilter, setChannelFilter] = useState('all')
   const [loading, setLoading] = useState(true); const [detailLoading, setDetailLoading] = useState(false); const [error, setError] = useState(''); const [messageContent, setMessageContent] = useState(''); const [sending, setSending] = useState(false)
-  const [notes, setNotes] = useState(''); const [savingNotes, setSavingNotes] = useState(false); const [showLoadingIndicator, setShowLoadingIndicator] = useState(false); const [loadingSeconds, setLoadingSeconds] = useState(5)
-  const lastLoadingTriggerAtRef = useRef<Record<string, number>>({}); const [isMessageInputFocused, setIsMessageInputFocused] = useState(false); const [showCustomerInfo, setShowCustomerInfo] = useState(false)
-
-  useEffect(() => { try { const rawEnabled = localStorage.getItem(SHOW_LOADING_PREF_KEY); const rawSeconds = localStorage.getItem(LOADING_SECONDS_PREF_KEY); if (rawEnabled !== null) setShowLoadingIndicator(rawEnabled === '1'); if (rawSeconds) { const n = Number.parseInt(rawSeconds, 10); if (Number.isFinite(n) && n >= 5 && n <= 60) setLoadingSeconds(n) } } catch {} }, [])
-  useEffect(() => { try { localStorage.setItem(SHOW_LOADING_PREF_KEY, showLoadingIndicator ? '1' : '0'); localStorage.setItem(LOADING_SECONDS_PREF_KEY, String(loadingSeconds)) } catch {} }, [showLoadingIndicator, loadingSeconds])
+  const [notes, setNotes] = useState(''); const [savingNotes, setSavingNotes] = useState(false); const [isMessageInputFocused, setIsMessageInputFocused] = useState(false); const [showCustomerInfo, setShowCustomerInfo] = useState(false)
 
   const loadChats = useCallback(async () => {
     setLoading(true); setError('')
@@ -45,9 +38,6 @@ export default function ChatsPage() {
   useEffect(() => { if (selectedChatId) { loadChatDetail(selectedChatId) } else { setChatDetail(null); setShowCustomerInfo(false) } }, [selectedChatId, loadChatDetail])
 
   const handleSelectChat = (chatId: string) => { setSelectedChatId(chatId); setMessageContent('') }
-
-  const triggerLoadingAnimation = useCallback(async (chatId: string) => { if (!showLoadingIndicator) return; const now = Date.now(); const last = lastLoadingTriggerAtRef.current[chatId] ?? 0; if (now - last < LOADING_REFRESH_INTERVAL_MS) return; lastLoadingTriggerAtRef.current[chatId] = now; try { await fetchApi(`/api/chats/${chatId}/loading`, { method: 'POST', body: JSON.stringify({ loadingSeconds }) }) } catch (err: any) { setError(`ローディング表示の失敗: ${err.message || 'unknown'}`) } }, [showLoadingIndicator, loadingSeconds])
-
   const handleSendMessage = async () => { if (!selectedChatId || !messageContent.trim()) return; setSending(true); try { await api.chats.send(selectedChatId, { content: messageContent.trim() }); setMessageContent(''); loadChatDetail(selectedChatId); loadChats() } catch { setError('メッセージの送信に失敗') } finally { setSending(false) } }
   const handleStatusUpdate = async (newStatus: string) => { if (!selectedChatId) return; try { await api.chats.update(selectedChatId, { status: newStatus }); loadChatDetail(selectedChatId); loadChats() } catch { setError('ステータスの更新に失敗') } }
   const handleSaveNotes = async () => { if (!selectedChatId) return; setSavingNotes(true); try { await api.chats.update(selectedChatId, { notes }); loadChatDetail(selectedChatId) } catch { setError('メモの保存に失敗') } finally { setSavingNotes(false) } }
@@ -61,18 +51,13 @@ export default function ChatsPage() {
         <div className="flex border-b border-gray-200 bg-gray-50">{channelFilters.map((f) => (<button key={f.key} onClick={() => { setChannelFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2 min-h-[40px] text-xs font-medium transition-colors ${channelFilter === f.key ? 'bg-white text-gray-900 border-b-2 border-purple-600' : 'text-gray-500 hover:bg-white'}`}>{f.label}</button>))}</div>
         <div className="flex border-b border-gray-200">{statusFilters.map((f) => (<button key={f.key} onClick={() => { setStatusFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2.5 min-h-[44px] text-xs font-medium transition-colors ${statusFilter === f.key ? 'text-white' : 'text-gray-600 hover:bg-gray-50'}`} style={statusFilter === f.key ? { backgroundColor: '#06C755' } : undefined}>{f.label}</button>))}</div>
         <div className="flex-1 overflow-y-auto">{loading ? (<div>{[...Array(5)].map((_, i) => (<div key={i} className="px-4 py-3 border-b border-gray-100 animate-pulse"><div className="h-3 bg-gray-200 rounded w-32" /><div className="h-2 bg-gray-100 rounded w-20 mt-2" /></div>))}</div>) : (<>{chats.map((chat: any) => { const st = statusConfig[chat.status] || { label: chat.status, className: 'bg-gray-100 text-gray-600' }; const isSelected = selectedChatId === chat.id; return (<button key={chat.id} onClick={() => { setSelectedFriendId(null); handleSelectChat(chat.id) }} className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${isSelected && !selectedFriendId ? 'bg-green-50' : 'hover:bg-gray-50'}`}><div className="flex items-center gap-3">{chat.friendPictureUrl ? <img src={chat.friendPictureUrl} alt="" className="w-10 h-10 rounded-full flex-shrink-0" /> : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-gray-500 text-sm">{(chat.friendName || '?').charAt(0)}</span></div>}<div className="min-w-0 flex-1"><p className="text-sm font-medium text-gray-900 truncate">{chat.friendName}</p><p className="text-xs text-gray-400 mt-0.5">{formatDatetime(chat.lastMessageAt)}</p></div><span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${st.className}`}>{st.label}</span></div></button>)})}</>)}</div></div>
-
       <div className={`flex-1 flex overflow-hidden ${selectedChatId || selectedFriendId ? 'flex' : 'hidden lg:flex'}`}>
         <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden flex">
           {!selectedChatId ? (<div className="flex-1 flex items-center justify-center"><p className="text-gray-400 text-sm">チャットを選択してください</p></div>)
           : detailLoading ? (<div className="flex-1 flex items-center justify-center"><p className="text-gray-400 text-sm">読み込み中...</p></div>)
           : chatDetail ? (<>
             <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <button onClick={() => setSelectedChatId(null)} className="lg:hidden flex-shrink-0 p-1 -ml-1 text-gray-500 hover:text-gray-700"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
-                {chatDetail.friendPictureUrl && <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />}
-                <div className="min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{chatDetail.friendName}</p><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${(statusConfig[chatDetail.status] || {}).className}`}>{(statusConfig[chatDetail.status] || {}).label || chatDetail.status}</span></div>
-              </div>
+              <div className="flex items-center gap-2 min-w-0"><button onClick={() => setSelectedChatId(null)} className="lg:hidden flex-shrink-0 p-1 -ml-1 text-gray-500 hover:text-gray-700"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>{chatDetail.friendPictureUrl && <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />}<div className="min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{chatDetail.friendName}</p><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${(statusConfig[chatDetail.status] || {}).className}`}>{(statusConfig[chatDetail.status] || {}).label || chatDetail.status}</span></div></div>
               <div className="flex flex-wrap items-center gap-2">
                 <button onClick={() => setShowCustomerInfo(!showCustomerInfo)} className={`px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium rounded-md ${showCustomerInfo ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{showCustomerInfo ? '📋 閉じる' : '📋 顧客情報'}</button>
                 {chatDetail.status !== 'unread' && <button onClick={() => handleStatusUpdate('unread')} className="px-3 py-1 min-h-[44px] lg:min-h-0 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md">未読</button>}
@@ -88,10 +73,9 @@ export default function ChatsPage() {
             <div className="px-4 py-3 border-t border-gray-200">
               {chatDetail && <AiDraftButton chatId={selectedChatId!} messages={(chatDetail.messages ?? []).map((m: any) => ({ direction: m.direction, content: m.content }))} onSelect={handleDraftSelect} />}
               {<QuickReplyTemplates onSelect={(text: string) => setMessageContent(text)} />}
-              <div className="flex items-center gap-2 mt-2"><input type="text" value={messageContent} onChange={(e) => { setMessageContent(e.target.value); if (selectedChatId && isMessageInputFocused && e.target.value.trim()) void triggerLoadingAnimation(selectedChatId) }} onFocus={() => { setIsMessageInputFocused(true); if (selectedChatId) void triggerLoadingAnimation(selectedChatId) }} onBlur={() => setIsMessageInputFocused(false)} onKeyDown={handleKeyDown} placeholder="メッセージを入力..." className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500" /><button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50" style={{ backgroundColor: '#06C755' }}>{sending ? '...' : '送信'}</button></div>
+              <div className="flex items-center gap-2 mt-2"><input type="text" value={messageContent} onChange={(e) => setMessageContent(e.target.value)} onKeyDown={handleKeyDown} placeholder="メッセージを入力..." className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-green-500" /><button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50" style={{ backgroundColor: '#06C755' }}>{sending ? '...' : '送信'}</button></div>
             </div>
           </>) : null}
-
           {selectedChatId && chatDetail && showCustomerInfo && (<div className="hidden lg:flex"><CustomerInfoPanel friendId={chatDetail.friendId} friendName={chatDetail.friendName} friendPictureUrl={chatDetail.friendPictureUrl} friendEmail={chatDetail.customerEmail} chatStatus={chatDetail.status} onClose={() => setShowCustomerInfo(false)} /></div>)}
         </div>
       </div>
