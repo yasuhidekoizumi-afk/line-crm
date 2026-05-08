@@ -17,30 +17,28 @@ aiDraft.post('/api/ai-draft/generate', async (c) => {
       return c.json({ success: false, error: 'GEMINI_API_KEYが設定されていません。Workerの環境変数を確認してください。' });
     }
 
-    const contextLines = (chatHistory ?? []).slice(-10).map((m) =>
+    const contextLines = (chatHistory ?? []).slice(-8).map((m) =>
       `${m.direction === 'incoming' ? '顧客' : 'オペレーター'}: ${m.content.slice(0, 500)}`
     ).join('\n');
 
-    const prompt = `あなたはECサイト「ORYZAE（オリゼ）」のカスタマーサポート担当です。
+const prompt = `あなたはECブランド「ORYZAE（オリゼ）」のカスタマーサポート担当です。
 米麹発酵食品（KOJIPOP、甘酒、グラノーラなど）を販売しています。
 
-以下の会話履歴に対して、オペレーターの返信文を1つ提案してください。
+以下の会話履歴に対するオペレーターの返信文を1つ提案してください。
 
-ルール:
-- 丁寧だが堅すぎない、親しみやすい敬語
-- 150〜300文字程度で、自然な会話として完結させる
-- 質問がある場合は回答を含める
-- 商品案内が必要な場合は自然に提案
-- 謝罪が必要な場合は誠実に対応
-- 必ず最後まで書き切ること。途中で切らない。
+【絶対守るルール】
+- 120〜180文字に収める。長くても200文字まで。
+- 堅苦しい表現は禁止：「お詫び申し上げます」「心よりお詫び」「スタッフ一同」「弊社」は使わない
+- 謝罪は1回だけ、シンプルに「申し訳ございません」でOK
+- 最後に「これからもORYZAEをよろしくお願いいたします」のような決まり文句は不要
+- 改行は最小限。LINEの1メッセージとして読める長さに。
+- トーン：丁寧だけど親しみやすい。実際のLINEのオペレーター返信のように。
 
 会話履歴:
 ${contextLines}
 
 オペレーターの返信文のみを書いてください。`;
 
-    // gemini-3-flash-preview は思考モードがデフォルトでhighのため
-    // 出力が削られる。gemini-2.5-flash は思考モード不要で安定
     const MODEL = 'gemini-2.5-flash';
 
     const res = await fetch(
