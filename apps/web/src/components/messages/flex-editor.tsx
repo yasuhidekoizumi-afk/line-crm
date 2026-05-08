@@ -170,11 +170,17 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
     }
     if (!target || typeof target !== 'object') return
     const targetObj = target as Record<string, unknown>
+    if (type === 'none') {
+      delete targetObj.action
+      onChange(JSON.stringify(updated, null, 2))
+      return
+    }
     const base = { type } as Record<string, string>
     if (type === 'uri') base.uri = 'https://'
     else if (type === 'message') base.text = ''
     else if (type === 'postback') base.data = ''
-    targetObj.action = { ...base, label: (targetObj.action as Record<string, unknown>)?.label || 'ボタン' }
+    const prevLabel = (targetObj.action as Record<string, unknown>)?.label
+    targetObj.action = { ...base, label: prevLabel || (selectedEntry.type === 'image' ? 'タップ' : 'ボタン') }
     onChange(JSON.stringify(updated, null, 2))
   }, [selectedNode, selectedEntry, parsed, onChange])
 
@@ -521,6 +527,27 @@ export default function FlexEditor({ value, onChange }: FlexEditorProps) {
                     { value: 'md', label: 'MD' },
                     { value: 'sm', label: 'SM' },
                   ]})}
+                  <div className="pt-1 border-t border-gray-100">
+                    <p className="text-xs font-medium text-gray-500 mb-1.5">タップ時の動作</p>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-500 w-24 shrink-0">アクション</label>
+                      <select
+                        className="flex-1 border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-500 bg-white"
+                        value={String((selectedNode?.action as Record<string, unknown>)?.type || 'none')}
+                        onChange={e => updateActionType(e.target.value)}
+                      >
+                        <option value="none">なし</option>
+                        <option value="uri">URLを開く</option>
+                        <option value="message">メッセージを送信</option>
+                      </select>
+                    </div>
+                    {(selectedNode?.action as Record<string, unknown>)?.type === 'uri' && (
+                      editField('遷移先URL', 'action.uri', { placeholder: 'https://...', type: 'url' })
+                    )}
+                    {(selectedNode?.action as Record<string, unknown>)?.type === 'message' && (
+                      editField('送信テキスト', 'action.text', { placeholder: '送信されるメッセージ' })
+                    )}
+                  </div>
                 </div>
               )}
 
