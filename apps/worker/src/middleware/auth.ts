@@ -25,6 +25,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redeem$/) || // POST redeem (Shopify customer page)
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) || // POST cancel code (Shopify customer page)
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) || // GET history (Shopify customer page)
+    path === '/api/loyalty/admin/link-by-name' || // ADMIN: temporary auth skip for linking
     path === '/api/rewards' || // GET active reward items (Shopify widget)
     path.match(/^\/api\/rewards\/[^/]+\/exchange$/) || // POST exchange (Shopify widget)
     // FERMENT: 認証不要エンドポイント
@@ -58,7 +59,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
 
   // Fallback: env API_KEY acts as owner
   if (token === c.env.API_KEY) {
-    c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
+    c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' });
     return next();
   }
 
