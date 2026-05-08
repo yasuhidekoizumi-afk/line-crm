@@ -1,53 +1,11 @@
-/**
- * raw_payload から customer_name を抽出して shopify_orders テーブルを更新
- * raw_payload がない場合、email/phone は既存カラムから使う
- */
-export async function extractNamesFromPayload(db: D1Database): Promise<{ scanned: number; updated: number; errors: number }> {
-  let updated = 0, errors = 0;
-  const BATCH = 500;
-  let offset = 0;
-  let scanned = 0;
-
-  while (true) {
-    // raw_payloadカラムがあれば使う、なければスキップ
-    let rows: { shopify_order_id: string; raw_payload: string | null }[];
-    try {
-      const r = await db.prepare(
-        `SELECT shopify_order_id, raw_payload FROM shopify_orders WHERE customer_name IS NULL AND raw_payload IS NOT NULL ORDER BY shopify_order_id LIMIT ? OFFSET ?`
-      ).bind(BATCH, offset).all<{ shopify_order_id: string; raw_payload: string | null }>();
-      rows = r.results;
-    } catch {
-      // raw_payload カラムがない
-      return { scanned: 0, updated: 0, errors: 0 };
-    }
-
-    if (rows.length === 0) break;
-    scanned += rows.length;
-
-    for (const row of rows) {
-      try {
-        const payload = JSON.parse(row.raw_payload || '{}');
-        let name: string | null = null;
-        const billing = payload.billing_address || payload.billingAddress;
-        if (billing?.name && typeof billing.name === 'string' && billing.name.trim()) {
-          name = billing.name.trim();
-        } else {
-          const cust = payload.customer;
-          if (cust) {
-            const first = cust.first_name || cust.firstName || '';
-            const last = cust.last_name || cust.lastName || '';
-            const full = `${last} ${first}`.trim();
-            if (full) name = full;
-          }
-        }
-        if (name) {
-          await db.prepare(`UPDATE shopify_orders SET customer_name = ? WHERE shopify_order_id = ?`).bind(name, row.shopify_order_id).run();
-          updated++;
-        }
-      } catch { errors++; }
-    }
-    offset += BATCH;
-  }
-
-  return { scanned, updated, errors };
-}
+export interface ShopifyOrderForMatch { shopify_order_id: string; shopify_customer_id: string | null; customer_name: string | null; email: string | null; phone: string | null; }
+export interface FriendCandidate { id: string; displayName: string; score: number; matchedBy: 'name_exact'|'name_partial'|'phone'|'email'|'shopify_customer_id'; }
+function n(name:string):string{return name.replace(/[\u3000\s]+/g,'').replace(/[Ａ-Ｚａ-ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase()}
+function v(name:string):string[]{const w=n(name);const p=name.trim().split(/[\s\u3000]+/);const s=new Set<string>();s.add(w);if(p.length>=2){s.add(n(p.join('')));s.add(n([...p].reverse().join('')));for(const x of p)if(x.length>=2)s.add(n(x))}return[...s]}
+async function byName(db:D1Database,cn:string):Promise<{friendId:string;displayName:string;matchedBy:string}|null>{try{for(const q of v(cn)){const f=await db.prepare("SELECT id, display_name FROM friends WHERE REPLACE(LOWER(display_name), ' ', '') = REPLACE(LOWER(?), ' ', '') LIMIT 1").bind(q).first<{id:string;display_name:string}>();if(f)return{friendId:f.id,displayName:f.display_name,matchedBy:'name_exact'}}for(const q of v(cn).slice(0,2)){const f=await db.prepare("SELECT id, display_name FROM friends WHERE display_name LIKE ? COLLATE NOCASE LIMIT 1").bind(`%${q}%`).first<{id:string;display_name:string}>();if(f)return{friendId:f.id,displayName:f.display_name,matchedBy:'name_partial'}}}catch{}return null}
+async function byPhone(db:D1Database,ph:string):Promise<{friendId:string;displayName:string}|null>{try{const n2=ph.replace(/^\+81/,'0').replace(/[-\s]/g,'');if(n2.length<10)return null;const f=await db.prepare("SELECT id, display_name FROM friends WHERE metadata LIKE ? LIMIT 1").bind(`%${n2}%`).first<{id:string;display_name:string}>();if(f)return{friendId:f.id,displayName:f.display_name}}catch{}return null}
+async function byEmail(db:D1Database,em:string):Promise<{friendId:string;displayName:string}|null>{if(!em)return null;const e=em.toLowerCase().trim();try{const f=await db.prepare("SELECT id, display_name FROM friends WHERE LOWER(json_extract(metadata, '$.email')) = ? LIMIT 1").bind(e).first<{id:string;display_name:string}>();if(f)return{friendId:f.id,displayName:f.display_name}}catch{}try{const u=await db.prepare("SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1").bind(e).first<{id:string}>();if(u){const f=await db.prepare("SELECT id, display_name FROM friends WHERE user_id = ? LIMIT 1").bind(u.id).first<{id:string;display_name:string}>();if(f)return{friendId:f.id,displayName:f.display_name}}}catch{}return null}
+export async function matchShopifyOrderToFriend(db:D1Database,o:ShopifyOrderForMatch):Promise<FriendCandidate|null>{if(o.shopify_customer_id){try{const e=await db.prepare("SELECT friend_id FROM loyalty_points WHERE shopify_customer_id = ? LIMIT 1").bind(o.shopify_customer_id).first<{friend_id:string}>();if(e?.friend_id){const f=await db.prepare("SELECT display_name FROM friends WHERE id = ?").bind(e.friend_id).first<{display_name:string}>();return{id:e.friend_id,displayName:f?.display_name||'',score:100,matchedBy:'shopify_customer_id'}}}catch{}}if(o.customer_name){const m=await byName(db,o.customer_name);if(m)return{...m,score:m.matchedBy==='name_exact'?95:70}}if(o.email){const m=await byEmail(db,o.email);if(m)return{...m,score:80,matchedBy:'email'}}if(o.phone){const m=await byPhone(db,o.phone);if(m)return{...m,score:60,matchedBy:'phone'}}return null}
+export async function applyMatch(db:D1Database,oid:string,fid:string,scid:string|null):Promise<boolean>{try{if(scid){const e=await db.prepare("SELECT id FROM loyalty_points WHERE friend_id = ?").bind(fid).first<{id:string}>();if(e){await db.prepare("UPDATE loyalty_points SET shopify_customer_id = ? WHERE friend_id = ? AND (shopify_customer_id IS NULL OR shopify_customer_id = '')").bind(scid,fid).run()}else{await db.prepare("INSERT INTO loyalty_points (id, friend_id, balance, total_spent, rank, shopify_customer_id) VALUES (?, ?, 0, 0, 'レギュラー', ?)").bind(crypto.randomUUID(),fid,scid).run()}}await db.prepare("UPDATE shopify_orders SET friend_id = ? WHERE shopify_order_id = ?").bind(fid,oid).run();return true}catch{return false}}
+export async function batchMatchAll(db:D1Database,opts:{limit?:number;useCustomerName?:boolean}={}):Promise<{totalUnmatchedOrders:number;matched:number;skipped:number;errors:number;results:Array<{shopify_order_id:string;customer_name:string|null;friend_name:string|null;matched_by:string}>}>{const lim=opts.limit??500;const ucn=opts.useCustomerName??false;try{const nc=ucn?', customer_name':'';const nn=ucn?'':', NULL as customer_name';const rows=await db.prepare(`SELECT shopify_order_id, shopify_customer_id${nc}${nn}, email, phone FROM shopify_orders WHERE friend_id IS NULL AND cancelled_at IS NULL ORDER BY processed_at DESC LIMIT ?`).bind(lim).all<ShopifyOrderForMatch>();const res:any[]=[];let m=0,s=0,er=0;for(const o of rows.results){try{const c=await matchShopifyOrderToFriend(db,o);if(c&&c.score>=60){const ok=await applyMatch(db,o.shopify_order_id,c.id,o.shopify_customer_id);if(ok){m++;res.push({shopify_order_id:o.shopify_order_id,customer_name:o.customer_name,friend_name:c.displayName,matched_by:c.matchedBy})}else er++}else s++}catch{er++}}return{totalUnmatchedOrders:rows.results.length,matched:m,skipped:s,errors:er,results:res}}catch{return{totalUnmatchedOrders:0,matched:0,skipped:0,errors:1,results:[]}}}
+export async function extractNamesFromPayload(db:D1Database):Promise<{scanned:number;updated:number;errors:number}>{let u=0,er=0,sc=0,of=0;const B=500;while(true){let rows:{shopify_order_id:string;raw_payload:string|null}[];try{const r=await db.prepare("SELECT shopify_order_id, raw_payload FROM shopify_orders WHERE customer_name IS NULL AND raw_payload IS NOT NULL ORDER BY shopify_order_id LIMIT ? OFFSET ?").bind(B,of).all<{shopify_order_id:string;raw_payload:string|null}>();rows=r.results}catch{return{scanned:0,updated:0,errors:0}}if(rows.length===0)break;sc+=rows.length;for(const row of rows){try{const p=JSON.parse(row.raw_payload||'{}');let name:string|null=null;const ba=p.billing_address||p.billingAddress;if(ba?.name&&typeof ba.name==='string'&&ba.name.trim()){name=ba.name.trim()}else{const cu=p.customer;if(cu){const f=cu.first_name||cu.firstName||'';const l=cu.last_name||cu.lastName||'';const full=`${l} ${f}`.trim();if(full)name=full}}if(name){await db.prepare("UPDATE shopify_orders SET customer_name = ? WHERE shopify_order_id = ?").bind(name,row.shopify_order_id).run();u++}}catch{er++}}of+=B}return{scanned:sc,updated:u,errors:er}}
