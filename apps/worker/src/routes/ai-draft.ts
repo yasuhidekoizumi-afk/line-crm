@@ -38,8 +38,11 @@ ${contextLines}
 
 オペレーターの返信文のみを書いてください。`;
 
+    // gemini-2.0-flashは新規ユーザー利用不可のため新しいモデルに更新
+    const MODEL = 'gemini-2.5-flash-preview-04-17';
+
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
