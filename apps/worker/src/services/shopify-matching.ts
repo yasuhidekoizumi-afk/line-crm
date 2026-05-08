@@ -4,11 +4,13 @@
  * 戦略:
  * 1. shopify_customer_id 経由の既存紐付け確認
  * 2. 名前正規化マッチ（姓名の順序入れ替え・スペース除去）
- * 3. 電話番号マッチ（Shopify phone ↔ friends.metadata.phone）
- * 4. メールアドレスマッチ（Shopify email ↔ users.email → friends.user_id）
+ * 3. メールアドレスマッチ（Shopify email ↔ users.email → friends.user_id）
+ * 4. 電話番号マッチ（Shopify phone ↔ friends.metadata.phone）
  *
  * マッチしたら loyalty_points.shopify_customer_id をセットし、
  * shopify_orders.friend_id も更新する。
+ * 
+ * すべてのDBクエリは try-catch で保護し、カラム不在でも安全に動作する。
  */
 
 export interface ShopifyOrderForMatch {
@@ -28,8 +30,6 @@ export interface FriendCandidate {
 
 /**
  * 名前を正規化して比較用キーを生成
- * - 全角英数字→半角
- * - スペース除去
  */
 function normalizeNameForMatch(name: string): string {
   return name
@@ -59,36 +59,37 @@ function generateNameVariations(name: string): string[] {
 }
 
 /**
- * Shopify 注文の顧客名から、一致する LINE 友だちを検索
+ * 名前で一致する LINE 友だちを検索
  */
 async function findFriendByName(
   db: D1Database,
   customerName: string,
 ): Promise<{ friendId: string; displayName: string; matchedBy: string } | null> {
-  const variations = generateNameVariations(customerName);
+  try {
+    const variations = generateNameVariations(customerName);
 
-  // Step 1: 完全一致（正規化後）
-  for (const v of variations) {
-    const friend = await db
-      .prepare(`SELECT id, display_name FROM friends WHERE REPLACE(LOWER(display_name), ' ', '') = REPLACE(LOWER(?), ' ', '') LIMIT 1`)
-      .bind(v)
-      .first<{ id: string; display_name: string }>();
-    if (friend) {
-      return { friendId: friend.id, displayName: friend.display_name, matchedBy: 'name_exact' };
+    for (const v of variations) {
+      const friend = await db
+        .prepare(`SELECT id, display_name FROM friends WHERE REPLACE(LOWER(display_name), ' ', '') = REPLACE(LOWER(?), ' ', '') LIMIT 1`)
+        .bind(v)
+        .first<{ id: string; display_name: string }>();
+      if (friend) {
+        return { friendId: friend.id, displayName: friend.display_name, matchedBy: 'name_exact' };
+      }
     }
-  }
 
-  // Step 2: 部分一致
-  for (const v of variations.slice(0, 2)) {
-    const friend = await db
-      .prepare(`SELECT id, display_name FROM friends WHERE display_name LIKE ? COLLATE NOCASE LIMIT 1`)
-      .bind(`%${v}%`)
-      .first<{ id: string; display_name: string }>();
-    if (friend) {
-      return { friendId: friend.id, displayName: friend.display_name, matchedBy: 'name_partial' };
+    for (const v of variations.slice(0, 2)) {
+      const friend = await db
+        .prepare(`SELECT id, display_name FROM friends WHERE display_name LIKE ? COLLATE NOCASE LIMIT 1`)
+        .bind(`%${v}%`)
+        .first<{ id: string; display_name: string }>();
+      if (friend) {
+        return { friendId: friend.id, displayName: friend.display_name, matchedBy: 'name_partial' };
+      }
     }
+  } catch {
+    // name matching failed silently
   }
-
   return null;
 }
 
@@ -99,34 +100,26 @@ async function findFriendByPhone(
   db: D1Database,
   phone: string,
 ): Promise<{ friendId: string; displayName: string } | null> {
-  const normalized = phone.replace(/^\+81/, '0').replace(/[-\s]/g, '');
-  if (normalized.length < 10) return null;
+  try {
+    const normalized = phone.replace(/^\+81/, '0').replace(/[-\s]/g, '');
+    if (normalized.length < 10) return null;
 
-  const friend = await db
-    .prepare(`SELECT id, display_name FROM friends WHERE metadata LIKE ? LIMIT 1`)
-    .bind(`%${normalized}%`)
-    .first<{ id: string; display_name: string }>();
+    const friend = await db
+      .prepare(`SELECT id, display_name FROM friends WHERE metadata LIKE ? LIMIT 1`)
+      .bind(`%${normalized}%`)
+      .first<{ id: string; display_name: string }>();
 
-  if (friend) {
-    try {
-      const metaStr = await db.prepare(`SELECT metadata FROM friends WHERE id = ?`).bind(friend.id).first<{ metadata: string }>();
-      if (metaStr?.metadata) {
-        const meta = JSON.parse(metaStr.metadata);
-        const metaPhone = (meta.phone || '').replace(/[-\s]/g, '');
-        if (metaPhone.includes(normalized) || normalized.includes(metaPhone)) {
-          return { friendId: friend.id, displayName: friend.display_name };
-        }
-      }
-    } catch {
+    if (friend) {
       return { friendId: friend.id, displayName: friend.display_name };
     }
+  } catch {
+    // phone matching failed (e.g. metadata column doesn't exist)
   }
-
   return null;
 }
 
 /**
- * メールアドレスで友だちを検索（users.email → friends.user_id 経由）
+ * メールアドレスで友だちを検索
  */
 async function findFriendByEmail(
   db: D1Database,
@@ -135,26 +128,34 @@ async function findFriendByEmail(
   if (!email) return null;
   const normalized = email.toLowerCase().trim();
 
-  // friends.metadata.email を直接検索
-  const friend = await db
-    .prepare(`SELECT id, display_name FROM friends WHERE LOWER(json_extract(metadata, '$.email')) = ? LIMIT 1`)
-    .bind(normalized)
-    .first<{ id: string; display_name: string }>();
-
-  if (friend) return { friendId: friend.id, displayName: friend.display_name };
-
-  // users.email → friends.user_id 経由
-  const user = await db
-    .prepare(`SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1`)
-    .bind(normalized)
-    .first<{ id: string }>();
-
-  if (user) {
-    const friendByUser = await db
-      .prepare(`SELECT id, display_name FROM friends WHERE user_id = ? LIMIT 1`)
-      .bind(user.id)
+  try {
+    // friends.metadata.email 経由
+    const friend = await db
+      .prepare(`SELECT id, display_name FROM friends WHERE LOWER(json_extract(metadata, '$.email')) = ? LIMIT 1`)
+      .bind(normalized)
       .first<{ id: string; display_name: string }>();
-    if (friendByUser) return { friendId: friendByUser.id, displayName: friendByUser.display_name };
+
+    if (friend) return { friendId: friend.id, displayName: friend.display_name };
+  } catch {
+    // metadata column not available, fall through
+  }
+
+  try {
+    // users.email → friends.user_id 経由
+    const user = await db
+      .prepare(`SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1`)
+      .bind(normalized)
+      .first<{ id: string }>();
+
+    if (user) {
+      const friendByUser = await db
+        .prepare(`SELECT id, display_name FROM friends WHERE user_id = ? LIMIT 1`)
+        .bind(user.id)
+        .first<{ id: string; display_name: string }>();
+      if (friendByUser) return { friendId: friendByUser.id, displayName: friendByUser.display_name };
+    }
+  } catch {
+    // users table query failed
   }
 
   return null;
@@ -169,16 +170,20 @@ export async function matchShopifyOrderToFriend(
 ): Promise<FriendCandidate | null> {
   // 既存の shopify_customer_id 経由のマッチを確認
   if (order.shopify_customer_id) {
-    const existing = await db
-      .prepare(`SELECT friend_id FROM loyalty_points WHERE shopify_customer_id = ? LIMIT 1`)
-      .bind(order.shopify_customer_id)
-      .first<{ friend_id: string }>();
-    if (existing?.friend_id) {
-      const friend = await db
-        .prepare(`SELECT display_name FROM friends WHERE id = ?`)
-        .bind(existing.friend_id)
-        .first<{ display_name: string }>();
-      return { id: existing.friend_id, displayName: friend?.display_name || '', score: 100, matchedBy: 'shopify_customer_id' };
+    try {
+      const existing = await db
+        .prepare(`SELECT friend_id FROM loyalty_points WHERE shopify_customer_id = ? LIMIT 1`)
+        .bind(order.shopify_customer_id)
+        .first<{ friend_id: string }>();
+      if (existing?.friend_id) {
+        const friend = await db
+          .prepare(`SELECT display_name FROM friends WHERE id = ?`)
+          .bind(existing.friend_id)
+          .first<{ display_name: string }>();
+        return { id: existing.friend_id, displayName: friend?.display_name || '', score: 100, matchedBy: 'shopify_customer_id' };
+      }
+    } catch {
+      // loyalty_points table may not exist
     }
   }
 
@@ -219,31 +224,35 @@ export async function applyMatch(
   friendId: string,
   shopifyCustomerId: string | null,
 ): Promise<boolean> {
-  if (shopifyCustomerId) {
-    const existing = await db
-      .prepare(`SELECT id FROM loyalty_points WHERE friend_id = ?`)
-      .bind(friendId)
-      .first<{ id: string }>();
+  try {
+    if (shopifyCustomerId) {
+      const existing = await db
+        .prepare(`SELECT id FROM loyalty_points WHERE friend_id = ?`)
+        .bind(friendId)
+        .first<{ id: string }>();
 
-    if (existing) {
-      await db
-        .prepare(`UPDATE loyalty_points SET shopify_customer_id = ? WHERE friend_id = ? AND (shopify_customer_id IS NULL OR shopify_customer_id = '')`)
-        .bind(shopifyCustomerId, friendId)
-        .run();
-    } else {
-      await db
-        .prepare(`INSERT INTO loyalty_points (id, friend_id, balance, total_spent, rank, shopify_customer_id) VALUES (?, ?, 0, 0, 'レギュラー', ?)`)
-        .bind(crypto.randomUUID(), friendId, shopifyCustomerId)
-        .run();
+      if (existing) {
+        await db
+          .prepare(`UPDATE loyalty_points SET shopify_customer_id = ? WHERE friend_id = ? AND (shopify_customer_id IS NULL OR shopify_customer_id = '')`)
+          .bind(shopifyCustomerId, friendId)
+          .run();
+      } else {
+        await db
+          .prepare(`INSERT INTO loyalty_points (id, friend_id, balance, total_spent, rank, shopify_customer_id) VALUES (?, ?, 0, 0, 'レギュラー', ?)`)
+          .bind(crypto.randomUUID(), friendId, shopifyCustomerId)
+          .run();
+      }
     }
+
+    await db
+      .prepare(`UPDATE shopify_orders SET friend_id = ? WHERE shopify_order_id = ?`)
+      .bind(friendId, shopifyOrderId)
+      .run();
+
+    return true;
+  } catch {
+    return false;
   }
-
-  await db
-    .prepare(`UPDATE shopify_orders SET friend_id = ? WHERE shopify_order_id = ?`)
-    .bind(friendId, shopifyOrderId)
-    .run();
-
-  return true;
 }
 
 /**
@@ -256,6 +265,7 @@ export async function batchMatchAll(
   totalUnmatchedOrders: number;
   matched: number;
   skipped: number;
+  errors: number;
   results: Array<{
     shopify_order_id: string;
     customer_name: string | null;
@@ -266,39 +276,59 @@ export async function batchMatchAll(
   const limit = options.limit ?? 500;
   const useCN = options.useCustomerName ?? false;
 
-  // 未マッチ注文を取得（customer_nameカラムの有無を気にしないクエリ）
-  const nameCol = useCN ? ', customer_name' : '';
-  const whereExtra = useCN ? ' AND customer_name IS NOT NULL' : '';
+  try {
+    const nameCol = useCN ? ', customer_name' : '';
+    const nameColNull = useCN ? '' : ', NULL as customer_name';
+    const whereExtra = useCN ? ' AND customer_name IS NOT NULL' : '';
 
-  const unmatchOrders = await db
-    .prepare(`SELECT shopify_order_id, shopify_customer_id${nameCol}, email, phone FROM shopify_orders WHERE friend_id IS NULL AND cancelled_at IS NULL${whereExtra} ORDER BY processed_at DESC LIMIT ?`)
-    .bind(limit)
-    .all<ShopifyOrderForMatch>();
+    const unmatchOrders = await db
+      .prepare(`SELECT shopify_order_id, shopify_customer_id${nameCol}${nameColNull}, email, phone FROM shopify_orders WHERE friend_id IS NULL AND cancelled_at IS NULL${whereExtra} ORDER BY processed_at DESC LIMIT ?`)
+      .bind(limit)
+      .all<ShopifyOrderForMatch>();
 
-  const results: Array<{ shopify_order_id: string; customer_name: string | null; friend_name: string | null; matched_by: string }> = [];
-  let matched = 0;
-  let skipped = 0;
+    const results: Array<{ shopify_order_id: string; customer_name: string | null; friend_name: string | null; matched_by: string }> = [];
+    let matched = 0;
+    let skipped = 0;
+    let errors = 0;
 
-  for (const order of unmatchOrders.results) {
-    const candidate = await matchShopifyOrderToFriend(db, order);
-    if (candidate && candidate.score >= 60) {
-      await applyMatch(db, order.shopify_order_id, candidate.id, order.shopify_customer_id);
-      matched++;
-      results.push({
-        shopify_order_id: order.shopify_order_id,
-        customer_name: order.customer_name,
-        friend_name: candidate.displayName,
-        matched_by: candidate.matchedBy,
-      });
-    } else {
-      skipped++;
+    for (const order of unmatchOrders.results) {
+      try {
+        const candidate = await matchShopifyOrderToFriend(db, order);
+        if (candidate && candidate.score >= 60) {
+          const ok = await applyMatch(db, order.shopify_order_id, candidate.id, order.shopify_customer_id);
+          if (ok) {
+            matched++;
+            results.push({
+              shopify_order_id: order.shopify_order_id,
+              customer_name: order.customer_name,
+              friend_name: candidate.displayName,
+              matched_by: candidate.matchedBy,
+            });
+          } else {
+            errors++;
+          }
+        } else {
+          skipped++;
+        }
+      } catch {
+        errors++;
+      }
     }
-  }
 
-  return {
-    totalUnmatchedOrders: unmatchOrders.results.length,
-    matched,
-    skipped,
-    results,
-  };
+    return {
+      totalUnmatchedOrders: unmatchOrders.results.length,
+      matched,
+      skipped,
+      errors,
+      results,
+    };
+  } catch (e) {
+    return {
+      totalUnmatchedOrders: 0,
+      matched: 0,
+      skipped: 0,
+      errors: 1,
+      results: [],
+    };
+  }
 }
