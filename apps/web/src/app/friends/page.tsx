@@ -52,8 +52,8 @@ export default function FriendsPage() {
     }
   }, [])
 
-  const loadFriends = useCallback(async () => {
-    setLoading(true)
+  const loadFriends = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     setError('')
     try {
       const params: Record<string, string> = {
@@ -75,7 +75,7 @@ export default function FriendsPage() {
     } catch {
       setError('友だちの読み込みに失敗しました。もう一度お試しください。')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [page, selectedTagId, selectedAccountId, searchQuery])
 
@@ -179,7 +179,7 @@ export default function FriendsPage() {
         <FriendTable
           friends={friends}
           allTags={allTags}
-          onRefresh={loadFriends}
+          onRefresh={() => loadFriends(true)}
         />
       )}
 
