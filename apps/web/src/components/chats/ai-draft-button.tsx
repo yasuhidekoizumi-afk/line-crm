@@ -5,8 +5,6 @@ import { fetchApi } from '@/lib/api'
 
 interface AiDraftButtonProps {
   chatId: string
-  friendName?: string
-  customerEmail?: string
   onSelect: (text: string) => void
   messages?: { direction: string; content: string }[]
 }
@@ -22,7 +20,7 @@ export default function AiDraftButton({ chatId, messages, onSelect }: AiDraftBut
     setError('')
     setDraft(null)
     try {
-      const res = await fetchApi<{ success: boolean; data: { draft: string }; error?: string }>(
+      const res = await fetchApi<{ success: boolean; data?: { draft: string }; error?: string }>(
         '/api/ai-draft/generate',
         {
           method: 'POST',
@@ -38,10 +36,10 @@ export default function AiDraftButton({ chatId, messages, onSelect }: AiDraftBut
       if (res.success && res.data) {
         setDraft(res.data.draft)
       } else {
-        setError(res.error ?? '生成に失敗しました')
+        setError(res.error ?? '生成に失敗しました（不明なエラー）')
       }
-    } catch {
-      setError('AI下書きの生成に失敗しました')
+    } catch (err: any) {
+      setError(err?.message ?? '通信エラーが発生しました')
     }
     setLoading(false)
   }
@@ -52,7 +50,6 @@ export default function AiDraftButton({ chatId, messages, onSelect }: AiDraftBut
         <button
           onClick={handleGenerate}
           className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1"
-          disabled={loading}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -72,7 +69,9 @@ export default function AiDraftButton({ chatId, messages, onSelect }: AiDraftBut
       )}
 
       {error && (
-        <p className="text-xs text-red-500">{error}</p>
+        <div className="text-xs text-red-500 bg-red-50 border border-red-100 rounded p-2 mb-1">
+          {error}
+        </div>
       )}
 
       {draft && !loading && (
