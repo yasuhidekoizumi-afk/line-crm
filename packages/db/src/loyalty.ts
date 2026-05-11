@@ -7,6 +7,8 @@ export interface LoyaltyPointRow {
   id: string;
   friend_id: string;
   balance: number;
+  limited_balance: number;
+  limited_expires_at: string | null;
   total_spent: number;
   rank: LoyaltyRank;
   shopify_customer_id: string | null;
@@ -358,6 +360,8 @@ export async function getLoyaltyPoints(
          COALESCE(lp.id, '') as id,
          f.id as friend_id,
          COALESCE(lp.balance, 0) as balance,
+         COALESCE(lp.limited_balance, 0) as limited_balance,
+         lp.limited_expires_at,
          COALESCE(lp.total_spent, 0) as total_spent,
          COALESCE(lp.rank, 'レギュラー') as rank,
          lp.shopify_customer_id,
@@ -369,7 +373,7 @@ export async function getLoyaltyPoints(
        LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
        LEFT JOIN customers c ON c.line_user_id = f.line_user_id
        WHERE ${where}
-       ORDER BY COALESCE(lp.balance, 0) DESC, COALESCE(c.display_name, f.display_name) ASC
+       ORDER BY COALESCE(lp.balance, 0) + COALESCE(lp.limited_balance, 0) DESC, COALESCE(c.display_name, f.display_name) ASC
        LIMIT ? OFFSET ?`,
     )
     .bind(...bindings, limit, offset)
@@ -381,15 +385,24 @@ export async function getLoyaltyPoints(
 export async function upsertLoyaltyPoint(
   db: D1Database,
   friendId: string,
-  updates: { balance: number; totalSpent: number; rank: LoyaltyRank; shopifyCustomerId?: string },
+  updates: {
+    balance: number;
+    limitedBalance?: number;
+    limitedExpiresAt?: string | null;
+    totalSpent: number;
+    rank: LoyaltyRank;
+    shopifyCustomerId?: string;
+  },
 ): Promise<void> {
   const now = jstNow();
   await db
     .prepare(
-      `INSERT INTO loyalty_points (id, friend_id, balance, total_spent, rank, shopify_customer_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO loyalty_points (id, friend_id, balance, limited_balance, limited_expires_at, total_spent, rank, shopify_customer_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (friend_id) DO UPDATE SET
          balance = excluded.balance,
+         limited_balance = excluded.limited_balance,
+         limited_expires_at = COALESCE(excluded.limited_expires_at, loyalty_points.limited_expires_at),
          total_spent = excluded.total_spent,
          rank = excluded.rank,
          shopify_customer_id = COALESCE(excluded.shopify_customer_id, loyalty_points.shopify_customer_id),
@@ -399,6 +412,8 @@ export async function upsertLoyaltyPoint(
       crypto.randomUUID(),
       friendId,
       updates.balance,
+      updates.limitedBalance ?? 0,
+      updates.limitedExpiresAt ?? null,
       updates.totalSpent,
       updates.rank,
       updates.shopifyCustomerId ?? null,

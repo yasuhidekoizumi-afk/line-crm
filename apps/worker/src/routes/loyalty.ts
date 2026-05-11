@@ -514,12 +514,32 @@ loyalty.post('/api/loyalty/award', async (c) => {
       activeCampaigns,
     );
 
-    const newBalance = currentBalance + earnedPoints;
+    // 通常ポイントと期間限定ポイントを分割
+    // 基本1倍分（×ランク倍率）→ balance（通常）
+    // キャンペーン上乗せ分 → limited_balance（期間限定）
+    const hasCampaignBonus = appliedCampaigns.length > 0 && earnedPoints > basePoints;
+    const regularPoints = hasCampaignBonus ? basePoints : earnedPoints;
+    const limitedPoints = hasCampaignBonus ? earnedPoints - basePoints : 0;
+
+    const newBalance = currentBalance + regularPoints;
+    const newLimitedBalance = (current?.limited_balance ?? 0) + limitedPoints;
+
+    // 期間限定ポイントの期限
+    const effectiveExpiryDays = campaignExpiryDays ?? expiryDays;
+    let limitedExpiresAt: string | null = null;
+    if (limitedPoints > 0) {
+      const expiry = new Date();
+      expiry.setDate(expiry.getDate() + effectiveExpiryDays);
+      limitedExpiresAt = expiry.toISOString();
+    }
+
     const newRank = determineRank(newTotalSpent);
     const effectiveCustomerId = body.shopifyCustomerId ?? current?.shopify_customer_id ?? undefined;
 
     await upsertLoyaltyPoint(c.env.DB, body.friendId, {
       balance: newBalance,
+      limitedBalance: newLimitedBalance,
+      limitedExpiresAt,
       totalSpent: newTotalSpent,
       rank: newRank,
       shopifyCustomerId: effectiveCustomerId,
@@ -532,7 +552,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
       balanceAfter: newBalance,
       reason: `購入ポイント付与（¥${body.orderAmount.toLocaleString('ja-JP')}）${appliedCampaigns.length > 0 ? `【${appliedCampaigns.join(', ')}】` : ''}`,
       orderId: body.orderId,
-      expiryDays: campaignExpiryDays ?? expiryDays,
+      expiryDays: effectiveExpiryDays,
     });
 
     // Shopify メタフィールド保存（非同期・失敗しても付与には影響させない）
@@ -559,7 +579,11 @@ loyalty.post('/api/loyalty/award', async (c) => {
       success: true,
       data: {
         earnedPoints,
+        regularPoints,
+        limitedPoints,
+        limitedExpiresAt,
         balance: newBalance,
+        limitedBalance: newLimitedBalance,
         rank: newRank,
         rankChanged: newRank !== currentRank,
         previousRank: currentRank,
@@ -699,6 +723,10 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
       success: true,
       data: {
         balance: point.balance,
+        paid_balance: 0,
+        bonus_balance: point.balance,
+        limited_balance: point.limited_balance ?? 0,
+        limited_expires_at: point.limited_expires_at,
         rank: point.rank,
         total_spent: point.total_spent,
         pending_code: pendingCode,
@@ -742,8 +770,12 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
     }
 
     const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
-    if (!point || point.balance < body.points) {
-      return c.json({ success: false, error: 'ポイント残高が不足しています' }, 400);
+    if (!point) {
+      return c.json({ success: false, error: 'ポイント残高がありません' }, 400);
+    }
+    const totalBalance = point.balance + (point.limited_balance ?? 0);
+    if (totalBalance < body.points) {
+      return c.json({ success: false, error: `ポイント残高が不足しています（現在 ${totalBalance}pt）` }, 400);
     }
 
     // 既存の未使用コードがあれば発行をブロック
@@ -850,11 +882,17 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
       return c.json({ success: false, error: `Shopify Discount Code 作成失敗: ${err}` }, 500);
     }
 
-    // 3) ポイント残高を減算
-    const newBalance = point.balance - body.points;
+    // 3) ポイント残高を減算（期間限定 → 通常の順で消費）
+    const limitedToUse = Math.min(point.limited_balance ?? 0, body.points);
+    const balanceToUse = body.points - limitedToUse;
+    const newBalance = point.balance - balanceToUse;
+    const newLimitedBalance = (point.limited_balance ?? 0) - limitedToUse;
     const newRank = determineRank(point.total_spent);
+
     await upsertLoyaltyPoint(c.env.DB, point.friend_id, {
       balance: newBalance,
+      limitedBalance: newLimitedBalance,
+      limitedExpiresAt: newLimitedBalance > 0 ? point.limited_expires_at : null,
       totalSpent: point.total_spent,
       rank: newRank,
       shopifyCustomerId,
@@ -875,6 +913,8 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
         discountAmount,
         pointsUsed: body.points,
         balanceAfter: newBalance,
+        limitedBalanceAfter: newLimitedBalance,
+        breakdown: { balance: balanceToUse, limited: limitedToUse },
       },
     });
   } catch (e) {
