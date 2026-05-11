@@ -79,6 +79,7 @@ export interface LoyaltyCampaignRow {
   status: CampaignStatus;
   starts_at: string | null;
   ends_at: string | null;
+  expiry_days: number | null;
   conditions: string; // JSON
   action_type: CampaignActionType;
   action_value: number;
@@ -132,6 +133,7 @@ export async function createCampaign(
     status?: CampaignStatus;
     starts_at?: string;
     ends_at?: string;
+    expiry_days?: number | null;
     conditions?: CampaignCondition[];
     action_type: CampaignActionType;
     action_value: number;
@@ -142,8 +144,8 @@ export async function createCampaign(
   await db
     .prepare(`
       INSERT INTO loyalty_campaigns
-        (id, name, description, status, starts_at, ends_at, conditions, action_type, action_value, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, name, description, status, starts_at, ends_at, expiry_days, conditions, action_type, action_value, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .bind(
       id,
@@ -152,6 +154,7 @@ export async function createCampaign(
       input.status ?? 'draft',
       input.starts_at ?? null,
       input.ends_at ?? null,
+      input.expiry_days ?? null,
       JSON.stringify(input.conditions ?? []),
       input.action_type,
       input.action_value,
@@ -171,6 +174,7 @@ export async function updateCampaign(
     status: CampaignStatus;
     starts_at: string | null;
     ends_at: string | null;
+    expiry_days: number | null;
     conditions: CampaignCondition[];
     action_type: CampaignActionType;
     action_value: number;
@@ -213,9 +217,11 @@ export function applyCampaigns(
     totalSpent?: number;
   },
   campaigns: LoyaltyCampaign[],
-): { finalPoints: number; appliedCampaigns: string[] } {
+): { finalPoints: number; appliedCampaigns: string[]; expiryDays: number | null } {
   let finalPoints = basePoints;
   const appliedCampaigns: string[] = [];
+  // 適用されたキャンペーンの中で最も長い expiry_days を採用
+  let maxExpiryDays: number | null = null;
 
   for (const campaign of campaigns) {
     // 条件チェック
@@ -250,6 +256,13 @@ export function applyCampaigns(
 
     appliedCampaigns.push(campaign.name);
 
+    // キャンペーンに expiry_days が設定されている場合、最大値を追跡
+    if (campaign.expiry_days != null) {
+      if (maxExpiryDays == null || campaign.expiry_days > maxExpiryDays) {
+        maxExpiryDays = campaign.expiry_days;
+      }
+    }
+
     switch (campaign.action_type) {
       case 'rate_multiply':
         finalPoints = Math.floor(finalPoints * campaign.action_value);
@@ -264,7 +277,7 @@ export function applyCampaigns(
     }
   }
 
-  return { finalPoints, appliedCampaigns };
+  return { finalPoints, appliedCampaigns, expiryDays: maxExpiryDays };
 }
 
 // --- 設定ヘルパー ---

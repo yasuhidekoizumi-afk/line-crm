@@ -23,6 +23,7 @@ interface Campaign {
   status: CampaignStatus
   starts_at: string | null
   ends_at: string | null
+  expiry_days: number | null
   conditions: Condition[]
   action_type: ActionType
   action_value: number
@@ -59,6 +60,7 @@ const EMPTY_FORM = {
   status: 'draft' as CampaignStatus,
   starts_at: '',
   ends_at: '',
+  expiry_days: '',
   conditions: [] as Condition[],
   action_type: 'rate_multiply' as ActionType,
   action_value: 2,
@@ -111,6 +113,7 @@ function CampaignModal({
     status: initial.status,
     starts_at: initial.starts_at?.slice(0, 16) ?? '',
     ends_at:   initial.ends_at?.slice(0, 16) ?? '',
+    expiry_days: initial.expiry_days?.toString() ?? '',
     conditions: initial.conditions,
     action_type: initial.action_type,
     action_value: initial.action_value,
@@ -138,6 +141,7 @@ function CampaignModal({
         starts_at: form.starts_at ? new Date(form.starts_at).toISOString() : null,
         ends_at:   form.ends_at   ? new Date(form.ends_at).toISOString()   : null,
         description: form.description || null,
+        expiry_days: form.expiry_days ? parseInt(form.expiry_days, 10) : null,
       }
       const res = initial
         ? await fetchApi<{ success: boolean; error?: string }>(`/api/loyalty/campaigns/${initial.id}`, { method: 'PUT', body: JSON.stringify(payload) })
@@ -219,7 +223,7 @@ function CampaignModal({
             )}
           </div>
 
-          {/* アクション */}
+          {/* ポイントアクション */}
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">ポイントアクション</label>
             <select value={form.action_type} onChange={(e) => setForm((f) => ({ ...f, action_type: e.target.value as ActionType }))}
@@ -236,6 +240,18 @@ function CampaignModal({
                 → {ACTION_FORMAT[form.action_type](form.action_value)}
               </span>
             </div>
+          </div>
+
+          {/* 期間限定ポイントの期限 */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              期間限定ポイントの期限（日数）<span className="text-gray-400 font-normal">（空欄=グローバル設定）</span>
+            </label>
+            <input type="number" min="0" value={form.expiry_days}
+              onChange={(e) => setForm((f) => ({ ...f, expiry_days: e.target.value }))}
+              className="w-32 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              placeholder="例: 60" />
+            <p className="text-xs text-gray-400 mt-1">このキャンペーンで付与したポイントの有効期限（日数）。空欄の場合は基本設定の「365日」が適用されます。</p>
           </div>
 
           {error && <p className="text-xs text-red-600">{error}</p>}
@@ -337,6 +353,9 @@ export default function CampaignsTab() {
                   {c.description && <p className="text-xs text-gray-500 mb-1">{c.description}</p>}
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                     <span>アクション: <strong className="text-gray-700">{ACTION_FORMAT[c.action_type](c.action_value)}</strong></span>
+                    {c.expiry_days != null && (
+                      <span>ポイント期限: <strong className="text-gray-700">{c.expiry_days}日</strong></span>
+                    )}
                     {c.conditions.length > 0 && (
                       <span>条件: {c.conditions.map((cd) => `${COND_TYPE_LABELS[cd.type]}="${cd.value}"`).join(' & ')}</span>
                     )}

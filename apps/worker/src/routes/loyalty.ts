@@ -106,6 +106,7 @@ loyalty.post('/api/loyalty/campaigns', async (c) => {
       status?: CampaignStatus;
       starts_at?: string;
       ends_at?: string;
+      expiry_days?: number | null;
       conditions?: CampaignCondition[];
       action_type: CampaignActionType;
       action_value: number;
@@ -498,7 +499,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
 
     // キャンペーン適用
     const activeCampaigns = await getActiveCampaigns(c.env.DB).catch(() => []);
-    const { finalPoints: earnedPoints, appliedCampaigns } = applyCampaigns(
+    const { finalPoints: earnedPoints, appliedCampaigns, expiryDays: campaignExpiryDays } = applyCampaigns(
       basePoints,
       body.orderAmount,
       {
@@ -529,9 +530,9 @@ loyalty.post('/api/loyalty/award', async (c) => {
       type: 'award',
       points: earnedPoints,
       balanceAfter: newBalance,
-      reason: `購入ポイント付与（¥${body.orderAmount.toLocaleString('ja-JP')}）`,
+      reason: `購入ポイント付与（¥${body.orderAmount.toLocaleString('ja-JP')}）${appliedCampaigns.length > 0 ? `【${appliedCampaigns.join(', ')}】` : ''}`,
       orderId: body.orderId,
-      expiryDays,
+      expiryDays: campaignExpiryDays ?? expiryDays,
     });
 
     // Shopify メタフィールド保存（非同期・失敗しても付与には影響させない）
@@ -920,29 +921,30 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     const { price_rules } = (await searchRes.json()) as { price_rules: { id: number; title: string }[] };
     const rule = price_rules.find((r) => r.title === `ポイント割引 ${code}`);
     if (!rule) {
-      return c.json({ success: false, error: 'コードが見つかりません（すでに削除済みの可能性があります）' }, 404);
-    }
+      // Price Rule が既に削除済みの場合も DB 上の取り消しは続行
+      // （コードが見つからなければ Shopify 側はクリーンな状態）
+    } else {
+      // Discount Code の使用状況を確認
+      const dcRes = await fetch(
+        `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}/discount_codes.json`,
+        { headers: { 'X-Shopify-Access-Token': adminToken } },
+      );
+      if (!dcRes.ok) {
+        return c.json({ success: false, error: 'コード状況の確認に失敗しました' }, 500);
+      }
+      const { discount_codes } = (await dcRes.json()) as { discount_codes: { usage_count: number }[] };
+      if (discount_codes[0]?.usage_count > 0) {
+        return c.json({ success: false, error: 'このコードはすでに使用済みのためキャンセルできません' }, 400);
+      }
 
-    // Discount Code の使用状況を確認
-    const dcRes = await fetch(
-      `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}/discount_codes.json`,
-      { headers: { 'X-Shopify-Access-Token': adminToken } },
-    );
-    if (!dcRes.ok) {
-      return c.json({ success: false, error: 'コード状況の確認に失敗しました' }, 500);
-    }
-    const { discount_codes } = (await dcRes.json()) as { discount_codes: { usage_count: number }[] };
-    if (discount_codes[0]?.usage_count > 0) {
-      return c.json({ success: false, error: 'このコードはすでに使用済みのためキャンセルできません' }, 400);
-    }
-
-    // Price Rule（＝割引コード）を削除
-    const delRes = await fetch(
-      `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}.json`,
-      { method: 'DELETE', headers: { 'X-Shopify-Access-Token': adminToken } },
-    );
-    if (!delRes.ok && delRes.status !== 404) {
-      return c.json({ success: false, error: 'コードの削除に失敗しました' }, 500);
+      // Price Rule（＝割引コード）を削除
+      const delRes = await fetch(
+        `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}.json`,
+        { method: 'DELETE', headers: { 'X-Shopify-Access-Token': adminToken } },
+      );
+      if (!delRes.ok && delRes.status !== 404) {
+        return c.json({ success: false, error: 'コードの削除に失敗しました' }, 500);
+      }
     }
 
     // 元のポイント数を reason から逆算
@@ -950,7 +952,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
       .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? ORDER BY created_at DESC LIMIT 1`)
       .bind(point.friend_id, `%コード: ${code}%`)
       .first<{ reason: string }>();
-    const m = latestRedeem?.reason?.match(/¥(\\d+)割引/);
+    const m = latestRedeem?.reason?.match(/¥(\d+)割引/);
     const refundPoints = m ? parseInt(m[1], 10) : 0;
 
     if (refundPoints <= 0) {
