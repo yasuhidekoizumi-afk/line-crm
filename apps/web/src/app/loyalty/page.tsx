@@ -71,6 +71,14 @@ const TX_TYPE_META: Record<string, { label: string; color: string; bg: string }>
 
 const RANKS: LoyaltyRank[] = ['レギュラー', 'シルバー', 'ゴールド', 'プラチナ', 'ダイヤモンド']
 
+const RANKS_INFO: { rank: LoyaltyRank; minSpent: number; multiplier: number; color: string; description: string }[] = [
+  { rank: 'ダイヤモンド', minSpent: 300_000, multiplier: 5.0, color: 'bg-blue-100 text-blue-800',  description: '年間購入額 ¥300,000 以上のVIP会員。5倍のポイントが貯まります。' },
+  { rank: 'プラチナ',     minSpent: 100_000, multiplier: 3.0, color: 'bg-purple-100 text-purple-800', description: '年間購入額 ¥100,000 以上の上顧客。3倍のポイントが貯まります。' },
+  { rank: 'ゴールド',     minSpent:  30_000, multiplier: 2.0, color: 'bg-yellow-100 text-yellow-800', description: '年間購入額 ¥30,000 以上の中核顧客。2倍のポイントが貯まります。' },
+  { rank: 'シルバー',     minSpent:  10_000, multiplier: 1.5, color: 'bg-slate-100 text-slate-700',   description: '年間購入額 ¥10,000 以上のリピーター。1.5倍のポイントが貯まります。' },
+  { rank: 'レギュラー',   minSpent:       0, multiplier: 1.0, color: 'bg-gray-100 text-gray-700',     description: 'すべての会員に適用されるベーシックランク。' },
+]
+
 const PERIOD_LABELS: Record<string, string> = {
   this_month: '今月',
   last_month: '先月',
@@ -744,7 +752,65 @@ function SettingsPanel() {
   )
 }
 
-type TabType = 'members' | 'activity' | 'campaigns' | 'rewards' | 'settings'
+// ─── ランク説明タブ ───
+function RanksTab() {
+  return (
+    <div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {RANKS_INFO.map((r) => {
+          const nextRank = RANKS_INFO.find(
+            (x) => x.minSpent > r.minSpent && r.rank !== 'ダイヤモンド',
+          )
+          return (
+            <div key={r.rank} className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`inline-block px-2.5 py-0.5 rounded text-sm font-bold ${r.color}`}>
+                  {r.rank}
+                </span>
+                {r.multiplier > 1 && (
+                  <span className="text-xs font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded">
+                    ×{r.multiplier}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">条件（累計購入額）</span>
+                  <span className="font-bold text-gray-900">
+                    {r.minSpent > 0 ? `¥${r.minSpent.toLocaleString('ja-JP')}〜` : '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500">ポイント倍率</span>
+                  <span className="font-bold text-gray-900">{r.multiplier.toFixed(1)}x</span>
+                </div>
+                {nextRank && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-500">次のランク</span>
+                    <span className="font-semibold text-gray-900">
+                      ¥{nextRank.minSpent.toLocaleString('ja-JP')}〜
+                    </span>
+                  </div>
+                )}
+                {r.rank === 'ダイヤモンド' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-500">次のランク</span>
+                    <span className="text-gray-400">—（最上位）</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">
+                {r.description}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+type TabType = 'members' | 'activity' | 'campaigns' | 'rewards' | 'settings' | 'ranks'
 
 export default function LoyaltyPage() {
   const [stats, setStats] = useState<Stats | null>(null)
@@ -834,6 +900,7 @@ export default function LoyaltyPage() {
           { key: 'activity',  label: '取引履歴' },
           { key: 'campaigns', label: 'キャンペーン' },
           { key: 'rewards',   label: '交換アイテム' },
+          { key: 'ranks',     label: 'ランク説明' },
           { key: 'settings',  label: '基本設定' },
         ] as { key: TabType; label: string }[]).map(({ key, label }) => (
           <button key={key} onClick={() => setTab(key)}
@@ -852,6 +919,7 @@ export default function LoyaltyPage() {
       {tab === 'activity'  && <ActivityTab />}
       {tab === 'campaigns' && <CampaignsTab />}
       {tab === 'rewards'   && <RewardsTab />}
+      {tab === 'ranks'     && <RanksTab />}
       {tab === 'settings'  && <SettingsPanel />}
 
       {/* 詳細モーダル */}

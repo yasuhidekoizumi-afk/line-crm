@@ -22,6 +22,8 @@ import {
   addLoyaltyTransaction,
   determineRank,
   calculatePoints,
+  RANK_THRESHOLDS,
+  RANK_MULTIPLIERS,
   type LoyaltyRank,
   type CampaignCondition,
   type CampaignActionType,
@@ -689,9 +691,21 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
       c.req.param('shopifyCustomerId'),
     );
     if (!point) {
+      const rank_definitions = RANK_THRESHOLDS.map((r) => ({
+        rank: r.rank,
+        min_spent: r.minSpent,
+        multiplier: RANK_MULTIPLIERS[r.rank],
+      }));
       return c.json({
         success: true,
-        data: { balance: 0, rank: 'レギュラー', total_spent: 0, pending_code: null },
+        data: {
+          balance: 0,
+          rank: 'レギュラー',
+          total_spent: 0,
+          pending_code: null,
+          rank_definitions,
+          next_rank: { rank: 'シルバー', min_spent: 10_000, remaining: 10_000 },
+        },
       });
     }
 
@@ -719,6 +733,22 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
       expiringSoon = await getExpiringSoonPoints(c.env.DB, point.friend_id);
     } catch (_) {}
 
+    // ランク定義（顧客向け表示用）
+    const rank_definitions = RANK_THRESHOLDS.map((r) => ({
+      rank: r.rank,
+      min_spent: r.minSpent,
+      multiplier: RANK_MULTIPLIERS[r.rank],
+    }));
+
+    // 次のランク情報
+    let next_rank: { rank: string; min_spent: number; remaining: number } | null = null;
+    for (const r of RANK_THRESHOLDS) {
+      if (r.minSpent > point.total_spent) {
+        next_rank = { rank: r.rank, min_spent: r.minSpent, remaining: r.minSpent - point.total_spent };
+        break;
+      }
+    }
+
     return c.json({
       success: true,
       data: {
@@ -733,6 +763,8 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
         pending_discount: pendingDiscount,
         pending_points: pendingPoints,
         expiring_soon: expiringSoon,
+        rank_definitions,
+        next_rank,
       },
     });
   } catch (e) {

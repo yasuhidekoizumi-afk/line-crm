@@ -31,7 +31,7 @@ export interface LoyaltyTransactionRow {
 }
 
 // ランク閾値（累計購入額 円）
-const RANK_THRESHOLDS: { rank: LoyaltyRank; minSpent: number }[] = [
+export const RANK_THRESHOLDS: { rank: LoyaltyRank; minSpent: number }[] = [
   { rank: 'ダイヤモンド', minSpent: 300_000 },
   { rank: 'プラチナ',     minSpent: 100_000 },
   { rank: 'ゴールド',     minSpent:  30_000 },
@@ -47,7 +47,7 @@ export function determineRank(totalSpent: number): LoyaltyRank {
 }
 
 // ポイント倍率
-const RANK_MULTIPLIERS: Record<LoyaltyRank, number> = {
+export const RANK_MULTIPLIERS: Record<LoyaltyRank, number> = {
   'レギュラー':   1.0,
   'シルバー':     1.5,
   'ゴールド':     2.0,
