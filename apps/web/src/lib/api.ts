@@ -38,6 +38,15 @@ if (!API_URL) {
   )
 }
 
+const LOCAL_STORAGE_AUTH_KEYS = ['lh_api_key', 'lh_staff_name', 'lh_staff_role', 'lh_role_mode', 'lh_onboarding_completed']
+
+function logout() {
+  if (typeof window === 'undefined') return
+  LOCAL_STORAGE_AUTH_KEYS.forEach(k => localStorage.removeItem(k))
+  const base = window.location.pathname.startsWith('/line-crm') ? '/line-crm' : ''
+  window.location.replace(`${base}/login`)
+}
+
 /**
  * Read the API key from localStorage (set during login).
  * Never embed secrets in the client bundle via NEXT_PUBLIC_* env vars.
@@ -58,6 +67,10 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
       ...options?.headers,
     },
   })
+  if (res.status === 401) {
+    logout()
+    throw new Error('Unauthorized')
+  }
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return res.json() as Promise<T>
 }
@@ -71,6 +84,7 @@ export async function fetchApiObjectUrl(path: string): Promise<string> {
   const res = await fetch(`${API_URL}${path}`, {
     headers: { Authorization: `Bearer ${getApiKey()}` },
   })
+  if (res.status === 401) { logout(); throw new Error('Unauthorized') }
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   const blob = await res.blob()
   return URL.createObjectURL(blob)
@@ -86,6 +100,7 @@ export async function fetchApiBase64(
   const res = await fetch(`${API_URL}${path}`, {
     headers: { Authorization: `Bearer ${getApiKey()}` },
   })
+  if (res.status === 401) { logout(); throw new Error('Unauthorized') }
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   const blob = await res.blob()
   const contentType: 'image/png' | 'image/jpeg' =
