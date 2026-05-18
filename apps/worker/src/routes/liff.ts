@@ -982,6 +982,30 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
     // 保留注文バックフィル
     const backfill = await backfillPendingOrders(c.env.DB, friend.id, shopifyCustomerId);
 
+    // LINEプッシュ通知（連携完了＋ポイント付与、ノンブロッキング）
+    try {
+      const totalAwarded = bonusAwarded + promoPointsAwarded + backfill.totalPointsAwarded;
+      if (totalAwarded > 0) {
+        const { LineClient } = await import('@line-crm/line-sdk');
+        const accountRow = await c.env.DB
+          .prepare('SELECT channel_access_token FROM line_accounts WHERE is_active = 1 LIMIT 1')
+          .first<{ channel_access_token: string }>();
+        const accessToken = accountRow?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
+        if (accessToken && lineUserId) {
+          const after = await getLoyaltyPoint(c.env.DB, friend.id);
+          const lineClient = new LineClient(accessToken);
+          const lines: string[] = ['🎉 ポイントを受け取りました！', ''];
+          if (bonusAwarded > 0) lines.push(`連携ボーナス：+${bonusAwarded}pt`);
+          if (promoPointsAwarded > 0) lines.push(`カードボーナス：+${promoPointsAwarded}pt`);
+          if (backfill.totalPointsAwarded > 0) lines.push(`過去購入ボーナス：+${backfill.totalPointsAwarded}pt`);
+          lines.push('', `現在の残高：${after?.balance ?? 0}pt`, '', 'ポイントは次回のお買い物でご利用いただけます。');
+          await lineClient.pushMessage(lineUserId, [{ type: 'text', text: lines.join('\n') }]);
+        }
+      }
+    } catch (err) {
+      console.error('link-shopify LINE notification error (non-blocking):', err);
+    }
+
     return c.json({
       success: true,
       data: {
@@ -1062,6 +1086,24 @@ liffRoutes.post('/api/liff/promo-grant', async (c) => {
       reason: promo.reason,
       expiresAt,
     });
+
+    // LINEプッシュ通知（ノンブロッキング）
+    try {
+      const { LineClient } = await import('@line-crm/line-sdk');
+      const accountRow = await c.env.DB
+        .prepare('SELECT channel_access_token FROM line_accounts WHERE is_active = 1 LIMIT 1')
+        .first<{ channel_access_token: string }>();
+      const accessToken = accountRow?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
+      if (accessToken) {
+        const lineClient = new LineClient(accessToken);
+        await lineClient.pushMessage(body.lineUserId, [{
+          type: 'text',
+          text: `🎁 ポイントを受け取りました！\n\n${promo.reason.includes('CARD') ? 'カードボーナス' : 'ボーナス'}：+${promo.points}pt\n現在の残高：${newBalance}pt\n\nポイントは次回のお買い物でご利用いただけます。`,
+        }]);
+      }
+    } catch (err) {
+      console.error('promo-grant LINE notification error (non-blocking):', err);
+    }
 
     return c.json({ success: true, data: { pointsAwarded: promo.points, newBalance } });
   } catch (err) {
