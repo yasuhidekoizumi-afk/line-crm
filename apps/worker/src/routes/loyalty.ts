@@ -413,6 +413,7 @@ loyalty.post('/api/loyalty/:friendId/adjust', async (c) => {
 
     await upsertLoyaltyPoint(c.env.DB, friendId, {
       balance: newBalance,
+      limitedBalance: current.limited_balance ?? 0,
       totalSpent: currentTotalSpent,
       rank: newRank,
       shopifyCustomerId: current?.shopify_customer_id ?? undefined,
@@ -442,7 +443,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
       orderAmount: number;
       orderId?: string;
       shopifyCustomerId?: string;
-      currency?: string;          // 通貨コード（例: \"JPY\", \"USD\"）
+      currency?: string;          // 通貨コード（例: "JPY", "USD"）
       isSubscription?: boolean;   // サブスクリプション注文フラグ
       customerTags?: string[];
       productTags?: string[];
@@ -450,6 +451,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
       productTypes?: string[];
       collectionIds?: string[];
       orderCount?: number;
+      sendLineNotification?: boolean; // falseでLINE通知を抑制（管理画面操作など）
     }>();
 
     if (!body.friendId || typeof body.orderAmount !== 'number' || body.orderAmount <= 0) {
@@ -577,6 +579,59 @@ loyalty.post('/api/loyalty/award', async (c) => {
       }
     }
 
+    // LINE通知を非同期で送信
+    const lineToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (lineToken && body.sendLineNotification !== false) {
+      c.executionCtx?.waitUntil(
+        (async () => {
+          try {
+            // 友だちのLINEユーザーIDを取得
+            const friendRow = await c.env.DB
+              .prepare('SELECT line_user_id, display_name FROM friends WHERE id = ?')
+              .bind(body.friendId)
+              .first<{ line_user_id: string; display_name: string }>();
+            if (!friendRow?.line_user_id?.startsWith('U')) return; // 実LINEユーザーのみ
+
+            // メッセージテキストを構築
+            let msg = `🌟 ORYZAEポイントを獲得しました
+
+`;
+            msg += `💰 獲得ポイント: ${earnedPoints}pt
+`;
+            if (regularPoints > 0) msg += `・通常ポイント: ${regularPoints}pt
+`;
+            if (limitedPoints > 0) {
+              const d = new Date(limitedExpiresAt!);
+              msg += `・期間限定ポイント: ${limitedPoints}pt（${d.getMonth()+1}/${d.getDate()}まで）
+`;
+            }
+            msg += `
+📊 現在の残高: ${newBalance}pt`;
+            if (newLimitedBalance > 0) msg += `（＋期間限定${newLimitedBalance}pt）`;
+            msg += `
+🏅 ランク: ${newRank}`;
+            if (newRank !== currentRank) msg += `（${currentRank}からアップ！）`;
+            if (appliedCampaigns.length > 0) msg += `
+🎁 キャンペーン: ${appliedCampaigns.join('・')}`;
+
+            await fetch('https://api.line.me/v2/bot/message/push', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${lineToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                to: friendRow.line_user_id,
+                messages: [{ type: 'text', text: msg }],
+              }),
+            });
+          } catch (_e) {
+            // LINE通知の失敗はポイント付与に影響させない
+          }
+        })()
+      );
+    }
+
     return c.json({
       success: true,
       data: {
@@ -635,12 +690,18 @@ loyalty.post('/api/loyalty/order-cancelled', async (c) => {
     }
 
     const refundPoints = awardTx.points; // 付与したポイント数（正の値）
-    const newBalance = Math.max(0, current.balance - refundPoints);
+    // キャンセル: limited_balance → balance の順で減算（redeemの逆順）
+    const limitedRefund = Math.min(current.limited_balance ?? 0, refundPoints);
+    const balanceRefund = refundPoints - limitedRefund;
+    const newBalance = Math.max(0, current.balance - balanceRefund);
+    const newLimitedBalance = Math.max(0, (current.limited_balance ?? 0) - limitedRefund);
     const newRank = determineRank(current.total_spent);
     const effectiveCustomerId = body.shopifyCustomerId ?? current.shopify_customer_id ?? undefined;
 
     await upsertLoyaltyPoint(c.env.DB, awardTx.friend_id, {
       balance: newBalance,
+      limitedBalance: newLimitedBalance,
+      limitedExpiresAt: newLimitedBalance > 0 ? current.limited_expires_at : null,
       totalSpent: current.total_spent,
       rank: newRank,
       shopifyCustomerId: effectiveCustomerId,
@@ -700,6 +761,10 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
         success: true,
         data: {
           balance: 0,
+          paid_balance: 0,
+          bonus_balance: 0,
+          limited_balance: 0,
+          limited_expires_at: null,
           rank: 'レギュラー',
           total_spent: 0,
           pending_code: null,
@@ -1036,6 +1101,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     const newRank = determineRank(point.total_spent);
     await upsertLoyaltyPoint(c.env.DB, point.friend_id, {
       balance: newBalance,
+      limitedBalance: point.limited_balance ?? 0,
       totalSpent: point.total_spent,
       rank: newRank,
       shopifyCustomerId,
@@ -1087,6 +1153,7 @@ loyalty.post('/api/loyalty/link-shopify', async (c) => {
     const current = await getLoyaltyPoint(c.env.DB, body.friendId);
     await upsertLoyaltyPoint(c.env.DB, body.friendId, {
       balance: current?.balance ?? 0,
+      limitedBalance: current?.limited_balance ?? 0,
       totalSpent: current?.total_spent ?? 0,
       rank: current?.rank ?? 'レギュラー',
       shopifyCustomerId: body.shopifyCustomerId,
@@ -1109,6 +1176,7 @@ loyalty.post('/api/loyalty/link-shopify', async (c) => {
         const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
         await upsertLoyaltyPoint(c.env.DB, body.friendId, {
           balance: newBalance,
+          limitedBalance: beforeBonus?.limited_balance ?? 0,
           totalSpent: beforeBonus?.total_spent ?? 0,
           rank: beforeBonus?.rank ?? 'レギュラー',
           shopifyCustomerId: body.shopifyCustomerId,
@@ -1179,6 +1247,7 @@ loyalty.post('/api/loyalty/admin/link-by-name', async (c) => {
     const current = await getLoyaltyPoint(c.env.DB, friend.id);
     await upsertLoyaltyPoint(c.env.DB, friend.id, {
       balance: current?.balance ?? 0,
+      limitedBalance: current?.limited_balance ?? 0,
       totalSpent: current?.total_spent ?? 0,
       rank: current?.rank ?? 'レギュラー',
       shopifyCustomerId: body.shopifyCustomerId,

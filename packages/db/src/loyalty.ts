@@ -402,7 +402,7 @@ export async function upsertLoyaltyPoint(
        ON CONFLICT (friend_id) DO UPDATE SET
          balance = excluded.balance,
          limited_balance = excluded.limited_balance,
-         limited_expires_at = COALESCE(excluded.limited_expires_at, loyalty_points.limited_expires_at),
+         limited_expires_at = excluded.limited_expires_at,
          total_spent = excluded.total_spent,
          rank = excluded.rank,
          shopify_customer_id = COALESCE(excluded.shopify_customer_id, loyalty_points.shopify_customer_id),

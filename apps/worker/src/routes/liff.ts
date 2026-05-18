@@ -741,6 +741,7 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       shopifyCustomerId: string;
       expires?: string;
       sig?: string;
+      promoCode?: string;
     }>();
     if (!body.shopifyCustomerId) {
       return c.json({ success: false, error: 'shopifyCustomerId は必須です' }, 400);
@@ -945,6 +946,39 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       }
     }
 
+    // プロモコードボーナス（link-shopify完了時に同時付与）
+    let promoPointsAwarded = 0;
+    if (body.promoCode) {
+      const promoCodes: Record<string, { points: number; reason: string }> = {
+        CARD88: { points: 88, reason: '同梱カードボーナス CARD88' },
+      };
+      const promo = promoCodes[body.promoCode.trim().toUpperCase()];
+      if (promo) {
+        const alreadyPromo = await c.env.DB
+          .prepare(`SELECT id FROM loyalty_transactions WHERE friend_id = ? AND reason = ? LIMIT 1`)
+          .bind(friend.id, promo.reason)
+          .first();
+        if (!alreadyPromo) {
+          const afterBonus = await getLoyaltyPoint(c.env.DB, friend.id);
+          const promoBalance = (afterBonus?.balance ?? 0) + promo.points;
+          await upsertLoyaltyPoint(c.env.DB, friend.id, {
+            balance: promoBalance,
+            totalSpent: afterBonus?.total_spent ?? 0,
+            rank: afterBonus?.rank ?? 'レギュラー',
+            shopifyCustomerId,
+          });
+          await addLoyaltyTransaction(c.env.DB, {
+            friendId: friend.id,
+            type: 'adjust',
+            points: promo.points,
+            balanceAfter: promoBalance,
+            reason: promo.reason,
+          });
+          promoPointsAwarded = promo.points;
+        }
+      }
+    }
+
     // 保留注文バックフィル
     const backfill = await backfillPendingOrders(c.env.DB, friend.id, shopifyCustomerId);
 
@@ -952,12 +986,86 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       success: true,
       data: {
         bonusAwarded,
+        promoPointsAwarded,
         backfilledOrders: backfill.processed,
         backfilledPoints: backfill.totalPointsAwarded,
       },
     });
   } catch (err) {
     console.error('POST /api/liff/link-shopify error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/liff/promo-grant — プロモコードによるポイント付与（紐付け済みユーザー向け）
+liffRoutes.post('/api/liff/promo-grant', async (c) => {
+  try {
+    const body = await c.req.json<{ lineUserId: string; promoCode: string }>();
+    if (!body.lineUserId || !body.promoCode) {
+      return c.json({ success: false, error: 'lineUserId と promoCode は必須です' }, 400);
+    }
+
+    const code = body.promoCode.trim().toUpperCase();
+    const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+    if (!friend) {
+      return c.json({ success: false, error: 'LINEアカウントが見つかりません' }, 404);
+    }
+
+    const {
+      getLoyaltyPoint,
+      upsertLoyaltyPoint,
+      addLoyaltyTransaction,
+      getLoyaltySetting,
+    } = await import('@line-crm/db');
+
+    // Shopify紐付け確認
+    const loyaltyPoint = await getLoyaltyPoint(c.env.DB, friend.id);
+    if (!loyaltyPoint?.shopify_customer_id) {
+      return c.json({ success: false, error: 'not_linked', message: 'Shopify連携が完了していません' }, 400);
+    }
+
+    // プロモコード設定を取得（コード・ポイント数）
+    const promoCodes: Record<string, { points: number; reason: string }> = {
+      CARD88: { points: 88, reason: '同梱カードボーナス CARD88' },
+    };
+    const promo = promoCodes[code];
+    if (!promo) {
+      return c.json({ success: false, error: 'invalid_code', message: '無効なプロモコードです' }, 400);
+    }
+
+    // 重複チェック（1人1回）
+    const already = await c.env.DB
+      .prepare(`SELECT id FROM loyalty_transactions WHERE friend_id = ? AND reason = ? LIMIT 1`)
+      .bind(friend.id, promo.reason)
+      .first();
+    if (already) {
+      return c.json({ success: false, error: 'already_used', message: 'このコードは既に使用済みです' }, 400);
+    }
+
+    // ポイント付与
+    const expiryDaysSetting = await getLoyaltySetting(c.env.DB, 'expiry_days').catch(() => null);
+    const expiryDays = parseInt(expiryDaysSetting ?? '365', 10) || 365;
+    const expiresAt = new Date(Date.now() + expiryDays * 86400000).toISOString().slice(0, 10);
+
+    const newBalance = (loyaltyPoint.balance ?? 0) + promo.points;
+    await upsertLoyaltyPoint(c.env.DB, friend.id, {
+      balance: newBalance,
+      totalSpent: loyaltyPoint.total_spent ?? 0,
+      rank: loyaltyPoint.rank ?? 'レギュラー',
+      shopifyCustomerId: loyaltyPoint.shopify_customer_id,
+    });
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId: friend.id,
+      type: 'adjust',
+      points: promo.points,
+      balanceAfter: newBalance,
+      reason: promo.reason,
+      expiresAt,
+    });
+
+    return c.json({ success: true, data: { pointsAwarded: promo.points, newBalance } });
+  } catch (err) {
+    console.error('POST /api/liff/promo-grant error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
