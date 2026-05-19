@@ -75,26 +75,26 @@ git push
 
 ---
 
-### STEP 4：本番に反映する（デプロイ）
+### STEP 4：自動デプロイ（pushするだけでOK）
 
-#### 管理画面（見た目）を変えた場合
+`git push` したら、**あとは自動で本番反映されます。** ローカルで何かコマンドを実行する必要はありません。
 
-```bash
-cd ~/Desktop/line-crm
-pnpm deploy:web
-git add apps/web/out
-git commit -m "deploy: 管理画面を更新"
-git push
-```
+GitHub Actions が自動で以下のデプロイを実行します：
 
-#### APIの動作を変えた場合
+| 変更内容 | 自動で実行されるデプロイ |
+|---------|------------------------|
+| 管理画面（見た目）を変えた → `apps/web/` を変更 | GitHub Pages に自動デプロイ → https://line.oryzae.shop |
+| APIの動作を変えた → `apps/worker/` を変更 | Cloudflare Workers に自動デプロイ → https://oryzae-line-crm.oryzae.workers.dev |
 
-```bash
-cd ~/Desktop/line-crm/apps/worker
-pnpm deploy
-```
+**デプロイが完了したか確認したいときは：**
+1. GitHub のリポジトリページ（https://github.com/yasuhidekoizumi-afk/line-crm）を開く
+2. 上のタブから「Actions」をクリック
+3. 最新のワークフロー実行に ✓（緑色のチェック）が付いていれば成功
+4. ✕（赤色のバツ）が付いていたら、その行をクリックしてエラーメッセージを確認
 
-> どちらか迷ったら Claude Code に「これはどっちのデプロイが必要ですか？」と聞けば教えてくれます。
+> ⚠️ ローカルで `pnpm deploy:web` や `pnpm deploy` を実行しないでください。
+> これらのコマンドは認証情報（Cloudflare API Tokenなど）が必要で、あなたの環境では動きません。
+> ローカルでやるべきことは `git push` だけで完了です。
 
 ---
 
@@ -109,8 +109,14 @@ pnpm deploy
 git checkout .
 ```
 
-### Q. デプロイしたけど反映されていない
-→ バックエンド（API）の変更は `apps/worker` でデプロイ、管理画面の変更は `deploy:web` が必要です。Claude Code に確認してみてください。
+### Q. pushしたのに反映されていない
+→ GitHub Actions のデプロイが完了するまで数分かかることがあります。Actions タブで進行状況を確認してください。
+  - 管理画面: GitHub Pages への反映にはビルド＋デプロイで約2〜3分
+  - API: Cloudflare Workers への反映には約1〜2分
+
+### Q. Actions の実行が赤い✕になった
+→ その実行をクリックして、赤い✕が付いたステップを開くとエラーメッセージが表示されます。
+   エラーメッセージを小泉さんに共有してください。
 
 ### Q. エラーが出てわからない
 → エラーメッセージをそのまま Claude Code に貼り付けて「これどういう意味ですか？」と聞いてください。
@@ -121,9 +127,9 @@ git checkout .
 
 | 何 | URL |
 |---|---|
-| LINE Harness 管理画面 | https://yasuhidekoizumi-afk.github.io/line-crm/ |
-| Cloudflare（デプロイ状況確認） | https://dash.cloudflare.com |
+| LINE Harness 管理画面 | https://line.oryzae.shop |
 | GitHub（コード管理） | https://github.com/yasuhidekoizumi-afk/line-crm |
+| GitHub Actions（デプロイ状況） | https://github.com/yasuhidekoizumi-afk/line-crm/actions |
 
 ---
 
