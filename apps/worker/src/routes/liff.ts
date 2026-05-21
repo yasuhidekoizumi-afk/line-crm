@@ -11,6 +11,10 @@ import {
   getLineAccountByChannelId,
   getLineAccounts,
   jstNow,
+  getLoyaltyPoint,
+  upsertLoyaltyPoint,
+  addLoyaltyTransaction,
+  getLoyaltySetting,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
 
@@ -928,18 +932,23 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
         .first();
       if (!existingBonus) {
         const beforeBonus = await getLoyaltyPoint(c.env.DB, friend.id);
-        const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
+        const expiry = new Date();
+        expiry.setDate(expiry.getDate() + 60);
+        const newLimitedBalance = (beforeBonus?.limited_balance ?? 0) + bonusPoints;
         await upsertLoyaltyPoint(c.env.DB, friend.id, {
-          balance: newBalance,
+          balance: beforeBonus?.balance ?? 0,
+          limitedBalance: newLimitedBalance,
+          limitedExpiresAt: expiry.toISOString(),
           totalSpent: beforeBonus?.total_spent ?? 0,
           rank: beforeBonus?.rank ?? 'レギュラー',
           shopifyCustomerId,
         });
+        const totalAfter = (beforeBonus?.balance ?? 0) + newLimitedBalance;
         await addLoyaltyTransaction(c.env.DB, {
           friendId: friend.id,
           type: 'adjust',
           points: bonusPoints,
-          balanceAfter: newBalance,
+          balanceAfter: totalAfter,
           reason: 'LINE連携ボーナス',
         });
         bonusAwarded = bonusPoints;
@@ -1034,13 +1043,6 @@ liffRoutes.post('/api/liff/promo-grant', async (c) => {
     if (!friend) {
       return c.json({ success: false, error: 'LINEアカウントが見つかりません' }, 404);
     }
-
-    const {
-      getLoyaltyPoint,
-      upsertLoyaltyPoint,
-      addLoyaltyTransaction,
-      getLoyaltySetting,
-    } = await import('@line-crm/db');
 
     // Shopify紐付け確認
     const loyaltyPoint = await getLoyaltyPoint(c.env.DB, friend.id);
