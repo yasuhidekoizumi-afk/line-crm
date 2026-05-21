@@ -305,17 +305,19 @@ formPublicRoutes.post('/:formId/submit', async (c) => {
         }
       }
 
-      // 388ptキャンペーン: タグ検出時→ポイント付与API呼び出し
-      if (form.on_submit_tag === 'e8e9f6d1-f35c-418f-b39f-7a8765c082ec') {
-        const campaignEmail = body.email || (submissionData.email as string) || null;
-        if (campaignEmail) {
+    // 388ptキャンペーン: タグ検出時→ポイント付与API呼び出し
+    if (form.on_submit_tag === 'e8e9f6d1-f35c-418f-b39f-7a8765c082ec') {
+      const campaignEmail = body.email || (submissionData.email as string) || null;
+      if (campaignEmail) {
+        c.executionCtx.waitUntil(
           fetch('https://point-charge.oryzae.workers.dev/api/loyalty/campaign-award', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ campaign_key: '8th_anniversary_88pt', email: campaignEmail }),
-          }).catch(e => console.error('campaign award webhook failed:', e));
-        }
+          }).catch(e => console.error('campaign award webhook failed:', e))
+        );
       }
+    }
     }
 
     return c.json({
@@ -362,6 +364,17 @@ formPublicRoutes.post('/:formId/submit', async (c) => {
       user_agent: c.req.header('user-agent') ?? null,
       ip_hash: null,
     });
+
+    // 388ptキャンペーン: タグ検出時→ポイント付与API呼び出し
+    if (form.on_submit_tag === 'e8e9f6d1-f35c-418f-b39f-7a8765c082ec') {
+      c.executionCtx.waitUntil(
+        fetch('https://point-charge.oryzae.workers.dev/api/loyalty/campaign-award', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ campaign_key: '8th_anniversary_88pt', email }),
+        }).catch(e => console.error('campaign award webhook failed:', e))
+      );
+    }
 
     return c.json({ success: true, data: { customer_id: customerId } }, 200, {
       'Access-Control-Allow-Origin': '*',
