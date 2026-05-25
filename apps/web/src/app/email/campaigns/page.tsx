@@ -299,6 +299,8 @@ function EmailCampaignsPageInner() {
       } else {
         setError(res.error ?? '作成に失敗しました')
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '作成に失敗しました')
     } finally {
       setCreating(false)
     }
