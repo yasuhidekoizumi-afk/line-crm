@@ -192,6 +192,7 @@ reminders.get('/api/friends/:friendId/reminders', async (c) => {
         reminderId: fr.reminder_id,
         targetDate: fr.target_date,
         status: fr.status,
+        metadata: fr.metadata,
         createdAt: fr.created_at,
       })),
     });
