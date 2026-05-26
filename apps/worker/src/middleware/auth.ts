@@ -23,6 +23,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redeem$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) ||
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/profile-birthday$/) ||
     path === '/api/admin/run-migration' ||
     path === '/api/shopify/orders/backfill' ||
     path === '/api/shopify/auto-match/stats' ||

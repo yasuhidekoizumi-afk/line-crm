@@ -853,6 +853,279 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId/history', async (c) => {
   }
 });
 
+// POST /api/loyalty/shopify/:shopifyCustomerId/profile-birthday — 誕生日登録 + 100pt付与
+loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (c) => {
+  try {
+    const shopifyCustomerId = c.req.param('shopifyCustomerId');
+    const body = await c.req.json<{ birthday: string }>();
+    const { birthday } = body;
+
+    if (!birthday || !/^\d{4}-\d{2}-\d{2}$/.test(birthday)) {
+      return c.json({ success: false, error: '誕生日は YYYY-MM-DD 形式で指定してください' }, 400);
+    }
+
+    // 1. Shopify Customer メタフィールドに誕生日を保存
+    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+
+    if (!adminToken) {
+      return c.json({ success: false, error: 'Shopify API token not configured' }, 500);
+    }
+
+    // 既存メタフィールドをチェック
+    const checkResp = await fetch(
+      `https://${shopDomain}/admin/api/2026-04/customers/${shopifyCustomerId}/metafields.json?namespace=facts&key=birth_date`,
+      { headers: { 'X-Shopify-Access-Token': adminToken } }
+    );
+    if (checkResp.ok) {
+      const checkData = await checkResp.json() as { metafields: Array<{ value: string }> };
+      if (checkData.metafields?.length > 0 && checkData.metafields[0].value) {
+        return c.json({ success: false, error: '誕生日は既に登録されています' }, 400);
+      }
+    }
+
+    // メタフィールド保存
+    const saveResp = await fetch(
+      `https://${shopDomain}/admin/api/2026-04/customers/${shopifyCustomerId}/metafields.json`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': adminToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          metafield: { namespace: 'facts', key: 'birth_date', value: birthday, type: 'date' },
+        }),
+      }
+    );
+    if (!saveResp.ok) {
+      const errText = await saveResp.text();
+      console.error('birthday metafield save failed:', saveResp.status, errText);
+      return c.json({ success: false, error: '誕生日の保存に失敗しました' }, 500);
+    }
+
+    // 2. friend_id を取得（shopify_customer_id から）
+    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (!point) {
+      return c.json({ success: false, error: 'このアカウントはポイントシステムに連携されていません' }, 400);
+    }
+
+    const friendId = point.friend_id;
+    const current = await getLoyaltyPoint(c.env.DB, friendId);
+    const currentBalance = current?.balance ?? 0;
+    const currentLimited = current?.limited_balance ?? 0;
+    const awardedPoints = 100;
+    const newBalance = currentBalance + awardedPoints;
+    const expiryDays = 60;
+
+    const expiry = new Date();
+    expiry.setDate(expiry.getDate() + expiryDays);
+    const limitedExpiresAt = expiry.toISOString();
+
+    // 3. ポイント付与
+    await upsertLoyaltyPoint(c.env.DB, friendId, {
+      balance: newBalance,
+      limitedBalance: (currentLimited ?? 0) + awardedPoints,
+      limitedExpiresAt,
+      totalSpent: current?.total_spent ?? 0,
+      rank: (current?.rank as LoyaltyRank) ?? 'レギュラー',
+      shopifyCustomerId,
+    });
+
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId,
+      type: 'award',
+      points: awardedPoints,
+      balanceAfter: newBalance,
+      reason: `誕生日登録ボーナス: +${awardedPoints}pt（${expiryDays}日期限）`,
+      expiryDays,
+    });
+
+    // 4. LINE or メール通知（非同期・失敗しても付与には影響させない）
+    c.executionCtx?.waitUntil(
+      (async () => {
+        try {
+          const friendRow = await c.env.DB
+            .prepare('SELECT line_user_id, display_name FROM friends WHERE id = ?')
+            .bind(friendId)
+            .first<{ line_user_id: string; display_name: string }>();
+
+          const displayName = friendRow?.display_name || 'お客様';
+          const birthdayParts = birthday.split('-');
+          const bdayDisplay = `${birthdayParts[1]}月${birthdayParts[2]}日`;
+
+          // LINE連携済み → LINEプッシュ
+          if (friendRow?.line_user_id?.startsWith('U') && c.env.LINE_CHANNEL_ACCESS_TOKEN) {
+            const lineMsg =
+              `🎂 ${displayName}さん、誕生日登録ありがとうございます！\n\n` +
+              `誕生日: ${bdayDisplay}\n` +
+              `✨ ${awardedPoints}ptをプレゼントしました（${expiryDays}日期限）\n\n` +
+              `📊 現在の残高: ${newBalance}pt\n` +
+              `🛒 カートでポイントをご利用いただけます`;
+
+            await fetch('https://api.line.me/v2/bot/message/push', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${c.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                to: friendRow.line_user_id,
+                messages: [{ type: 'text', text: lineMsg }],
+              }),
+            });
+          } else if (c.env.RESEND_API_KEY && c.env.FERMENT_FROM_EMAIL_JP) {
+            const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+            const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+            if (adminToken) {
+              // 人気商品をShopify Storefront APIから動的に取得
+              let recommendHtml = '';
+              try {
+                const prodResp = await fetch(
+                  'https://oryzae.shop/collections/all/products.json?sort_by=best-selling&limit=50',
+                  { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' } }
+                );
+                if (prodResp.ok) {
+                  const prodData = await prodResp.json() as { products: Array<{ handle: string; title: string; images: Array<{ src: string }>; variants: Array<{ price: string }> }> };
+                  const products = (prodData.products || [])
+                    .filter(p => p.variants?.[0] && !p.title.includes('(定期)') && parseFloat(p.variants[0].price) >= 1000)
+                    .slice(0, 3);
+                    if (products.length > 0) {
+                    recommendHtml = products.map(p =>
+                      `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;margin-bottom:8px;"><tr>` +
+                        `<td style="width:50px;padding:0;vertical-align:middle;">` +
+                          `<a href="https://oryzae.shop/products/${p.handle}" style="text-decoration:none;display:block;">` +
+                            (p.images?.[0]?.src
+                              ? `<img src="${p.images[0].src}" alt="" width="50" height="50" style="display:block;width:50px;height:50px;border-radius:8px;border:0;" />`
+                              : `<div style="width:50px;height:50px;line-height:50px;text-align:center;font-size:22px;border-radius:8px;background:#fbf6ed;">🏷️</div>`) +
+                          `</a>` +
+                        `</td>` +
+                        `<td style="padding:0 0 0 12px;vertical-align:middle;">` +
+                          `<a href="https://oryzae.shop/products/${p.handle}" style="text-decoration:none;display:block;">` +
+                            `<div style="font-size:13px;font-weight:600;color:#1a1a1a;">${p.title}</div>` +
+                            `<div style="font-size:11px;color:#999;">¥${Number(p.variants[0].price).toLocaleString('ja-JP')}（100pt使える）</div>` +
+                          `</a>` +
+                        `</td>` +
+                      `</tr></table>`
+                    ).join('');
+                  }
+                }
+              } catch (_ee) {}
+              if (!recommendHtml) {
+                recommendHtml =
+                  `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;margin-bottom:8px;"><tr>` +
+                    `<td style="width:50px;padding:0;vertical-align:middle;text-align:center;"><div style="width:50px;height:50px;line-height:50px;font-size:22px;border-radius:8px;background:#fbf6ed;">🥣</div></td>` +
+                    `<td style="padding:0 0 0 12px;vertical-align:middle;">` +
+                      `<a href="https://oryzae.shop/products/set-fav" style="text-decoration:none;display:block;"><div style="font-size:13px;font-weight:600;color:#1a1a1a;">人気3種セット</div><div style="font-size:11px;color:#999;">¥3,240（100pt使える）</div></a>` +
+                    `</td></tr></table>` +
+                  `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;margin-bottom:8px;"><tr>` +
+                    `<td style="width:50px;padding:0;vertical-align:middle;text-align:center;"><div style="width:50px;height:50px;line-height:50px;font-size:22px;border-radius:8px;background:#fbf6ed;">🍶</div></td>` +
+                    `<td style="padding:0 0 0 12px;vertical-align:middle;">` +
+                      `<a href="https://oryzae.shop/products/oryzae-drink3" style="text-decoration:none;display:block;"><div style="font-size:13px;font-weight:600;color:#1a1a1a;">オリゼの甘酒3種セット</div><div style="font-size:11px;color:#999;">¥3,360（100pt使える）</div></a>` +
+                    `</td></tr></table>` +
+                  `<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>` +
+                    `<td style="width:50px;padding:0;vertical-align:middle;text-align:center;"><div style="width:50px;height:50px;line-height:50px;font-size:22px;border-radius:8px;background:#fbf6ed;">🍫</div></td>` +
+                    `<td style="padding:0 0 0 12px;vertical-align:middle;">` +
+                      `<a href="https://oryzae.shop/products/granola-bar" style="text-decoration:none;display:block;"><div style="font-size:13px;font-weight:600;color:#1a1a1a;">米麹グラノーラバー</div><div style="font-size:11px;color:#999;">¥1,980（100pt使える）</div></a>` +
+                    `</td></tr></table>`;
+              }
+
+              const custResp = await fetch(
+                `https://${shopDomain}/admin/api/2026-04/customers/${shopifyCustomerId}.json`,
+                { headers: { 'X-Shopify-Access-Token': adminToken } }
+              );
+              if (custResp.ok) {
+                const custData = await custResp.json() as { customer: { email: string } };
+                const email = custData.customer?.email;
+                if (email) {
+                  await fetch('https://api.resend.com/emails', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${c.env.RESEND_API_KEY}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      from: c.env.FERMENT_FROM_EMAIL_JP,
+                      to: [email],
+                      subject: '🎂 誕生日登録ありがとうございます！100ptをプレゼント',
+                      html: `
+                        <div style="font-family:'Zen Kaku Gothic New','Hiragino Sans',sans-serif;max-width:480px;margin:0 auto;background:#faf8f4;">
+                          <div style="background:#b8860b;padding:20px;text-align:center;">
+                            <div style="font-size:36px;margin-bottom:4px;">🎂</div>
+                            <h1 style="color:#fff;font-size:18px;margin:0;font-weight:700;">誕生日登録ありがとうございます</h1>
+                          </div>
+
+                          <div style="padding:24px 20px;background:#fff;margin:0 12px;border-radius:0 0 12px 12px;">
+                            <p style="margin:0 0 16px;font-size:14px;color:#333;line-height:1.7;">
+                              ${displayName}さん<br>
+                              誕生日を登録いただきありがとうございます！<br>
+                              <strong style="color:#b8860b;font-size:18px;">100pt</strong>をプレゼントしました 🎉
+                            </p>
+
+                            <div style="background:#fbf6ed;border:1px solid #ead6b0;border-radius:10px;padding:16px;margin:0 0 20px;">
+                              <table style="width:100%;font-size:13px;color:#5c4a2e;">
+                                <tr><td style="padding:4px 0;">誕生日</td><td style="padding:4px 0;font-weight:600;text-align:right;">${bdayDisplay}</td></tr>
+                                <tr><td style="padding:4px 0;">プレゼント</td><td style="padding:4px 0;font-weight:600;text-align:right;color:#b8860b;">100pt（${expiryDays}日期限）</td></tr>
+                                <tr><td style="padding:4px 0;">現在の残高</td><td style="padding:4px 0;font-weight:600;text-align:right;">${newBalance}pt</td></tr>
+                              </table>
+                            </div>
+
+                            <a href="https://oryzae.shop/cart"
+                              style="display:block;text-align:center;padding:14px;background:#b8860b;color:#fff;border-radius:10px;font-size:15px;font-weight:700;text-decoration:none;margin:0 0 8px;">
+                              100ptをお得に使う 🛒
+                            </a>
+                            <p style="margin:0 0 20px;font-size:12px;color:#999;text-align:center;">100ptがカートでのお支払いに使えます</p>
+
+                            <div style="margin:0 0 20px;">
+                              <p style="margin:0 0 10px;font-size:13px;font-weight:600;color:#5c4a2e;">🍚 人気の商品</p>
+                              ${recommendHtml}
+                            </div>
+
+                            <p style="margin:0 0 20px;font-size:13px;color:#b8860b;text-align:center;font-weight:500;">
+                              🎁 誕生月には特別クーポンをお届けします。お楽しみに！
+                            </p>
+
+                            <p style="margin:0;font-size:12px;color:#999;text-align:center;">
+                              期間限定ポイントは60日間有効です。<br>
+                              カートでもポイント残高をご確認いただけます。
+                            </p>
+                          </div>
+
+                          <div style="padding:16px 20px;text-align:center;">
+                            <p style="margin:0;font-size:11px;color:#aaa;">
+                              株式会社オリゼ<br>
+                              <a href="https://oryzae.shop" style="color:#b8860b;text-decoration:none;">https://oryzae.shop</a>
+                            </p>
+                          </div>
+                        </div>
+                      `,
+                    }),
+                  });
+                }
+              }
+            }
+          }
+        } catch (_e) {
+          console.error('birthday notification error:', _e);
+        }
+      })()
+    );
+
+    return c.json({
+      success: true,
+      data: {
+        earnedPoints: awardedPoints,
+        limitedExpiresAt,
+        birthday,
+        message: `🎂 誕生日登録ありがとうございます！${awardedPoints}ptを付与しました`,
+      },
+    });
+  } catch (e) {
+    console.error('profile birthday error:', e);
+    return c.json({ success: false, error: '誕生日登録に失敗しました' }, 500);
+  }
+});
+
 // POST /api/loyalty/shopify/:shopifyCustomerId/redeem — ポイント → 割引コード発行
 loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
   try {
