@@ -12,6 +12,7 @@ import {
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js';
+import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const shopifyWebhooks = new Hono<Env>();
@@ -159,7 +160,7 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   });
 
   const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-  const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+  const adminToken = await getShopifyAdminToken(c.env);
   if (shopDomain && adminToken) {
     const jobs: Promise<void>[] = [];
     if ((orderMfSetting ?? '1') === '1') {

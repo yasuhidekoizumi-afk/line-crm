@@ -20,6 +20,8 @@ export type FermentEnv = {
     X_HARNESS_URL?: string;
     SHOPIFY_ADMIN_TOKEN?: string;
     SHOPIFY_SHOP_DOMAIN?: string;
+    SHOPIFY_CLIENT_ID?: string;
+    SHOPIFY_CLIENT_SECRET?: string;
     // FERMENT 追加シークレット
     RESEND_API_KEY?: string;
     RESEND_WEBHOOK_SECRET?: string;

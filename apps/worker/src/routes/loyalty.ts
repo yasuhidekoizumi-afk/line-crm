@@ -31,6 +31,7 @@ import {
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { backfillPendingOrders } from '../services/loyalty-backfill.js';
+import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
@@ -561,7 +562,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
 
     // Shopify メタフィールド保存（非同期・失敗しても付与には影響させない）
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    const adminToken = await getShopifyAdminToken(c.env);
     if (shopDomain && adminToken) {
       const metafieldJobs: Promise<void>[] = [];
       if ((orderMetafieldSetting ?? '1') === '1' && body.orderId) {
@@ -718,7 +719,7 @@ loyalty.post('/api/loyalty/order-cancelled', async (c) => {
 
     // 顧客メタフィールド更新
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    const adminToken = await getShopifyAdminToken(c.env);
     if (shopDomain && adminToken && effectiveCustomerId) {
       const customerMetafieldSetting = await getLoyaltySetting(c.env.DB, 'customer_metafield_enabled').catch(() => null);
       if ((customerMetafieldSetting ?? '0') === '1') {
@@ -865,7 +866,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
     }
 
     // 1. Shopify Customer メタフィールドに誕生日を保存
-    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    const adminToken = await getShopifyAdminToken(c.env);
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
 
     if (!adminToken) {
@@ -976,7 +977,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
             });
           } else if (c.env.RESEND_API_KEY && c.env.FERMENT_FROM_EMAIL_JP) {
             const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
-            const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+            const adminToken = await getShopifyAdminToken(c.env);
             if (adminToken) {
               // 人気商品をShopify Storefront APIから動的に取得
               let recommendHtml = '';
@@ -1150,7 +1151,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
 
     // 既存の未使用コードがあれば発行をブロック
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    const adminToken = await getShopifyAdminToken(c.env);
     try {
       const latestRedeem = await c.env.DB
         .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
@@ -1315,7 +1316,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     }
 
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    const adminToken = await getShopifyAdminToken(c.env);
     if (!shopDomain || !adminToken) {
       return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
     }

@@ -49,6 +49,7 @@ import {
   notifyL2DraftReady,
 } from '../services/cs-slack-notify.js';
 import { fetchShopifyCustomerContext } from '../services/shopify-customer-context.js';
+import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 export const cs = new Hono<Env>();
@@ -274,7 +275,7 @@ async function runTriageForMessage(
   const link = await findCustomerLink(env.DB, { email: customerEmail });
   const shopifyCtx = await fetchShopifyCustomerContext(
     env.SHOPIFY_SHOP_DOMAIN,
-    env.SHOPIFY_ADMIN_TOKEN,
+    (await getShopifyAdminToken(env)) ?? undefined,
     customerEmail,
   );
   // Shopify顧客IDが取れたら customer_links を更新（次回以降の名寄せ高速化）

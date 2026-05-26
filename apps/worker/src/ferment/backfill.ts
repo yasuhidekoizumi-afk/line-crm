@@ -10,6 +10,7 @@
 
 import { Hono } from 'hono'
 import { generateFermentId, upsertCustomer } from '@line-crm/db'
+import { getShopifyAdminToken } from '../utils/shopify-token.js'
 import type { FermentEnv } from './types'
 
 const BATCH_SIZE = 50
@@ -31,7 +32,7 @@ backfillRoutes.post('/customers', async (c) => {
 
   const db = c.env.DB
   const shopifyDomain = c.env.SHOPIFY_SHOP_DOMAIN
-  const shopifyToken = c.env.SHOPIFY_ADMIN_TOKEN
+  const shopifyToken = await getShopifyAdminToken(c.env)
 
   // friends + loyalty_points を LEFT JOIN
   const rows = await db.prepare(`
@@ -171,7 +172,7 @@ backfillRoutes.post('/shopify-customers', async (c) => {
 
   const db = c.env.DB
   const shopifyDomain = c.env.SHOPIFY_SHOP_DOMAIN
-  const shopifyToken = c.env.SHOPIFY_ADMIN_TOKEN
+  const shopifyToken = await getShopifyAdminToken(c.env)
 
   if (!shopifyDomain || !shopifyToken) {
     return c.json({ success: false, error: 'Shopify credentials not configured' }, 500)

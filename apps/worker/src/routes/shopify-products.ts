@@ -10,6 +10,7 @@
 
 import { Hono } from 'hono';
 import { authMiddleware } from '../middleware/auth.js';
+import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 export const shopifyProducts = new Hono<Env>();
@@ -73,7 +74,7 @@ async function fetchShopifyProducts(
 
 shopifyProducts.get('/api/shopify/products', async (c) => {
   const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-  const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+  const adminToken = await getShopifyAdminToken(c.env);
   if (!shopDomain || !adminToken) {
     return c.json({ success: false, error: 'SHOPIFY_SHOP_DOMAIN / SHOPIFY_ADMIN_TOKEN not configured' }, 503);
   }
@@ -91,7 +92,7 @@ shopifyProducts.get('/api/shopify/products', async (c) => {
 // 商品 ID 配列を渡して商品サマリを取得（複数）
 shopifyProducts.post('/api/shopify/products/lookup', async (c) => {
   const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-  const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+  const adminToken = await getShopifyAdminToken(c.env);
   if (!shopDomain || !adminToken) {
     return c.json({ success: false, error: 'Shopify not configured' }, 503);
   }

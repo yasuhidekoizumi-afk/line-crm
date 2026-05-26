@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { authMiddleware } from '../middleware/auth.js';
 import { persistShopifyOrder, getBackfillProgress, updateBackfillProgress, type ShopifyOrderPayload } from '../services/shopify-orders.js';
+import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const shopifyOrders = new Hono<Env>();
@@ -8,7 +9,7 @@ shopifyOrders.use('/api/shopify/orders/*', authMiddleware);
 const BACKFILL_LIMIT = 20, SHOPIFY_API_VERSION = '2024-10';
 
 shopifyOrders.post('/api/shopify/orders/backfill', async (c) => {
-  const sd = c.env.SHOPIFY_SHOP_DOMAIN, at = c.env.SHOPIFY_ADMIN_TOKEN;
+  const sd = c.env.SHOPIFY_SHOP_DOMAIN, at = await getShopifyAdminToken(c.env);
   if (!sd || !at) return c.json({ success: false, error: 'Shopify credentials not configured' }, 500);
   const p = await getBackfillProgress(c.env.DB, 'orders');
   const sc = p?.cursor ?? '', tp = p?.total_processed ?? 0;

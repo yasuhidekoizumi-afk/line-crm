@@ -10,6 +10,7 @@
 
 import { Hono } from 'hono';
 import { generateFermentId } from '@line-crm/db';
+import { getShopifyAdminToken } from '../../utils/shopify-token.js';
 import type { FermentEnv } from '../types.js';
 
 export const cockpitRoutes = new Hono<FermentEnv>();
@@ -508,7 +509,7 @@ cockpitRoutes.post('/generate-image', async (c) => {
 
     // (B) 明示的に指定された商品 ID から画像 URL を取得
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    const adminToken = await getShopifyAdminToken(c.env);
     if (body.product_ids && body.product_ids.length > 0 && shopDomain && adminToken) {
       try {
         const url = `https://${shopDomain}/admin/api/2024-10/products.json?ids=${body.product_ids.join(',')}&fields=id,image`;
