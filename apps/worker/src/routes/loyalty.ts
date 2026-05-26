@@ -818,6 +818,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
     return c.json({
       success: true,
       data: {
+        friend_id: point.friend_id,
         balance: point.balance,
         paid_balance: 0,
         bonus_balance: point.balance,
