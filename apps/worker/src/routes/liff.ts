@@ -734,14 +734,29 @@ async function linkShopifyCustomerAndAwardBonus(
 
       if (realLoyalty) {
         const mergedBalance = (realLoyalty.balance ?? 0) + (existing.balance ?? 0);
+        const mergedLimitedBalance = (realLoyalty.limited_balance ?? 0) + (existing.limited_balance ?? 0);
         const mergedTotalSpent = (realLoyalty.total_spent ?? 0) + (existing.total_spent ?? 0);
         const rankOrder = ['レギュラー', 'シルバー', 'ゴールド', 'プラチナ', 'ダイヤモンド'];
         const higherRank =
           rankOrder.indexOf(existing.rank ?? 'レギュラー') > rankOrder.indexOf(realLoyalty.rank ?? 'レギュラー')
             ? (existing.rank ?? 'レギュラー')
             : (realLoyalty.rank ?? 'レギュラー');
+        // 期限はより早い方を採用（安全側・期限切れまでの猶予を短くしない）
+        // 片方が null の場合は他方を採用（限定残高に紐付く期限が必ず1つに収束する）
+        let mergedLimitedExpiresAt: string | null = null;
+        if (mergedLimitedBalance > 0) {
+          const realExp = realLoyalty.limited_expires_at;
+          const spExp = existing.limited_expires_at;
+          if (realExp && spExp) {
+            mergedLimitedExpiresAt = new Date(realExp) < new Date(spExp) ? realExp : spExp;
+          } else {
+            mergedLimitedExpiresAt = realExp ?? spExp ?? null;
+          }
+        }
         await upsertLoyaltyPoint(db, friendId, {
           balance: mergedBalance,
+          limitedBalance: mergedLimitedBalance,
+          limitedExpiresAt: mergedLimitedExpiresAt,
           totalSpent: mergedTotalSpent,
           rank: higherRank,
           shopifyCustomerId,
@@ -1000,14 +1015,28 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
         if (realLoyalty) {
           // 両方に loyalty_points 行あり → 本 friend 側にマージして sp_ 側は削除
           const mergedBalance = (realLoyalty.balance ?? 0) + (existing.balance ?? 0);
+          const mergedLimitedBalance = (realLoyalty.limited_balance ?? 0) + (existing.limited_balance ?? 0);
           const mergedTotalSpent = (realLoyalty.total_spent ?? 0) + (existing.total_spent ?? 0);
           const rankOrder = ['レギュラー', 'シルバー', 'ゴールド', 'プラチナ', 'ダイヤモンド'];
           const higherRank =
             rankOrder.indexOf(existing.rank ?? 'レギュラー') > rankOrder.indexOf(realLoyalty.rank ?? 'レギュラー')
               ? (existing.rank ?? 'レギュラー')
               : (realLoyalty.rank ?? 'レギュラー');
+          // 期限はより早い方を採用（安全側）。片方 null の場合は他方を採用
+          let mergedLimitedExpiresAt: string | null = null;
+          if (mergedLimitedBalance > 0) {
+            const realExp = realLoyalty.limited_expires_at;
+            const spExp = existing.limited_expires_at;
+            if (realExp && spExp) {
+              mergedLimitedExpiresAt = new Date(realExp) < new Date(spExp) ? realExp : spExp;
+            } else {
+              mergedLimitedExpiresAt = realExp ?? spExp ?? null;
+            }
+          }
           await upsertLoyaltyPoint(c.env.DB, friend.id, {
             balance: mergedBalance,
+            limitedBalance: mergedLimitedBalance,
+            limitedExpiresAt: mergedLimitedExpiresAt,
             totalSpent: mergedTotalSpent,
             rank: higherRank,
             shopifyCustomerId,
