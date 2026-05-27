@@ -696,7 +696,12 @@ liffRoutes.post('/api/liff/link', async (c) => {
 });
 
 /**
- * Shopify顧客IDをLINE friendに紐付け＋LINE連携ボーナス（300pt・60日期限）を付与する。
+ * Shopify顧客IDをLINE friendに紐付け＋LINE連携ボーナス（300pt・通常ポイント無期限）を付与する。
+ *
+ * 仕様:
+ * - LINE連携は会社にとって継続的な接触チャネルを獲得する重要行動のため、
+ *   お礼として通常ポイント（balance、無期限）で付与する。
+ *   購買促進は別途キャンペーン/誕生月クーポン（期間限定）で担う。
  *
  * セキュリティ方針:
  * - 既に他のLINE friendに紐付け済みのShopify顧客IDは上書きしない（なりすまし防止）
@@ -805,13 +810,11 @@ async function linkShopifyCustomerAndAwardBonus(
   }
 
   const beforeBonus = await getLoyaltyPoint(db, friendId);
-  const expiry = new Date();
-  expiry.setDate(expiry.getDate() + 60);
-  const newLimitedBalance = (beforeBonus?.limited_balance ?? 0) + bonusPoints;
+  // LINE連携ボーナスは通常ポイント（balance、無期限）として付与
+  // limited_balance / limited_expires_at は触らない（PR #112 で未指定なら既存値保持）
+  const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
   await upsertLoyaltyPoint(db, friendId, {
-    balance: beforeBonus?.balance ?? 0,
-    limitedBalance: newLimitedBalance,
-    limitedExpiresAt: expiry.toISOString(),
+    balance: newBalance,
     totalSpent: beforeBonus?.total_spent ?? 0,
     rank: beforeBonus?.rank ?? 'レギュラー',
     shopifyCustomerId,
@@ -820,7 +823,7 @@ async function linkShopifyCustomerAndAwardBonus(
     friendId,
     type: 'award',
     points: bonusPoints,
-    balanceAfter: (beforeBonus?.balance ?? 0) + newLimitedBalance,
+    balanceAfter: newBalance + (beforeBonus?.limited_balance ?? 0),
     reason: 'LINE連携ボーナス',
   });
 
@@ -1090,19 +1093,17 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
         .bind(friend.id)
         .first();
       if (!existingBonus) {
+        // LINE連携ボーナスは通常ポイント（balance、無期限）として付与
+        // limited_balance / limited_expires_at は触らない（PR #112 で未指定なら既存値保持）
         const beforeBonus = await getLoyaltyPoint(c.env.DB, friend.id);
-        const expiry = new Date();
-        expiry.setDate(expiry.getDate() + 60);
-        const newLimitedBalance = (beforeBonus?.limited_balance ?? 0) + bonusPoints;
+        const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
         await upsertLoyaltyPoint(c.env.DB, friend.id, {
-          balance: beforeBonus?.balance ?? 0,
-          limitedBalance: newLimitedBalance,
-          limitedExpiresAt: expiry.toISOString(),
+          balance: newBalance,
           totalSpent: beforeBonus?.total_spent ?? 0,
           rank: beforeBonus?.rank ?? 'レギュラー',
           shopifyCustomerId,
         });
-        const totalAfter = (beforeBonus?.balance ?? 0) + newLimitedBalance;
+        const totalAfter = newBalance + (beforeBonus?.limited_balance ?? 0);
         await addLoyaltyTransaction(c.env.DB, {
           friendId: friend.id,
           type: 'adjust',
