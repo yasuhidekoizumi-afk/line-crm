@@ -421,11 +421,12 @@ loyalty.post('/api/loyalty/:friendId/adjust', async (c) => {
       shopifyCustomerId: current?.shopify_customer_id ?? undefined,
     });
 
+    const grandTotalAfter = newBalance + (current?.limited_balance ?? 0);
     await addLoyaltyTransaction(c.env.DB, {
       friendId,
       type: 'adjust',
       points: body.points,
-      balanceAfter: newBalance,
+      balanceAfter: grandTotalAfter,
       reason: body.reason.trim(),
       staffId,
     });
@@ -555,7 +556,7 @@ loyalty.post('/api/loyalty/award', async (c) => {
       friendId: body.friendId,
       type: 'award',
       points: earnedPoints,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance + newLimitedBalance,
       reason: `購入ポイント付与（¥${body.orderAmount.toLocaleString('ja-JP')}）${appliedCampaigns.length > 0 ? `【${appliedCampaigns.join(', ')}】` : ''}`,
       orderId: body.orderId,
       expiryDays: effectiveExpiryDays,
@@ -713,7 +714,7 @@ loyalty.post('/api/loyalty/order-cancelled', async (c) => {
       friendId: awardTx.friend_id,
       type: 'adjust',
       points: -refundPoints,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance + newLimitedBalance,
       reason: `注文キャンセルによるポイント返還（注文ID: ${body.orderId}）`,
       orderId: body.orderId,
     });
@@ -1289,7 +1290,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
       friendId: point.friend_id,
       type: 'redeem',
       points: -body.points,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance + newLimitedBalance,
       reason: `ポイント利用（¥${discountAmount}割引 / コード: ${code}）${breakdownTag}`,
     });
 
@@ -1437,7 +1438,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
       friendId: point.friend_id,
       type: 'adjust',
       points: refundPoints,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance + newLimitedBalance,
       reason: `コード取り消しによるポイント返還（${code} 未使用削除 / 復元: limited=${refundLimited},balance=${refundBalance}）`,
     });
 
@@ -1654,7 +1655,7 @@ loyalty.post('/api/loyalty/link-shopify', async (c) => {
           friendId: body.friendId,
           type: 'adjust',
           points: bonusPoints,
-          balanceAfter: newBalance,
+          balanceAfter: newBalance + (beforeBonus?.limited_balance ?? 0),
           reason: 'LINE連携ボーナス',
         });
         bonusAwarded = bonusPoints;

@@ -78,7 +78,7 @@ rewards.post('/api/rewards/:id/exchange', async (c) => {
       friendId: point.friend_id,
       type: 'redeem',
       points: -item.required_points,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance + (point.limited_balance ?? 0),
       reason: `アイテム交換: ${item.name}`,
     });
 

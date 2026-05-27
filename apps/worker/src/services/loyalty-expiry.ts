@@ -39,7 +39,7 @@ export async function processLoyaltyExpirations(
           friendId: award.friend_id,
           type: 'expire',
           points: -unspent,
-          balanceAfter: newBalance,
+          balanceAfter: newBalance + (point?.limited_balance ?? 0),
           reason: 'ポイント有効期限切れ',
           sourceTxId: award.award_id,
         });

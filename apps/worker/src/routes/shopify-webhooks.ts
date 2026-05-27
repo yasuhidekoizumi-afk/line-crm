@@ -153,7 +153,7 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
     friendId: existing.friend_id,
     type: 'award',
     points: earnedPoints,
-    balanceAfter: newBalance,
+    balanceAfter: newBalance + (existing.limited_balance ?? 0),
     reason: `購入ポイント付与（¥${orderAmount.toLocaleString('ja-JP')}）`,
     orderId,
     expiryDays,
@@ -223,7 +223,7 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-cancelled', async (c) => {
     friendId: awardTx.friend_id,
     type: 'adjust',
     points: -awardTx.points,
-    balanceAfter: newBalance,
+    balanceAfter: newBalance + (current.limited_balance ?? 0),
     reason: `注文キャンセルによるポイント返還（注文#${orderId}）`,
     orderId,
   });
