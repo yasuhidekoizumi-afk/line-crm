@@ -395,20 +395,40 @@ export async function upsertLoyaltyPoint(
   },
 ): Promise<void> {
   const now = jstNow();
+
+  // INSERT 時のデフォルト値:
+  //   limitedBalance       → 0
+  //   limitedExpiresAt     → null
+  //   shopifyCustomerId    → null
+  //
+  // UPDATE 時の上書き挙動:
+  //   limitedBalance/limitedExpiresAt
+  //     - undefined を渡された → 現在値を保持（上書きしない）
+  //     - 数値/文字列/null を渡された → その値で上書き
+  //
+  // 既存の呼び出しの多くは limitedBalance を渡しておらず、
+  //  渡された場合のみ上書きする方が事故が少ない（誕生日ボーナス等の限定残高を
+  //  注文確定 webhook が誤って 0 で潰す既存事故を防止する）。
+  //
+  // shopify_customer_id は従来通り COALESCE で保護（null/未指定なら既存値維持）。
+  const limitedBalanceProvided = updates.limitedBalance !== undefined;
+  const limitedExpiresProvided = updates.limitedExpiresAt !== undefined;
+
   await db
     .prepare(
       `INSERT INTO loyalty_points (id, friend_id, balance, limited_balance, limited_expires_at, total_spent, rank, shopify_customer_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (friend_id) DO UPDATE SET
          balance = excluded.balance,
-         limited_balance = excluded.limited_balance,
-         limited_expires_at = excluded.limited_expires_at,
+         limited_balance = CASE WHEN ? = 1 THEN excluded.limited_balance ELSE loyalty_points.limited_balance END,
+         limited_expires_at = CASE WHEN ? = 1 THEN excluded.limited_expires_at ELSE loyalty_points.limited_expires_at END,
          total_spent = excluded.total_spent,
          rank = excluded.rank,
          shopify_customer_id = COALESCE(excluded.shopify_customer_id, loyalty_points.shopify_customer_id),
          updated_at = excluded.updated_at`,
     )
     .bind(
+      // INSERT 用の VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) のバインド
       crypto.randomUUID(),
       friendId,
       updates.balance,
@@ -419,6 +439,9 @@ export async function upsertLoyaltyPoint(
       updates.shopifyCustomerId ?? null,
       now,
       now,
+      // ON CONFLICT 内の CASE WHEN ? = 1 のフラグ（順序: limited_balance, limited_expires_at）
+      limitedBalanceProvided ? 1 : 0,
+      limitedExpiresProvided ? 1 : 0,
     )
     .run();
 }
