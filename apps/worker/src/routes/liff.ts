@@ -1150,9 +1150,12 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
     // 保留注文バックフィル
     const backfill = await backfillPendingOrders(c.env.DB, friend.id, shopifyCustomerId);
 
+    // point-charge キャッチアップ sync (LINE 連携前にキャンペーン付与された期間限定ポイントを取り込む)
+    const catchup = await catchupCampaignPointsFromPointCharge(c.env.DB, friend.id, shopifyCustomerId);
+
     // LINEプッシュ通知（連携完了＋ポイント付与、ノンブロッキング）
     try {
-      const totalAwarded = bonusAwarded + promoPointsAwarded + backfill.totalPointsAwarded;
+      const totalAwarded = bonusAwarded + promoPointsAwarded + backfill.totalPointsAwarded + catchup.awarded;
       if (totalAwarded > 0) {
         const { LineClient } = await import('@line-crm/line-sdk');
         const accountRow = await c.env.DB
@@ -1165,6 +1168,7 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
           const lines: string[] = ['🎉 ポイントを受け取りました！', ''];
           if (bonusAwarded > 0) lines.push(`連携ボーナス：+${bonusAwarded}pt`);
           if (promoPointsAwarded > 0) lines.push(`カードボーナス：+${promoPointsAwarded}pt`);
+          if (catchup.awarded > 0) lines.push(`キャンペーンポイント：+${catchup.awarded}pt（期間限定）`);
           if (backfill.totalPointsAwarded > 0) lines.push(`過去購入ボーナス：+${backfill.totalPointsAwarded}pt`);
           lines.push('', `現在の残高：${after?.balance ?? 0}pt`, '', 'ポイントは次回のお買い物でご利用いただけます。');
           await lineClient.pushMessage(lineUserId, [{ type: 'text', text: lines.join('\n') }]);
@@ -1179,6 +1183,7 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       data: {
         bonusAwarded,
         promoPointsAwarded,
+        catchupAwarded: catchup.awarded,
         backfilledOrders: backfill.processed,
         backfilledPoints: backfill.totalPointsAwarded,
       },
@@ -1248,6 +1253,11 @@ liffRoutes.post('/api/liff/promo-grant', async (c) => {
       expiresAt,
     });
 
+    // point-charge キャッチアップ sync (LINE 連携前に積まれた期間限定ポイントを取り込む)
+    const catchup = loyaltyPoint.shopify_customer_id
+      ? await catchupCampaignPointsFromPointCharge(c.env.DB, friend.id, loyaltyPoint.shopify_customer_id)
+      : { awarded: 0, expiresAt: null };
+
     // LINEプッシュ通知（ノンブロッキング）
     try {
       const { LineClient } = await import('@line-crm/line-sdk');
@@ -1257,16 +1267,22 @@ liffRoutes.post('/api/liff/promo-grant', async (c) => {
       const accessToken = accountRow?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
       if (accessToken) {
         const lineClient = new LineClient(accessToken);
-        await lineClient.pushMessage(body.lineUserId, [{
-          type: 'text',
-          text: `🎁 ポイントを受け取りました！\n\n${promo.reason.includes('CARD') ? 'カードボーナス' : 'ボーナス'}：+${promo.points}pt\n現在の残高：${newBalance}pt\n\nポイントは次回のお買い物でご利用いただけます。`,
-        }]);
+        const lines = [
+          '🎁 ポイントを受け取りました！',
+          '',
+          `${promo.reason.includes('CARD') ? 'カードボーナス' : 'ボーナス'}：+${promo.points}pt`,
+        ];
+        if (catchup.awarded > 0) {
+          lines.push(`キャンペーンポイント：+${catchup.awarded}pt（期間限定）`);
+        }
+        lines.push(`現在の残高：${newBalance + catchup.awarded}pt`, '', 'ポイントは次回のお買い物でご利用いただけます。');
+        await lineClient.pushMessage(body.lineUserId, [{ type: 'text', text: lines.join('\n') }]);
       }
     } catch (err) {
       console.error('promo-grant LINE notification error (non-blocking):', err);
     }
 
-    return c.json({ success: true, data: { pointsAwarded: promo.points, newBalance } });
+    return c.json({ success: true, data: { pointsAwarded: promo.points, catchupAwarded: catchup.awarded, newBalance: newBalance + catchup.awarded } });
   } catch (err) {
     console.error('POST /api/liff/promo-grant error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
@@ -1648,6 +1664,91 @@ async function resolveXHarnessToken(
     }
   } catch {
     return null;
+  }
+}
+
+// ─── point-charge catchup sync ─────────────────────────────────────
+// point-charge Worker は LINE 連携前にメアド等で 8周年キャンペーンを
+// 付与する経路があり、その場合 point_balances 側だけに limited_balance が
+// 積まれて loyalty_points には sync されない (該当行が存在しないため)。
+// LINE 連携直後にこの差分を取り込み、マイページに正しい残高を表示できるようにする。
+async function catchupCampaignPointsFromPointCharge(
+  db: D1Database,
+  friendId: string,
+  shopifyCustomerId: string,
+): Promise<{ awarded: number; expiresAt: string | null }> {
+  try {
+    const pb = await db
+      .prepare(
+        `SELECT limited_balance, limited_expires_at
+         FROM point_balances
+         WHERE customer_id = ?`,
+      )
+      .bind(shopifyCustomerId)
+      .first<{ limited_balance: number; limited_expires_at: string | null }>();
+    if (!pb || (pb.limited_balance ?? 0) <= 0) {
+      return { awarded: 0, expiresAt: null };
+    }
+
+    const lp = await db
+      .prepare(
+        `SELECT balance, limited_balance, limited_expires_at, total_spent, rank
+         FROM loyalty_points
+         WHERE friend_id = ?`,
+      )
+      .bind(friendId)
+      .first<{
+        balance: number;
+        limited_balance: number;
+        limited_expires_at: string | null;
+        total_spent: number;
+        rank: string;
+      }>();
+
+    const currentLpLimited = lp?.limited_balance ?? 0;
+    const diff = (pb.limited_balance ?? 0) - currentLpLimited;
+    if (diff <= 0) {
+      return { awarded: 0, expiresAt: null };
+    }
+
+    // point-charge の期限 (UTC ISO) を JST に整形して使う
+    const expiryDate = pb.limited_expires_at ? new Date(pb.limited_expires_at) : null;
+    const jstExpiry = expiryDate
+      ? new Date(expiryDate.getTime() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00')
+      : null;
+
+    // 期限が既存より早ければそれを優先 (安全側)
+    let mergedExpiry: string | null = lp?.limited_expires_at ?? null;
+    if (!mergedExpiry) {
+      mergedExpiry = jstExpiry;
+    } else if (jstExpiry && new Date(jstExpiry) < new Date(mergedExpiry)) {
+      mergedExpiry = jstExpiry;
+    }
+
+    const newLimited = currentLpLimited + diff;
+    await upsertLoyaltyPoint(db, friendId, {
+      balance: lp?.balance ?? 0,
+      limitedBalance: newLimited,
+      limitedExpiresAt: mergedExpiry,
+      totalSpent: lp?.total_spent ?? 0,
+      rank: (lp?.rank as 'レギュラー' | 'シルバー' | 'ゴールド' | 'プラチナ') ?? 'レギュラー',
+      shopifyCustomerId,
+    });
+
+    const totalAfter = (lp?.balance ?? 0) + newLimited;
+    await addLoyaltyTransaction(db, {
+      friendId,
+      type: 'adjust',
+      points: diff,
+      balanceAfter: totalAfter,
+      reason: `point-charge 連携時キャッチアップ: +${diff}pt（期間限定、期限 ${mergedExpiry ?? '未設定'}）`,
+      orderId: `pc-catchup-${shopifyCustomerId}-${Date.now()}`,
+    });
+
+    return { awarded: diff, expiresAt: mergedExpiry };
+  } catch (err) {
+    console.error('catchupCampaignPointsFromPointCharge error (non-blocking):', err);
+    return { awarded: 0, expiresAt: null };
   }
 }
 
