@@ -1271,12 +1271,16 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
       shopifyCustomerId,
     });
 
+    // 内訳タグを reason に埋め込む（cancel-code が逆順返還するために必要）
+    // フォーマット: [内訳:limited=<N>,balance=<N>,exp=<ISO|none>]
+    const breakdownTag = `[内訳:limited=${limitedToUse},balance=${balanceToUse},exp=${point.limited_expires_at ?? 'none'}]`;
+
     await addLoyaltyTransaction(c.env.DB, {
       friendId: point.friend_id,
       type: 'redeem',
       points: -body.points,
       balanceAfter: newBalance,
-      reason: `ポイント利用（¥${discountAmount}割引 / コード: ${code}）`,
+      reason: `ポイント利用（¥${discountAmount}割引 / コード: ${code}）${breakdownTag}`,
     });
 
     return c.json({
@@ -1372,12 +1376,38 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
       return c.json({ success: false, error: '返還ポイント数を特定できませんでした' }, 500);
     }
 
-    // ポイント残高を返還
-    const newBalance = point.balance + refundPoints;
+    // 内訳タグから redeem 時の消費内訳を復元
+    // タグが無い旧データは「全額 balance に返還」で従来挙動を維持（後方互換）
+    const breakdownMatch = latestRedeem?.reason?.match(/\[内訳:limited=(\d+),balance=(\d+),exp=([^\]]+)\]/);
+    let refundLimited = 0;
+    let refundBalance = refundPoints;
+    let restoreExpiresAt: string | null = null;
+    if (breakdownMatch) {
+      refundLimited = parseInt(breakdownMatch[1], 10);
+      refundBalance = parseInt(breakdownMatch[2], 10);
+      const expStr = breakdownMatch[3];
+      restoreExpiresAt = expStr === 'none' ? null : expStr;
+    }
+
+    // ポイント残高を返還（redeem の逆順: 元 limited 分は limited に / 元 balance 分は balance に）
+    const newBalance = point.balance + refundBalance;
+    const newLimitedBalance = (point.limited_balance ?? 0) + refundLimited;
+    // 期限復元: 現在の期限がまだ有効ならそれを維持。無ければ redeem 時の期限を復元
+    let limitedExpiresAt: string | null = point.limited_expires_at ?? null;
+    if (refundLimited > 0) {
+      if (!limitedExpiresAt && restoreExpiresAt) {
+        // 現在 limited が空で期限も無い → redeem 時の期限を戻す
+        limitedExpiresAt = restoreExpiresAt;
+      } else if (limitedExpiresAt && restoreExpiresAt) {
+        // 両方ある → より早い期限を優先（安全側）
+        limitedExpiresAt = new Date(limitedExpiresAt) < new Date(restoreExpiresAt) ? limitedExpiresAt : restoreExpiresAt;
+      }
+    }
     const newRank = determineRank(point.total_spent);
     await upsertLoyaltyPoint(c.env.DB, point.friend_id, {
       balance: newBalance,
-      limitedBalance: point.limited_balance ?? 0,
+      limitedBalance: newLimitedBalance,
+      limitedExpiresAt: newLimitedBalance > 0 ? limitedExpiresAt : null,
       totalSpent: point.total_spent,
       rank: newRank,
       shopifyCustomerId,
@@ -1388,7 +1418,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
       type: 'adjust',
       points: refundPoints,
       balanceAfter: newBalance,
-      reason: `コード取り消しによるポイント返還（${code} 未使用削除）`,
+      reason: `コード取り消しによるポイント返還（${code} 未使用削除 / 復元: limited=${refundLimited},balance=${refundBalance}）`,
     });
 
     // 元の redeem トランザクションを「取り消し済み」にマーク
