@@ -24,6 +24,7 @@ import {
   calculatePoints,
   RANK_THRESHOLDS,
   RANK_MULTIPLIERS,
+  getFriendByLineUserId,
   type LoyaltyRank,
   type CampaignCondition,
   type CampaignActionType,
@@ -1403,6 +1404,149 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to cancel code' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/campaign-award — キャンペーンポイント付与（LP 等から呼ぶ）
+//
+// 8周年 LINE 連携特典など、定義済みキャンペーン (campaign_key) に対して
+// 期間限定ポイントを付与する。point-charge Worker からの移行先。
+//
+// body: { campaign_key, lineUserId?, shopifyCustomerId? }
+//   - lineUserId が指定されていれば friend を直接特定
+//   - lineUserId 無しで shopifyCustomerId のみなら loyalty_points 経由で friend 解決
+//   - friend が見つからない場合は 'not_linked' を返す
+//
+// 重複ガード: loyalty_transactions.order_id = '<campaign_key>-<friend_id>'
+// ────────────────────────────────────────────────────────────────────
+const CAMPAIGN_AWARD_RULES: Record<string, { points: number; label: string }> = {
+  '8th_anniversary_88pt': { points: 388, label: '8周年キャンペーンLINE連携特典' },
+};
+
+loyalty.post('/api/loyalty/campaign-award', async (c) => {
+  try {
+    const body = await c.req.json<{
+      campaign_key: string;
+      lineUserId?: string;
+      shopifyCustomerId?: string;
+    }>();
+
+    if (!body.campaign_key) {
+      return c.json({ success: false, error: 'campaign_key は必須です' }, 400);
+    }
+    if (!body.lineUserId && !body.shopifyCustomerId) {
+      return c.json({ success: false, error: 'lineUserId または shopifyCustomerId が必要です' }, 400);
+    }
+
+    const rule = CAMPAIGN_AWARD_RULES[body.campaign_key];
+    if (!rule) {
+      return c.json({ success: false, error: `未定義のキャンペーン: ${body.campaign_key}` }, 400);
+    }
+
+    // friend を特定
+    let friendId: string | null = null;
+    let shopifyCustomerId: string | null = body.shopifyCustomerId ?? null;
+    if (body.lineUserId) {
+      const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+      if (friend) friendId = friend.id;
+    }
+    if (!friendId && shopifyCustomerId) {
+      const lp = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+      if (lp) friendId = lp.friend_id;
+    }
+    if (!friendId) {
+      return c.json(
+        {
+          success: false,
+          error: 'not_linked',
+          message: 'LINE連携が完了していません。先に友だち追加・連携してください。',
+        },
+        400,
+      );
+    }
+
+    // 期限設定を取得 (campaign_expiry_config テーブル、デフォルト 60 日)
+    const expiryConfig = await c.env.DB
+      .prepare(`SELECT expiry_days FROM campaign_expiry_config WHERE campaign_key = ? AND is_active = 1`)
+      .bind(body.campaign_key)
+      .first<{ expiry_days: number }>();
+    const expiryDays = expiryConfig?.expiry_days ?? 60;
+    const now = new Date();
+    const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00');
+    const jstExpiry = new Date(now.getTime() + (9 * 60 + expiryDays * 24 * 60) * 60 * 1000)
+      .toISOString()
+      .replace('Z', '+09:00');
+
+    // 重複ガード
+    const orderId = `${body.campaign_key}-${friendId}`;
+    const existing = await c.env.DB
+      .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? LIMIT 1`)
+      .bind(orderId)
+      .first();
+    if (existing) {
+      return c.json({
+        success: true,
+        data: {
+          awarded: false,
+          reason: '既に付与済み',
+          campaign_key: body.campaign_key,
+        },
+      });
+    }
+
+    // shopifyCustomerId が未指定の場合は loyalty_points から取得
+    if (!shopifyCustomerId) {
+      const lp = await getLoyaltyPoint(c.env.DB, friendId);
+      shopifyCustomerId = lp?.shopify_customer_id ?? null;
+    }
+
+    // loyalty_points に limited_balance を加算
+    const current = await getLoyaltyPoint(c.env.DB, friendId);
+    const newLimited = (current?.limited_balance ?? 0) + rule.points;
+    // 期限: 既存があれば早い方を優先 (安全側)
+    let mergedExpiry: string = jstExpiry;
+    if (current?.limited_expires_at) {
+      mergedExpiry = new Date(current.limited_expires_at) < new Date(jstExpiry)
+        ? current.limited_expires_at
+        : jstExpiry;
+    }
+    const rank = (current?.rank as LoyaltyRank) ?? 'レギュラー';
+
+    await upsertLoyaltyPoint(c.env.DB, friendId, {
+      balance: current?.balance ?? 0,
+      limitedBalance: newLimited,
+      limitedExpiresAt: mergedExpiry,
+      totalSpent: current?.total_spent ?? 0,
+      rank,
+      shopifyCustomerId: shopifyCustomerId ?? undefined,
+    });
+
+    const totalAfter = (current?.balance ?? 0) + newLimited;
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId,
+      type: 'award',
+      points: rule.points,
+      balanceAfter: totalAfter,
+      reason: `${rule.label}: +${rule.points}pt（${expiryDays}日期限）`,
+      orderId,
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        awarded: true,
+        friend_id: friendId,
+        shopify_customer_id: shopifyCustomerId,
+        points: rule.points,
+        campaign_key: body.campaign_key,
+        expires_at: mergedExpiry,
+        expiry_days: expiryDays,
+      },
+    });
+  } catch (err) {
+    console.error('POST /api/loyalty/campaign-award error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
 
