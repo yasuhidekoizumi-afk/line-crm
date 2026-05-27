@@ -488,6 +488,161 @@ export async function getLoyaltyTransactions(
   return { items: rows.results, total: countRow?.n ?? 0 };
 }
 
+// ────────────────────────────────────────────────────────────────────
+// mutateLoyaltyPoint — 残高変更の唯一の正規ルート
+//
+// 「balance / limited_balance を変更したら必ず loyalty_transactions を記録する」
+// 不変条件を関数内に閉じ込めることで、過去の「DB直 UPDATE で履歴が残らない」
+// 系の事故 (cancel-code 全額 balance 返還、誕生日100pt 二重カウント等) を
+// 構造的に防ぐ。
+//
+// 差分 (deltaBalance / deltaLimited) を指定するだけで:
+//   1. 現在残高を取得
+//   2. 新残高を計算 (負にならないようガード)
+//   3. UPSERT で loyalty_points を更新
+//   4. 同じ D1 batch で loyalty_transactions に挿入 (balance_after は新合計)
+//
+// 期間限定の expires_at は:
+//   - deltaLimited > 0 のとき: limitedExpiresAt (引数) で上書き or 既存と早い方を優先
+//   - deltaLimited <= 0 で残量0になったとき: null にリセット
+//   - それ以外: 既存値を維持
+// ────────────────────────────────────────────────────────────────────
+export type MutateLoyaltyInput = {
+  friendId: string;
+  /** balance(通常)の増減。0 可。 */
+  deltaBalance?: number;
+  /** limited_balance(期間限定)の増減。0 可。 */
+  deltaLimited?: number;
+  /** deltaLimited > 0 の場合に設定したい有効期限 (ISO 文字列)。未指定なら既存維持。 */
+  limitedExpiresAt?: string | null;
+  /** 期限上書きポリシー: 'earliest'(早い方優先=デフォルト) / 'replace'(無条件で置換) */
+  expiryPolicy?: 'earliest' | 'replace';
+  /** total_spent の増減 (購入時に加算)。省略時は既存維持。 */
+  deltaTotalSpent?: number;
+  /** トランザクションログの type */
+  txType: TransactionType;
+  /** トランザクションログの reason (任意) */
+  reason?: string;
+  /** トランザクションログの order_id (任意) */
+  orderId?: string;
+  /** トランザクションログの staff_id (任意) */
+  staffId?: string;
+  /** Shopify 顧客ID (まだ紐付けされていない friend なら必須) */
+  shopifyCustomerId?: string;
+  /** award の場合の有効期限日数 (loyalty_transactions.expires_at 用、UI表示専用) */
+  expiryDays?: number;
+};
+
+export type MutateLoyaltyResult = {
+  balanceBefore: number;
+  limitedBefore: number;
+  balanceAfter: number;
+  limitedAfter: number;
+  grandTotalAfter: number;
+  txId: string;
+};
+
+export async function mutateLoyaltyPoint(
+  db: D1Database,
+  input: MutateLoyaltyInput,
+): Promise<MutateLoyaltyResult> {
+  const deltaBalance = input.deltaBalance ?? 0;
+  const deltaLimited = input.deltaLimited ?? 0;
+  if (deltaBalance === 0 && deltaLimited === 0 && (input.deltaTotalSpent ?? 0) === 0) {
+    // 動かない: それでも監査用に記録だけは残す (points=0 の adjust)
+  }
+
+  // 現在残高
+  const current = await getLoyaltyPoint(db, input.friendId);
+  const balanceBefore = current?.balance ?? 0;
+  const limitedBefore = current?.limited_balance ?? 0;
+  const totalSpentBefore = current?.total_spent ?? 0;
+  const rankBefore = (current?.rank as LoyaltyRank) ?? 'レギュラー';
+
+  // 新残高 (負ガード)
+  const balanceAfter = Math.max(0, balanceBefore + deltaBalance);
+  const limitedAfter = Math.max(0, limitedBefore + deltaLimited);
+  const grandTotalAfter = balanceAfter + limitedAfter;
+  const totalSpentAfter = totalSpentBefore + (input.deltaTotalSpent ?? 0);
+  const newRank = determineRank(totalSpentAfter);
+
+  // 期限マージ
+  let mergedExpiry: string | null = current?.limited_expires_at ?? null;
+  if (limitedAfter === 0) {
+    mergedExpiry = null; // 残高0なら期限破棄
+  } else if (deltaLimited > 0 && input.limitedExpiresAt !== undefined) {
+    const policy = input.expiryPolicy ?? 'earliest';
+    if (policy === 'replace' || !mergedExpiry) {
+      mergedExpiry = input.limitedExpiresAt;
+    } else if (input.limitedExpiresAt && new Date(input.limitedExpiresAt) < new Date(mergedExpiry)) {
+      mergedExpiry = input.limitedExpiresAt;
+    }
+  }
+
+  const now = jstNow();
+  const txId = crypto.randomUUID();
+  const days = input.expiryDays ?? 365;
+  const txExpiresAt =
+    input.txType === 'award'
+      ? new Date(new Date(now).getTime() + days * 24 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '.000')
+      : null;
+  const lpId = current ? null : crypto.randomUUID();
+
+  // 1 batch で UPSERT + INSERT を実行 (D1 はトランザクション境界として batch を扱う)
+  const stmts = [
+    db.prepare(
+      `INSERT INTO loyalty_points (id, friend_id, balance, limited_balance, limited_expires_at, total_spent, rank, shopify_customer_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (friend_id) DO UPDATE SET
+         balance = excluded.balance,
+         limited_balance = excluded.limited_balance,
+         limited_expires_at = excluded.limited_expires_at,
+         total_spent = excluded.total_spent,
+         rank = excluded.rank,
+         shopify_customer_id = COALESCE(excluded.shopify_customer_id, loyalty_points.shopify_customer_id),
+         updated_at = excluded.updated_at`,
+    ).bind(
+      lpId ?? current!.id,
+      input.friendId,
+      balanceAfter,
+      limitedAfter,
+      mergedExpiry,
+      totalSpentAfter,
+      newRank,
+      input.shopifyCustomerId ?? current?.shopify_customer_id ?? null,
+      now,
+      now,
+    ),
+    db.prepare(
+      `INSERT INTO loyalty_transactions (id, friend_id, type, points, balance_after, reason, order_id, staff_id, created_at, expires_at, source_tx_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      txId,
+      input.friendId,
+      input.txType,
+      deltaBalance + deltaLimited,
+      grandTotalAfter,
+      input.reason ?? null,
+      input.orderId ?? null,
+      input.staffId ?? null,
+      now,
+      txExpiresAt,
+      null,
+    ),
+  ];
+
+  await db.batch(stmts);
+
+  return {
+    balanceBefore,
+    limitedBefore,
+    balanceAfter,
+    limitedAfter,
+    grandTotalAfter,
+    txId,
+  };
+}
+
 export async function getLoyaltyPointByShopifyCustomerId(
   db: D1Database,
   shopifyCustomerId: string,
