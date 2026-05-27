@@ -918,18 +918,28 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
     const currentBalance = current?.balance ?? 0;
     const currentLimited = current?.limited_balance ?? 0;
     const awardedPoints = 100;
-    const newBalance = currentBalance + awardedPoints;
     const expiryDays = 60;
 
     const expiry = new Date();
     expiry.setDate(expiry.getDate() + expiryDays);
     const limitedExpiresAt = expiry.toISOString();
 
-    // 3. ポイント付与
+    // 期限がより早ければ既存の期限を優先（安全側）
+    let mergedExpiry: string = limitedExpiresAt;
+    if (current?.limited_expires_at) {
+      mergedExpiry = new Date(current.limited_expires_at) < new Date(limitedExpiresAt)
+        ? current.limited_expires_at
+        : limitedExpiresAt;
+    }
+
+    // 3. ポイント付与 (期間限定 limited_balance のみに +100pt)
+    // balance には加算しない (二重カウント防止)
+    const newLimited = currentLimited + awardedPoints;
+    const balanceAfter = currentBalance + newLimited;
     await upsertLoyaltyPoint(c.env.DB, friendId, {
-      balance: newBalance,
-      limitedBalance: (currentLimited ?? 0) + awardedPoints,
-      limitedExpiresAt,
+      balance: currentBalance,
+      limitedBalance: newLimited,
+      limitedExpiresAt: mergedExpiry,
       totalSpent: current?.total_spent ?? 0,
       rank: (current?.rank as LoyaltyRank) ?? 'レギュラー',
       shopifyCustomerId,
@@ -939,7 +949,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
       friendId,
       type: 'award',
       points: awardedPoints,
-      balanceAfter: newBalance,
+      balanceAfter,
       reason: `誕生日登録ボーナス: +${awardedPoints}pt（${expiryDays}日期限）`,
       expiryDays,
     });
@@ -963,7 +973,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
               `🎂 ${displayName}さん、誕生日登録ありがとうございます！\n\n` +
               `誕生日: ${bdayDisplay}\n` +
               `✨ ${awardedPoints}ptをプレゼントしました（${expiryDays}日期限）\n\n` +
-              `📊 現在の残高: ${newBalance}pt\n` +
+              `📊 現在の残高: ${balanceAfter}pt\n` +
               `🛒 カートでポイントをご利用いただけます`;
 
             await fetch('https://api.line.me/v2/bot/message/push', {
@@ -1069,7 +1079,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
                               <table style="width:100%;font-size:13px;color:#5c4a2e;">
                                 <tr><td style="padding:4px 0;">誕生日</td><td style="padding:4px 0;font-weight:600;text-align:right;">${bdayDisplay}</td></tr>
                                 <tr><td style="padding:4px 0;">プレゼント</td><td style="padding:4px 0;font-weight:600;text-align:right;color:#b8860b;">100pt（${expiryDays}日期限）</td></tr>
-                                <tr><td style="padding:4px 0;">現在の残高</td><td style="padding:4px 0;font-weight:600;text-align:right;">${newBalance}pt</td></tr>
+                                <tr><td style="padding:4px 0;">現在の残高</td><td style="padding:4px 0;font-weight:600;text-align:right;">${balanceAfter}pt</td></tr>
                               </table>
                             </div>
 
