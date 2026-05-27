@@ -267,6 +267,14 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
         .then((r) => { if (r.matched > 0) console.log(`[auto-match] matched ${r.matched} orders`); })
         .catch((e) => console.error('[auto-match] error:', e))
     );
+    // ロイヤルティポイントの整合性チェック (残高乖離 / 異常ジャンプ / cancel連発)
+    // 異常検出時は SLACK_WEBHOOK_URL に通知
+    jobs.push(
+      import('./services/loyalty-integrity-check.js')
+        .then(({ runLoyaltyIntegrityCheck }) => runLoyaltyIntegrityCheck(env))
+        .then((r) => { if (r.issues.length > 0) console.log(`[loyalty-integrity] ${r.issues.length} issues detected`); })
+        .catch((e) => console.error('[loyalty-integrity] error:', e))
+    );
   } else if (cronExpr === '0 0 * * *') {
     jobs.push(sendDailySummary(env));
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
