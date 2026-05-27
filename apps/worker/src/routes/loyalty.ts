@@ -1375,11 +1375,21 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     }
 
     // 元のポイント数を reason から逆算
+    // 重要: [取り消し済み] プレフィックス付きの redeem は除外する
+    // (過去に取り消されたコードを再度 cancel-code すると二重返還される事故を防ぐ)
     const latestRedeem = await c.env.DB
-      .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? ORDER BY created_at DESC LIMIT 1`)
+      .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
       .bind(point.friend_id, `%コード: ${code}%`)
       .first<{ reason: string }>();
-    const m = latestRedeem?.reason?.match(/¥(\d+)割引/);
+
+    if (!latestRedeem) {
+      return c.json({
+        success: false,
+        error: 'すでに取り消し済み、または対象の利用記録が見つかりません',
+      }, 400);
+    }
+
+    const m = latestRedeem.reason?.match(/¥(\d+)割引/);
     const refundPoints = m ? parseInt(m[1], 10) : 0;
 
     if (refundPoints <= 0) {
