@@ -1442,8 +1442,9 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     });
 
     // 元の redeem トランザクションを「取り消し済み」にマーク
+    // 既に [取り消し済み] プレフィックスが付いている row には重ねない (二重プレフィックス防止)
     await c.env.DB
-      .prepare(`UPDATE loyalty_transactions SET reason = '[取り消し済み] ' || reason WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ?`)
+      .prepare(`UPDATE loyalty_transactions SET reason = '[取り消し済み] ' || reason WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? AND reason NOT LIKE '[取り消し済み]%'`)
       .bind(point.friend_id, `%コード: ${code}%`)
       .run();
 
