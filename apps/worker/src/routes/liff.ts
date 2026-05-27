@@ -43,6 +43,7 @@ liffRoutes.get('/auth/line', async (c) => {
   const utmSource = c.req.query('utm_source') || '';
   const utmMedium = c.req.query('utm_medium') || '';
   const utmCampaign = c.req.query('utm_campaign') || '';
+  const cidParam = c.req.query('cid') || ''; // Shopify customer ID for link-and-bonus on callback
   const accountParam = c.req.query('account') || '';
   const uidParam = c.req.query('uid') || ''; // existing user UUID for cross-account linking
   const baseUrl = new URL(c.req.url).origin;
@@ -86,7 +87,7 @@ liffRoutes.get('/auth/line', async (c) => {
   // Pack all tracking params into state so they survive the OAuth redirect.
   // The full ref (including xh: tokens) is stored in state — it is opaque to access.line.me
   // and only decoded by this worker's /auth/callback handler.
-  const state = JSON.stringify({ ref, redirect, gclid, fbclid, twclid, ttclid, utmSource, utmMedium, utmCampaign, account: accountParam, uid: uidParam });
+  const state = JSON.stringify({ ref, redirect, gclid, fbclid, twclid, ttclid, utmSource, utmMedium, utmCampaign, account: accountParam, uid: uidParam, cid: cidParam });
   const encodedState = btoa(state);
   const loginUrl = new URL('https://access.line.me/oauth2/v2.1/authorize');
   loginUrl.searchParams.set('response_type', 'code');
@@ -172,6 +173,7 @@ liffRoutes.get('/auth/callback', async (c) => {
   let utmCampaign = '';
   let accountParam = '';
   let uidParam = '';
+  let cidParam = '';
   try {
     const parsed = JSON.parse(atob(stateParam));
     ref = parsed.ref || '';
@@ -185,6 +187,7 @@ liffRoutes.get('/auth/callback', async (c) => {
     utmCampaign = parsed.utmCampaign || '';
     accountParam = parsed.account || '';
     uidParam = parsed.uid || '';
+    cidParam = parsed.cid || '';
   } catch {
     // ignore
   }
@@ -373,6 +376,16 @@ liffRoutes.get('/auth/callback', async (c) => {
         .prepare('UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?')
         .bind(JSON.stringify(merged), jstNow(), friend.id)
         .run();
+    }
+
+    // Shopify customer link + LINE連携ボーナス（cid 経由・/auth/line?cid=<shopify_customer_id>）
+    // セキュリティ: 紐付け済みShopify顧客IDは上書きしない（friend_id単位で1回のみのボーナス）
+    if (cidParam) {
+      try {
+        await linkShopifyCustomerAndAwardBonus(c.env.DB, friend.id, cidParam);
+      } catch (err) {
+        console.error('LINE連携ボーナス処理エラー (non-blocking):', err);
+      }
     }
 
     // X Harness token resolution: ref starting with "xh:" links X account to LINE friend
@@ -681,6 +694,123 @@ liffRoutes.post('/api/liff/link', async (c) => {
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
+
+/**
+ * Shopify顧客IDをLINE friendに紐付け＋LINE連携ボーナス（300pt・60日期限）を付与する。
+ *
+ * セキュリティ方針:
+ * - 既に他のLINE friendに紐付け済みのShopify顧客IDは上書きしない（なりすまし防止）
+ * - sp_ プレースホルダー（Webhook先行で作られた仮 friend）は合流させる
+ * - ボーナスは friend_id 単位で1回のみ（loyalty_transactions WHERE reason='LINE連携ボーナス' で重複チェック）
+ *
+ * /auth/callback から呼び出される。エラーは呼び出し元で握りつぶす想定（連携体験を阻害しない）。
+ */
+async function linkShopifyCustomerAndAwardBonus(
+  db: D1Database,
+  friendId: string,
+  shopifyCustomerId: string,
+): Promise<{ linked: boolean; bonusAwarded: number }> {
+  const {
+    getLoyaltyPoint,
+    getLoyaltyPointByShopifyCustomerId,
+    getLoyaltySetting,
+    upsertLoyaltyPoint,
+    addLoyaltyTransaction,
+  } = await import('@line-crm/db');
+
+  // 他の友だちが既にこのShopify顧客と紐付いていないかチェック
+  const existing = await getLoyaltyPointByShopifyCustomerId(db, shopifyCustomerId);
+  if (existing && existing.friend_id !== friendId) {
+    // sp_ プレフィックスは Shopify webhook が先行で作成したプレースホルダー友だち → 本 friend に合流
+    if (existing.friend_id.startsWith('sp_')) {
+      const spFriendId = existing.friend_id;
+      const realLoyalty = await getLoyaltyPoint(db, friendId);
+
+      // トランザクションを本 friend に付け替え
+      await db
+        .prepare(`UPDATE loyalty_transactions SET friend_id = ? WHERE friend_id = ?`)
+        .bind(friendId, spFriendId)
+        .run();
+
+      if (realLoyalty) {
+        const mergedBalance = (realLoyalty.balance ?? 0) + (existing.balance ?? 0);
+        const mergedTotalSpent = (realLoyalty.total_spent ?? 0) + (existing.total_spent ?? 0);
+        const rankOrder = ['レギュラー', 'シルバー', 'ゴールド', 'プラチナ', 'ダイヤモンド'];
+        const higherRank =
+          rankOrder.indexOf(existing.rank ?? 'レギュラー') > rankOrder.indexOf(realLoyalty.rank ?? 'レギュラー')
+            ? (existing.rank ?? 'レギュラー')
+            : (realLoyalty.rank ?? 'レギュラー');
+        await upsertLoyaltyPoint(db, friendId, {
+          balance: mergedBalance,
+          totalSpent: mergedTotalSpent,
+          rank: higherRank,
+          shopifyCustomerId,
+        });
+        await db.prepare(`DELETE FROM loyalty_points WHERE friend_id = ?`).bind(spFriendId).run();
+      } else {
+        await db
+          .prepare(`UPDATE loyalty_points SET friend_id = ? WHERE friend_id = ?`)
+          .bind(friendId, spFriendId)
+          .run();
+      }
+      await db.prepare(`DELETE FROM friends WHERE id = ?`).bind(spFriendId).run();
+      console.log(`[auth/callback] Merged placeholder ${spFriendId} into ${friendId}`);
+    } else {
+      // 既に別の実 friend に紐付け済み → 紐付けスキップ・ボーナスも付与しない（なりすまし防止）
+      console.log(`[auth/callback] Shopify customer ${shopifyCustomerId} already linked to ${existing.friend_id}, skipping`);
+      return { linked: false, bonusAwarded: 0 };
+    }
+  }
+
+  // 紐付け
+  const current = await getLoyaltyPoint(db, friendId);
+  await upsertLoyaltyPoint(db, friendId, {
+    balance: current?.balance ?? 0,
+    totalSpent: current?.total_spent ?? 0,
+    rank: current?.rank ?? 'レギュラー',
+    shopifyCustomerId,
+  });
+
+  // LINE連携ボーナス（friend_id単位で1回のみ）
+  const bonusEnabledSetting = await getLoyaltySetting(db, 'link_bonus_enabled').catch(() => null);
+  const bonusPointsSetting = await getLoyaltySetting(db, 'link_bonus_points').catch(() => null);
+  const bonusEnabled = (bonusEnabledSetting ?? '1') === '1';
+  const bonusPoints = parseInt(bonusPointsSetting ?? '300', 10) || 300;
+
+  if (!bonusEnabled || bonusPoints <= 0) {
+    return { linked: true, bonusAwarded: 0 };
+  }
+
+  const existingBonus = await db
+    .prepare(`SELECT 1 FROM loyalty_transactions WHERE friend_id = ? AND reason = 'LINE連携ボーナス' LIMIT 1`)
+    .bind(friendId)
+    .first();
+  if (existingBonus) {
+    return { linked: true, bonusAwarded: 0 };
+  }
+
+  const beforeBonus = await getLoyaltyPoint(db, friendId);
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + 60);
+  const newLimitedBalance = (beforeBonus?.limited_balance ?? 0) + bonusPoints;
+  await upsertLoyaltyPoint(db, friendId, {
+    balance: beforeBonus?.balance ?? 0,
+    limitedBalance: newLimitedBalance,
+    limitedExpiresAt: expiry.toISOString(),
+    totalSpent: beforeBonus?.total_spent ?? 0,
+    rank: beforeBonus?.rank ?? 'レギュラー',
+    shopifyCustomerId,
+  });
+  await addLoyaltyTransaction(db, {
+    friendId,
+    type: 'award',
+    points: bonusPoints,
+    balanceAfter: (beforeBonus?.balance ?? 0) + newLimitedBalance,
+    reason: 'LINE連携ボーナス',
+  });
+
+  return { linked: true, bonusAwarded: bonusPoints };
+}
 
 /**
  * Shopify Liquid 側で発行された HMAC 署名を検証する。
