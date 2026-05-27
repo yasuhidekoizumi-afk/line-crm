@@ -105,7 +105,7 @@ export async function backfillPendingOrders(
       friendId,
       type: 'award',
       points: earnedPoints,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance + (current?.limited_balance ?? 0),
       reason: `LINE連携時の遡及付与（¥${row.order_amount.toLocaleString('ja-JP')}）`,
       orderId,
       expiryDays,

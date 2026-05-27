@@ -1110,7 +1110,7 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
             friendId: friend.id,
             type: 'adjust',
             points: promo.points,
-            balanceAfter: promoBalance,
+            balanceAfter: promoBalance + (afterBonus?.limited_balance ?? 0),
             reason: promo.reason,
           });
           promoPointsAwarded = promo.points;
@@ -1214,7 +1214,7 @@ liffRoutes.post('/api/liff/promo-grant', async (c) => {
       friendId: friend.id,
       type: 'adjust',
       points: promo.points,
-      balanceAfter: newBalance,
+      balanceAfter: newBalance + (loyaltyPoint.limited_balance ?? 0),
       reason: promo.reason,
       expiresAt,
     });
