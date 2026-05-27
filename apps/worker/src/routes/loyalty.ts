@@ -919,31 +919,20 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
     const currentBalance = current?.balance ?? 0;
     const currentLimited = current?.limited_balance ?? 0;
     const awardedPoints = 100;
-    const expiryDays = 60;
 
-    const expiry = new Date();
-    expiry.setDate(expiry.getDate() + expiryDays);
-    const limitedExpiresAt = expiry.toISOString();
-
-    // 期限がより早ければ既存の期限を優先（安全側）
-    let mergedExpiry: string = limitedExpiresAt;
-    if (current?.limited_expires_at) {
-      mergedExpiry = new Date(current.limited_expires_at) < new Date(limitedExpiresAt)
-        ? current.limited_expires_at
-        : limitedExpiresAt;
-    }
-
-    // 3. ポイント付与 (期間限定 limited_balance のみに +100pt)
-    // balance には加算しない (二重カウント防止)
-    const newLimited = currentLimited + awardedPoints;
-    const balanceAfter = currentBalance + newLimited;
+    // 誕生日登録ボーナスは「生年月日という個人情報を提供してくれたお礼」であり、
+    // 購買促進ボーナスではないため、通常ポイント (balance) として無期限で付与する。
+    // 期間限定 (limited_balance) にすると「条件付きで罠あり」と感じられ、
+    // 登録CVR低下 → 誕生月クーポンセグメント施策の弱体化につながる。
+    // 購買促進は別途「誕生月クーポン」(期間限定) で担う設計。
+    const newBalance = currentBalance + awardedPoints;
+    const balanceAfter = newBalance + currentLimited;
     await upsertLoyaltyPoint(c.env.DB, friendId, {
-      balance: currentBalance,
-      limitedBalance: newLimited,
-      limitedExpiresAt: mergedExpiry,
+      balance: newBalance,
       totalSpent: current?.total_spent ?? 0,
       rank: (current?.rank as LoyaltyRank) ?? 'レギュラー',
       shopifyCustomerId,
+      // limitedBalance / limitedExpiresAt は意図的に渡さない (PR #112 により既存値保持)
     });
 
     await addLoyaltyTransaction(c.env.DB, {
@@ -951,8 +940,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
       type: 'award',
       points: awardedPoints,
       balanceAfter,
-      reason: `誕生日登録ボーナス: +${awardedPoints}pt（${expiryDays}日期限）`,
-      expiryDays,
+      reason: `誕生日登録ボーナス: +${awardedPoints}pt`,
     });
 
     // 4. LINE or メール通知（非同期・失敗しても付与には影響させない）
@@ -973,7 +961,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
             const lineMsg =
               `🎂 ${displayName}さん、誕生日登録ありがとうございます！\n\n` +
               `誕生日: ${bdayDisplay}\n` +
-              `✨ ${awardedPoints}ptをプレゼントしました（${expiryDays}日期限）\n\n` +
+              `✨ ${awardedPoints}ptをプレゼントしました\n\n` +
               `📊 現在の残高: ${balanceAfter}pt\n` +
               `🛒 カートでポイントをご利用いただけます`;
 
@@ -1079,7 +1067,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
                             <div style="background:#fbf6ed;border:1px solid #ead6b0;border-radius:10px;padding:16px;margin:0 0 20px;">
                               <table style="width:100%;font-size:13px;color:#5c4a2e;">
                                 <tr><td style="padding:4px 0;">誕生日</td><td style="padding:4px 0;font-weight:600;text-align:right;">${bdayDisplay}</td></tr>
-                                <tr><td style="padding:4px 0;">プレゼント</td><td style="padding:4px 0;font-weight:600;text-align:right;color:#b8860b;">100pt（${expiryDays}日期限）</td></tr>
+                                <tr><td style="padding:4px 0;">プレゼント</td><td style="padding:4px 0;font-weight:600;text-align:right;color:#b8860b;">100pt</td></tr>
                                 <tr><td style="padding:4px 0;">現在の残高</td><td style="padding:4px 0;font-weight:600;text-align:right;">${balanceAfter}pt</td></tr>
                               </table>
                             </div>
@@ -1100,7 +1088,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
                             </p>
 
                             <p style="margin:0;font-size:12px;color:#999;text-align:center;">
-                              期間限定ポイントは60日間有効です。<br>
+                              ポイントは無期限でご利用いただけます。<br>
                               カートでもポイント残高をご確認いただけます。
                             </p>
                           </div>
