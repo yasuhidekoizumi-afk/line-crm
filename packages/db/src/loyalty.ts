@@ -463,8 +463,10 @@ export async function addLoyaltyTransaction(
   const now = jstNow();
   const days = input.expiryDays ?? 365;
   // award トランザクションは付与日 + expiryDays 日で失効
+  // expiryDays = 0 を渡すと無期限 (expires_at = null) として扱う。
+  // 誕生日登録ボーナス・LINE連携ボーナスのような通常ポイント付与で使う想定。
   const expiresAt =
-    input.type === 'award'
+    input.type === 'award' && days > 0
       ? new Date(new Date(now).getTime() + days * 24 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '.000')
       : null;
   await db

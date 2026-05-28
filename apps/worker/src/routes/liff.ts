@@ -825,6 +825,7 @@ async function linkShopifyCustomerAndAwardBonus(
     points: bonusPoints,
     balanceAfter: newBalance + (beforeBonus?.limited_balance ?? 0),
     reason: 'LINE連携ボーナス',
+    expiryDays: 0, // 通常ポイント (balance) として無期限付与のため
   });
 
   return { linked: true, bonusAwarded: bonusPoints };

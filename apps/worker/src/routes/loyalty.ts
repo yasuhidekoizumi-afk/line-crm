@@ -941,6 +941,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
       points: awardedPoints,
       balanceAfter,
       reason: `誕生日登録ボーナス: +${awardedPoints}pt`,
+      expiryDays: 0, // 通常ポイント (balance) として無期限付与のため
     });
 
     // 4. LINE or メール通知（非同期・失敗しても付与には影響させない）

@@ -74,6 +74,11 @@ export async function processLoyaltyExpirations(
 
 /**
  * FIFO: 指定された award トランザクションから未使用のポイント数を計算する
+ *
+ * 注意: '[取り消し済み]' プレフィックス付きの redeem は実際には消費していない
+ * （cancel-code で返還済み）ため、consumed から除外する必要がある。
+ * これを含めると、未消費判定が低めになり期限切れ時に balance から
+ * 過剰に引かれてしまう (画山さん事例で発覚)。
  */
 async function calcUnspentFromAward(
   db: D1Database,
@@ -81,12 +86,14 @@ async function calcUnspentFromAward(
   awardId: string,
   awardPoints: number,
 ): Promise<number> {
-  // 消費済み合計（redeem + expire）
+  // 消費済み合計（redeem + expire、ただし [取り消し済み] プレフィックスは除外）
   const consumed = await db
     .prepare(
       `SELECT COALESCE(SUM(ABS(points)), 0) as total
        FROM loyalty_transactions
-       WHERE friend_id = ? AND type IN ('redeem', 'expire')`,
+       WHERE friend_id = ?
+         AND type IN ('redeem', 'expire')
+         AND (reason IS NULL OR reason NOT LIKE '[取り消し済み]%')`,
     )
     .bind(friendId)
     .first<{ total: number }>();
