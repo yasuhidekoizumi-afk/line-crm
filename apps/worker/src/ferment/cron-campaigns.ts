@@ -8,7 +8,7 @@
  *   - apps/worker/src/index.ts (scheduled handler)
  */
 
-import { getScheduledCampaignsDue, updateEmailCampaign, getSegmentMembersWithEmail } from '@line-crm/db';
+import { getScheduledCampaignsDue, updateEmailCampaign } from '@line-crm/db';
 import { executeCampaign } from './send-engine.js';
 import { notifySlack } from './slack-notifier.js';
 
@@ -38,10 +38,12 @@ export async function processScheduledEmailCampaigns(env: FermentEnv): Promise<v
     try {
       // 対象顧客数を取得して total_targets を更新
       if (campaign.segment_id) {
-        const sample = await getSegmentMembersWithEmail(env.DB, campaign.segment_id, 1, 0);
-        const allMembers = await getSegmentMembersWithEmail(env.DB, campaign.segment_id, 10000, 0);
+        const countResult = await env.DB
+          .prepare(`SELECT COUNT(*) AS total FROM segment_members WHERE segment_id = ?`)
+          .bind(campaign.segment_id)
+          .first<{ total: number }>();
         await updateEmailCampaign(env.DB, campaign.campaign_id, {
-          total_targets: allMembers.length,
+          total_targets: countResult?.total ?? 0,
         });
       }
 

@@ -262,21 +262,22 @@ function rulesGroupToSql(group: SegmentGroupCondition): QueryPart {
  * セグメント条件に合致する顧客 ID を D1 から取得する
  *
  * @param rules セグメントルール DSL
- * @param db D1 データベース
- * @returns 該当する customer_id の配列
- */
-export async function querySegmentCustomerIds(
-  rules: SegmentRules,
-  db: D1Database,
-): Promise<string[]> {
-  const { sql: whereSql, bindings } = rulesGroupToSql(rules);
+ /**
+  * セグメント条件に合致する顧客IDを取得する（最大10000件に制限）
+  */
+ export async function querySegmentCustomerIds(
+   rules: SegmentRules,
+   db: D1Database,
+ ): Promise<string[]> {
+   const { sql: whereSql, bindings } = rulesGroupToSql(rules);
 
-  const query = `
-    SELECT c.customer_id
-    FROM customers c
-    WHERE ${whereSql}
-    ORDER BY c.created_at DESC
-  `;
+   const query = `
+     SELECT c.customer_id
+     FROM customers c
+     WHERE ${whereSql}
+     ORDER BY c.created_at DESC
+     LIMIT 10000
+   `;
 
   const result = await db
     .prepare(query)
@@ -304,10 +305,10 @@ export async function computeSegment(segmentId: string, db: D1Database): Promise
     throw new Error(`Invalid segment rules JSON: ${segment.rules}`);
   }
 
-  // ルールが空の場合は全顧客を対象
+  // ルールが空の場合は全顧客を対象（最大10000件に制限: Workersメモリ対策）
   if (!rules.conditions || rules.conditions.length === 0) {
     const result = await db
-      .prepare('SELECT customer_id FROM customers ORDER BY created_at DESC')
+      .prepare('SELECT customer_id FROM customers ORDER BY created_at DESC LIMIT 10000')
       .all<{ customer_id: string }>();
     const ids = result.results.map((r) => r.customer_id);
     await replaceSegmentMembers(db, segmentId, ids);

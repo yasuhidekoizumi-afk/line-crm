@@ -19,6 +19,8 @@ export interface BackfillResult {
 /**
  * LINE連携した友だちに対し、保留中のShopify注文ポイントを遡及付与する。
  * 冪等性：同一order_idで既にaward済みのものはスキップ。処理済みはpending_ordersから削除。
+ * 
+ * 最大10件まで処理（N+1問題対策）。残りは次回のcronで処理される。
  */
 export async function backfillPendingOrders(
   db: D1Database,
@@ -31,7 +33,8 @@ export async function backfillPendingOrders(
     .prepare(
       `SELECT order_id, order_amount, currency FROM loyalty_pending_orders
        WHERE shopify_customer_id = ? AND processed_at IS NULL
-       ORDER BY created_at ASC`,
+       ORDER BY created_at ASC
+       LIMIT 10`,
     )
     .bind(shopifyCustomerId)
     .all<{ order_id: string; order_amount: number; currency: string | null }>();
