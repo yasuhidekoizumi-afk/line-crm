@@ -131,18 +131,24 @@ export default function ShopifyBiTopPage() {
       const cohortPs = new URLSearchParams()
       if (range.fromMonth && range.toMonth) { cohortPs.set('from', range.fromMonth); cohortPs.set('to', range.toMonth) }
 
-      const [statsRes, funnelRes, cohortRes, matrixRes, trafficRes] = await Promise.all([
+      const results = await Promise.allSettled([
         fetchApi<{ success: boolean; data: OrderStats }>(`/api/shopify/orders/stats?${ps}`),
         fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel?${ps}`),
         fetchApi<{ success: boolean; data: CohortRow[] }>(`/api/customer-journey/cohort?${cohortPs}`),
         fetchApi<{ success: boolean; data: ChannelMatrixRow[] }>(`/api/customer-journey/channel-matrix?${ps}`),
         fetchApi<{ success: boolean; data: TrafficSourceRow[] }>(`/api/customer-journey/traffic-source?${ps}`),
       ])
-      if (statsRes.success) setStats(statsRes.data)
-      if (funnelRes.success) setFunnel(funnelRes.data)
-      if (matrixRes.success) setChannelMatrix(matrixRes.data)
-      if (trafficRes.success) setTrafficSource(trafficRes.data)
-      if (cohortRes.success) setCohort(cohortRes.data)
+      // 各APIの結果を個別に処理（1つが失敗しても他は表示）
+      if (results[0].status === 'fulfilled' && results[0].value.success) setStats(results[0].value.data)
+      else console.warn('[shopify-bi] stats API failed:', results[0])
+      if (results[1].status === 'fulfilled' && results[1].value.success) setFunnel(results[1].value.data)
+      else console.warn('[shopify-bi] funnel API failed:', results[1])
+      if (results[2].status === 'fulfilled' && results[2].value.success) setCohort(results[2].value.data)
+      else console.warn('[shopify-bi] cohort API failed:', results[2])
+      if (results[3].status === 'fulfilled' && results[3].value.success) setChannelMatrix(results[3].value.data)
+      else console.warn('[shopify-bi] channel-matrix API failed:', results[3])
+      if (results[4].status === 'fulfilled' && results[4].value.success) setTrafficSource(results[4].value.data)
+      else console.warn('[shopify-bi] traffic-source API failed:', results[4])
     } catch (e) {
       setError(`読み込み失敗: ${String(e)}`)
     } finally {
@@ -174,12 +180,12 @@ export default function ShopifyBiTopPage() {
       if (range.fromMonth && range.toMonth) { cohortPs.set('from', range.fromMonth); cohortPs.set('to', range.toMonth) }
       const ps = new URLSearchParams()
       if (range.from && range.to) { ps.set('from', range.from); ps.set('to', range.to) }
-      const [funnelRes, cohortRes] = await Promise.all([
+      const [funnelRes, cohortRes] = await Promise.allSettled([
         fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel?${ps}`),
         fetchApi<{ success: boolean; data: CohortRow[] }>(`/api/customer-journey/cohort?${cohortPs}`),
       ])
-      if (funnelRes.success) setFunnel(funnelRes.data)
-      if (cohortRes.success) setCohort(cohortRes.data)
+      if (funnelRes.status === 'fulfilled' && funnelRes.value.success) setFunnel(funnelRes.value.data)
+      if (cohortRes.status === 'fulfilled' && cohortRes.value.success) setCohort(cohortRes.value.data)
     } catch (e) {
       setError(`再計算失敗: ${String(e)}`)
     } finally {
