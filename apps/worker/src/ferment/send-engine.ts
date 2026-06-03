@@ -206,7 +206,7 @@ export async function executeCampaign(
     await updateEmailCampaign(env.DB, campaignId, { status: 'sending' });
   }
 
-  const BATCH_SIZE = 100; // 1回のバッチで処理する上限
+  const BATCH_SIZE = 40; // 1回のバッチで処理する上限（Workersサブリクエスト制限対策）
   const customers = campaign.segment_id
     ? await getSegmentMembersWithEmail(env.DB, campaign.segment_id, BATCH_SIZE, batchOffset)
     : [];
@@ -225,9 +225,9 @@ export async function executeCampaign(
     if (ok) sent++;
     else failed++;
 
-    // Resend レート制限対応: 500ms 待機（2 req/s）
+    // Resend レート制限対応: 1000ms 待機（1 req/s に調整）
     // Workers では setTimeout が使えないため fetch で代替
-    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
   }
 
   const isLastBatch = customers.length < BATCH_SIZE;
