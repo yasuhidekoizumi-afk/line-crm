@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useState, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { fetchApi } from '@/lib/api'
 import Header from '@/components/layout/header'
@@ -88,6 +88,7 @@ export default function ShopifyBiTopPage() {
   const [error, setError] = useState<string | null>(null)
   const [recomputing, setRecomputing] = useState(false)
   const [dataKey, setDataKey] = useState(0)
+  const fetchingRef = useRef(false)
 
   const calcRange = useCallback(() => {
     const now = new Date()
@@ -115,10 +116,13 @@ export default function ShopifyBiTopPage() {
     }
   }, [period, customFrom, customTo])
 
-  const range = calcRange()
+  // range を useMemo で安定化（毎レンダリングで新規オブジェクト生成を防止）
+  const range = useMemo(() => calcRange(), [period, customFrom, customTo])
 
   const fetchAll = useCallback(async () => {
     if (!range) return
+    if (fetchingRef.current) return
+    fetchingRef.current = true
     setLoading(true)
     setError(null)
     try {
@@ -142,9 +146,10 @@ export default function ShopifyBiTopPage() {
     } catch (e) {
       setError(`読み込み失敗: ${String(e)}`)
     } finally {
+      fetchingRef.current = false
       setLoading(false)
     }
-  }, [dataKey])
+  }, [dataKey, range])
 
   useEffect(() => { if (range) fetchAll() }, [fetchAll, range])
 

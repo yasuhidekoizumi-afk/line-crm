@@ -305,7 +305,8 @@ export default function AutomationsPage() {
                 {saving ? '作成中...' : '作成'}
               </button>
               <button
-                onClick={() => { setShowCreate(false); setFormError('') }}
+                type="button"
+                onClick={() => { setShowCreate(false); setForm({ ...initialForm }); setFormError('') }}
                 className="px-4 py-2 min-h-[44px] text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
               >
                 キャンセル
