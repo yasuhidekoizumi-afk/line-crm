@@ -2,7 +2,6 @@
 import { usePathname } from 'next/navigation'
 import Sidebar from './layout/sidebar'
 import AuthGuard from './auth-guard'
-import HelpChat from './help-chat'
 import { AccountProvider } from '@/contexts/account-context'
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -21,7 +20,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {children}
           </main>
         </div>
-        <HelpChat />
       </AccountProvider>
     </AuthGuard>
   )
