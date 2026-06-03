@@ -264,6 +264,14 @@ export async function upsertCustomer(
         display_name = COALESCE(excluded.display_name, display_name),
         region = COALESCE(excluded.region, region),
         language = COALESCE(excluded.language, language),
+        -- 購入データ系は「0/NULL より大きい・有効な値が来たときだけ」更新する。
+        -- webhook やフォーム経由の呼び出し元は order_count/ltv を渡さず 0/NULL で bind するため、
+        -- 単純な excluded 上書きだと既存の注文回数を 0 に潰してしまう。バックフィルだけが正しい値を書ける。
+        ltv = CASE WHEN excluded.ltv > 0 THEN excluded.ltv ELSE ltv END,
+        order_count = CASE WHEN excluded.order_count > 0 THEN excluded.order_count ELSE order_count END,
+        avg_order_value = CASE WHEN excluded.avg_order_value > 0 THEN excluded.avg_order_value ELSE avg_order_value END,
+        first_order_at = COALESCE(excluded.first_order_at, first_order_at),
+        last_order_at = COALESCE(excluded.last_order_at, last_order_at),
         updated_at = excluded.updated_at`,
     )
     .bind(
