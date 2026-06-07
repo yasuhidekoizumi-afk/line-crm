@@ -1344,6 +1344,99 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
 });
 
 // ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/backfill-purchases
+//   新システム移管後(既定 2026-04-15〜)の「付与漏れ購入ポイント」を補填する管理用バッチ。
+//   - 認証必須(authMiddleware: Bearer API_KEY)。
+//   - 対象 = shopify_orders の有効注文 × 会員(loyalty_points有り) × その注文に award 無し。
+//     ※事前に shopify_orders を最新化すること(POST /api/shopify/orders/backfill を done まで)。
+//   - LINE通知は送らず、マイページ履歴(reason)に残すのみ。冪等(同一order_idは二重付与しない)。
+//   body: { since?: 'YYYY-MM-DD', dryRun?: boolean(既定true), limit?: number(実行時の1回上限) }
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/backfill-purchases', async (c) => {
+  try {
+    const body = await c.req
+      .json<{ since?: string; dryRun?: boolean; limit?: number }>()
+      .catch(() => ({} as { since?: string; dryRun?: boolean; limit?: number }));
+    const since = (body.since ?? '2026-04-15').trim();
+    const dryRun = body.dryRun !== false; // 既定は dry-run（集計のみ・書き込みなし）
+    const limit = Math.min(Math.max(body.limit ?? 200, 1), 500);
+
+    const pointRate = parseFloat((await getLoyaltySetting(c.env.DB, 'point_rate').catch(() => null)) ?? '0.01') || 0.01;
+    const expiryDays = parseInt((await getLoyaltySetting(c.env.DB, 'expiry_days').catch(() => null)) ?? '365', 10) || 365;
+
+    // 対象抽出: 移管後の有効注文 × 会員 × award未付与（古い順）
+    const baseSql = `
+      SELECT so.shopify_order_id AS order_id, so.total_price AS amount,
+             lp.friend_id AS friend_id, lp.shopify_customer_id AS scid, lp.total_spent AS total_spent
+      FROM shopify_orders so
+      JOIN loyalty_points lp ON lp.shopify_customer_id = so.shopify_customer_id
+      LEFT JOIN loyalty_transactions lt ON lt.order_id = so.shopify_order_id AND lt.type = 'award'
+      WHERE so.processed_at >= ?
+        AND so.cancelled_at IS NULL
+        AND (so.financial_status IS NULL OR so.financial_status NOT IN ('refunded','voided'))
+        AND (so.currency IS NULL OR so.currency = 'JPY')
+        AND so.total_price > 0
+        AND lt.id IS NULL
+      ORDER BY so.processed_at ASC`;
+    type Row = { order_id: string; amount: number; friend_id: string; scid: string; total_spent: number };
+    const res = dryRun
+      ? await c.env.DB.prepare(baseSql).bind(since).all<Row>()
+      : await c.env.DB.prepare(baseSql + ' LIMIT ?').bind(since, limit).all<Row>();
+    const targets = res.results ?? [];
+
+    const seen = new Set<string>(); // 同一注文の重複(顧客行重複JOIN)を弾く
+    let count = 0, totalAmount = 0, estimatedPoints = 0, awarded = 0, awardedPoints = 0, errors = 0;
+
+    for (const t of targets) {
+      if (seen.has(t.order_id)) continue;
+      seen.add(t.order_id);
+      count++;
+      totalAmount += t.amount;
+      estimatedPoints += calculatePoints(t.amount, determineRank(t.total_spent ?? 0), pointRate);
+      if (dryRun) continue;
+      try {
+        // 同一顧客の複数注文を順に積むため、その都度 最新残高で再計算
+        const cur = await getLoyaltyPoint(c.env.DB, t.friend_id);
+        const curBalance = cur?.balance ?? 0;
+        const curSpent = cur?.total_spent ?? 0;
+        const pts = calculatePoints(t.amount, determineRank(curSpent), pointRate);
+        if (pts <= 0) continue;
+        const newBalance = curBalance + pts;
+        const newSpent = curSpent + t.amount;
+        await upsertLoyaltyPoint(c.env.DB, t.friend_id, {
+          balance: newBalance, totalSpent: newSpent, rank: determineRank(newSpent), shopifyCustomerId: t.scid,
+        });
+        await addLoyaltyTransaction(c.env.DB, {
+          friendId: t.friend_id, type: 'award', points: pts,
+          balanceAfter: newBalance + (cur?.limited_balance ?? 0),
+          reason: `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${t.order_id}）`,
+          orderId: t.order_id, expiryDays,
+        });
+        awarded++;
+        awardedPoints += pts;
+      } catch (e) {
+        errors++;
+        console.error(`[backfill-purchases] order=${t.order_id} 付与失敗:`, e);
+      }
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        dryRun, since,
+        target_orders: count,
+        target_amount_jpy: totalAmount,
+        estimated_points: estimatedPoints, // ランク倍率込みの見込み
+        awarded, awarded_points: awardedPoints, errors,
+        more: dryRun ? false : targets.length >= limit, // 実行時: まだ残っている可能性
+      },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: 'backfill-purchases failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
 // POST /api/loyalty/campaign-award — キャンペーンポイント付与（LP 等から呼ぶ）
 //
 // 8周年 LINE 連携特典など、定義済みキャンペーン (campaign_key) に対して
