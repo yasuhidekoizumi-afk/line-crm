@@ -116,12 +116,15 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
         ? await api.broadcasts.update(editId, payload)
         : await api.broadcasts.create({
             ...payload,
-            status: form.sendMode === 'now' ? 'sending' : 'draft',
             lineAccountId: selectedAccountId || null,
           })
       if (res.success) {
-        if (form.sendMode === 'now' && editId) {
-          await api.broadcasts.send(editId)
+        // 「今すぐ送信」は新規・編集どちらの場合も、作成/更新後に送信APIを呼ぶ。
+        // 旧実装は editId があるときだけ send していたため、新規作成＋今すぐ送信が
+        // 下書き保存されるだけで実際に送信されない不具合があった。
+        if (form.sendMode === 'now') {
+          const sendId = editId ?? res.data?.id
+          if (sendId) await api.broadcasts.send(sendId)
         }
         onSuccess()
       } else {

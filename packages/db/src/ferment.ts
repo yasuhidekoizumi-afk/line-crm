@@ -748,6 +748,9 @@ export async function updateSegment(
 }
 
 export async function deleteSegment(db: D1Database, segmentId: string): Promise<void> {
+  // segment_members が外部キーで segments を参照している(ON DELETE CASCADE 無し)ため、
+  // 先にメンバーを削除しないと、メンバー有りセグメントの削除が外部キー制約で失敗(500)する。
+  await db.prepare('DELETE FROM segment_members WHERE segment_id = ?').bind(segmentId).run();
   await db.prepare('DELETE FROM segments WHERE segment_id = ?').bind(segmentId).run();
 }
 
