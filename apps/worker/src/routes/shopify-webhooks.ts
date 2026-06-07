@@ -12,6 +12,7 @@ import {
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js';
+import { refundUnusedPointCode, findPendingCodeByFriendId } from '../services/loyalty-code-refund.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
@@ -158,6 +159,25 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
     orderId,
     expiryDays,
   });
+
+  // ── バグB 安全網(B1): 注文確定時、未使用のポイント割引コードが残っていたら自動返還 ──
+  // この注文でコードを「使った」場合は Shopify の usage_count が増えているため、
+  // refundUnusedPointCode 内で used 判定され返金されない（＝正常利用は守られる）。
+  // 別クーポンで購入した等でコードが未使用のままなら、ここで返してポイントが宙に浮くのを防ぐ。
+  c.executionCtx?.waitUntil(
+    (async () => {
+      try {
+        const pendingCode = await findPendingCodeByFriendId(c.env.DB, existing.friend_id);
+        if (!pendingCode) return;
+        const r = await refundUnusedPointCode(c.env, shopifyCustomerId, pendingCode, 'order_paid');
+        if (r.refunded) {
+          console.log(`[orders-paid] 未使用コード自動返還: ${pendingCode} +${r.refundPoints}pt (cust=${shopifyCustomerId})`);
+        }
+      } catch (err) {
+        console.error('[orders-paid] 未使用コード自動返還に失敗:', err);
+      }
+    })(),
+  );
 
   const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
   const adminToken = await getShopifyAdminToken(c.env);

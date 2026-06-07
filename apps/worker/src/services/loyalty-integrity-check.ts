@@ -84,13 +84,15 @@ export async function runLoyaltyIntegrityCheck(env: IntegrityEnv): Promise<{ iss
   }
 
   // ─── 3. cancel-code の連発 (1ユーザー1時間で5回以上) ────────────
+  // 顧客が手動で取り消した返還のみを対象にする（自動返還 B1/B2 は
+  // 「ポイントシステムの不具合により…」という別文言なので除外され、誤検知しない）。
   const cancelSpamRows = await env.DB
     .prepare(
       `SELECT friend_id, COUNT(*) as cnt
        FROM loyalty_transactions
        WHERE created_at >= ?
          AND type = 'adjust'
-         AND reason LIKE 'コード取り消しによるポイント返還%'
+         AND reason LIKE '割引コードの取り消しにより%'
        GROUP BY friend_id
        HAVING cnt >= 5`,
     )

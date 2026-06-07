@@ -32,6 +32,7 @@ import {
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { backfillPendingOrders } from '../services/loyalty-backfill.js';
+import { refundUnusedPointCode } from '../services/loyalty-code-refund.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
@@ -783,7 +784,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
     let pendingPoints: number | null = null;
     try {
       const latest = await c.env.DB
-        .prepare(`SELECT reason, points FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
+        .prepare(`SELECT reason, points FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' AND reason NOT LIKE '[利用済み]%' ORDER BY created_at DESC LIMIT 1`)
         .bind(point.friend_id)
         .first<{ reason: string; points: number }>();
       if (latest?.reason) {
@@ -1156,7 +1157,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
     const adminToken = await getShopifyAdminToken(c.env);
     try {
       const latestRedeem = await c.env.DB
-        .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
+        .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' AND reason NOT LIKE '[利用済み]%' ORDER BY created_at DESC LIMIT 1`)
         .bind(point.friend_id)
         .first<{ reason: string }>();
       const existingCodeMatch = latestRedeem?.reason?.match(/コード: ([A-Z0-9-]+)/);
@@ -1308,140 +1309,34 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     if (!body.code || typeof body.code !== 'string') {
       return c.json({ success: false, error: 'code は必須です' }, 400);
     }
-    const code = body.code.trim().toUpperCase();
 
-    // コードがこの顧客のものか確認（コード末尾6桁 = customer ID 末尾6桁）
-    const expectedSuffix = shopifyCustomerId.slice(-6);
-    if (!code.startsWith(`ORYZAE-${expectedSuffix}-`)) {
-      return c.json({ success: false, error: '指定されたコードはこのアカウントのものではありません' }, 403);
-    }
+    // 返金処理は共通関数 refundUnusedPointCode に集約（注文時/cron の自動返還と同一ロジック）
+    const result = await refundUnusedPointCode(c.env, shopifyCustomerId, body.code, 'manual');
 
-    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
-    if (!point) {
-      return c.json({ success: false, error: 'ポイント情報が見つかりません' }, 404);
-    }
-
-    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-    const adminToken = await getShopifyAdminToken(c.env);
-    if (!shopDomain || !adminToken) {
-      return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
-    }
-
-    // Price Rule を title で検索
-    const searchRes = await fetch(
-      `https://${shopDomain}/admin/api/2024-10/price_rules.json?limit=250`,
-      { headers: { 'X-Shopify-Access-Token': adminToken } },
-    );
-    if (!searchRes.ok) {
-      return c.json({ success: false, error: 'Shopify API エラー' }, 500);
-    }
-    const { price_rules } = (await searchRes.json()) as { price_rules: { id: number; title: string }[] };
-    const rule = price_rules.find((r) => r.title === `ポイント割引 ${code}`);
-    if (!rule) {
-      // Price Rule が既に削除済みの場合も DB 上の取り消しは続行
-      // （コードが見つからなければ Shopify 側はクリーンな状態）
-    } else {
-      // Discount Code の使用状況を確認
-      const dcRes = await fetch(
-        `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}/discount_codes.json`,
-        { headers: { 'X-Shopify-Access-Token': adminToken } },
-      );
-      if (!dcRes.ok) {
-        return c.json({ success: false, error: 'コード状況の確認に失敗しました' }, 500);
-      }
-      const { discount_codes } = (await dcRes.json()) as { discount_codes: { usage_count: number }[] };
-      if (discount_codes[0]?.usage_count > 0) {
-        return c.json({ success: false, error: 'このコードはすでに使用済みのためキャンセルできません' }, 400);
-      }
-
-      // Price Rule（＝割引コード）を削除
-      const delRes = await fetch(
-        `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}.json`,
-        { method: 'DELETE', headers: { 'X-Shopify-Access-Token': adminToken } },
-      );
-      if (!delRes.ok && delRes.status !== 404) {
-        return c.json({ success: false, error: 'コードの削除に失敗しました' }, 500);
+    if (!result.refunded) {
+      switch (result.reason) {
+        case 'not_owned':
+          return c.json({ success: false, error: '指定されたコードはこのアカウントのものではありません' }, 403);
+        case 'no_point':
+          return c.json({ success: false, error: 'ポイント情報が見つかりません' }, 404);
+        case 'shopify_unconfigured':
+          return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+        case 'shopify_error':
+          return c.json({ success: false, error: 'Shopify API エラー、またはコード状況の確認・削除に失敗しました' }, 500);
+        case 'used':
+          return c.json({ success: false, error: 'このコードはすでに使用済みのためキャンセルできません' }, 400);
+        case 'no_redeem':
+          return c.json({ success: false, error: 'すでに取り消し済み、または対象の利用記録が見つかりません' }, 400);
+        case 'amount_unknown':
+          return c.json({ success: false, error: '返還ポイント数を特定できませんでした' }, 500);
+        default:
+          return c.json({ success: false, error: 'コードの取り消しに失敗しました' }, 500);
       }
     }
-
-    // 元のポイント数を reason から逆算
-    // 重要: [取り消し済み] プレフィックス付きの redeem は除外する
-    // (過去に取り消されたコードを再度 cancel-code すると二重返還される事故を防ぐ)
-    const latestRedeem = await c.env.DB
-      .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
-      .bind(point.friend_id, `%コード: ${code}%`)
-      .first<{ reason: string }>();
-
-    if (!latestRedeem) {
-      return c.json({
-        success: false,
-        error: 'すでに取り消し済み、または対象の利用記録が見つかりません',
-      }, 400);
-    }
-
-    const m = latestRedeem.reason?.match(/¥(\d+)割引/);
-    const refundPoints = m ? parseInt(m[1], 10) : 0;
-
-    if (refundPoints <= 0) {
-      return c.json({ success: false, error: '返還ポイント数を特定できませんでした' }, 500);
-    }
-
-    // 内訳タグから redeem 時の消費内訳を復元
-    // タグが無い旧データは「全額 balance に返還」で従来挙動を維持（後方互換）
-    const breakdownMatch = latestRedeem?.reason?.match(/\[内訳:limited=(\d+),balance=(\d+),exp=([^\]]+)\]/);
-    let refundLimited = 0;
-    let refundBalance = refundPoints;
-    let restoreExpiresAt: string | null = null;
-    if (breakdownMatch) {
-      refundLimited = parseInt(breakdownMatch[1], 10);
-      refundBalance = parseInt(breakdownMatch[2], 10);
-      const expStr = breakdownMatch[3];
-      restoreExpiresAt = expStr === 'none' ? null : expStr;
-    }
-
-    // ポイント残高を返還（redeem の逆順: 元 limited 分は limited に / 元 balance 分は balance に）
-    const newBalance = point.balance + refundBalance;
-    const newLimitedBalance = (point.limited_balance ?? 0) + refundLimited;
-    // 期限復元: 現在の期限がまだ有効ならそれを維持。無ければ redeem 時の期限を復元
-    let limitedExpiresAt: string | null = point.limited_expires_at ?? null;
-    if (refundLimited > 0) {
-      if (!limitedExpiresAt && restoreExpiresAt) {
-        // 現在 limited が空で期限も無い → redeem 時の期限を戻す
-        limitedExpiresAt = restoreExpiresAt;
-      } else if (limitedExpiresAt && restoreExpiresAt) {
-        // 両方ある → より早い期限を優先（安全側）
-        limitedExpiresAt = new Date(limitedExpiresAt) < new Date(restoreExpiresAt) ? limitedExpiresAt : restoreExpiresAt;
-      }
-    }
-    const newRank = determineRank(point.total_spent);
-    await upsertLoyaltyPoint(c.env.DB, point.friend_id, {
-      balance: newBalance,
-      limitedBalance: newLimitedBalance,
-      limitedExpiresAt: newLimitedBalance > 0 ? limitedExpiresAt : null,
-      totalSpent: point.total_spent,
-      rank: newRank,
-      shopifyCustomerId,
-    });
-
-    await addLoyaltyTransaction(c.env.DB, {
-      friendId: point.friend_id,
-      type: 'adjust',
-      points: refundPoints,
-      balanceAfter: newBalance + newLimitedBalance,
-      reason: `コード取り消しによるポイント返還（${code} 未使用削除 / 復元: limited=${refundLimited},balance=${refundBalance}）`,
-    });
-
-    // 元の redeem トランザクションを「取り消し済み」にマーク
-    // 既に [取り消し済み] プレフィックスが付いている row には重ねない (二重プレフィックス防止)
-    await c.env.DB
-      .prepare(`UPDATE loyalty_transactions SET reason = '[取り消し済み] ' || reason WHERE friend_id = ? AND type = 'redeem' AND reason LIKE ? AND reason NOT LIKE '[取り消し済み]%'`)
-      .bind(point.friend_id, `%コード: ${code}%`)
-      .run();
-
 
     return c.json({
       success: true,
-      data: { refundPoints, balance: newBalance, rank: newRank },
+      data: { refundPoints: result.refundPoints, balance: result.balance, rank: result.rank },
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to cancel code' }, 500);
