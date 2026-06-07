@@ -279,6 +279,13 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     jobs.push(sendDailySummary(env));
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
     jobs.push(checkRakutenLicenseExpiry(env).then(() => undefined).catch(() => undefined));
+    // B2: 未使用ポイント割引コードの自動返還（設定 unused_code_auto_refund_enabled='1' のときのみ動作）
+    jobs.push(
+      import('./services/loyalty-unused-code-sweep.js')
+        .then(({ sweepUnusedPointCodes }) => sweepUnusedPointCodes(env))
+        .then((r) => { if (r.enabled && (r.refunded > 0 || r.errors > 0)) console.log(`[unused-code-sweep] refunded=${r.refunded}(+${r.refundedPoints}pt) errors=${r.errors}`); })
+        .catch((e) => console.error('[unused-code-sweep] error:', e)),
+    );
   } else {
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));

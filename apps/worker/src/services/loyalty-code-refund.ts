@@ -215,7 +215,8 @@ export async function findPendingCodeByFriendId(
   const latest = await db
     .prepare(
       `SELECT reason FROM loyalty_transactions
-       WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%'
+       WHERE friend_id = ? AND type = 'redeem'
+         AND reason NOT LIKE '[取り消し済み]%' AND reason NOT LIKE '[利用済み]%'
        ORDER BY created_at DESC LIMIT 1`,
     )
     .bind(friendId)

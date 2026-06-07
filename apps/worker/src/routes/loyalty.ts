@@ -784,7 +784,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
     let pendingPoints: number | null = null;
     try {
       const latest = await c.env.DB
-        .prepare(`SELECT reason, points FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
+        .prepare(`SELECT reason, points FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' AND reason NOT LIKE '[利用済み]%' ORDER BY created_at DESC LIMIT 1`)
         .bind(point.friend_id)
         .first<{ reason: string; points: number }>();
       if (latest?.reason) {
@@ -1157,7 +1157,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
     const adminToken = await getShopifyAdminToken(c.env);
     try {
       const latestRedeem = await c.env.DB
-        .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' ORDER BY created_at DESC LIMIT 1`)
+        .prepare(`SELECT reason FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' AND reason NOT LIKE '[利用済み]%' ORDER BY created_at DESC LIMIT 1`)
         .bind(point.friend_id)
         .first<{ reason: string }>();
       const existingCodeMatch = latestRedeem?.reason?.match(/コード: ([A-Z0-9-]+)/);
