@@ -33,4 +33,18 @@ migrationRunner.post('/api/admin/run-migration', async (c) => {
   return c.json({ success: errors.length===0, results, errors });
 });
 
+// 配信結果の可視化用カラム追加（失敗件数・失敗理由）。ADD COLUMN は非破壊・冪等。
+migrationRunner.post('/api/admin/run-migration-broadcast-stats', async (c) => {
+  const results: string[] = [];
+  const errors: string[] = [];
+
+  try { await c.env.DB.prepare("ALTER TABLE broadcasts ADD COLUMN failed_count INTEGER NOT NULL DEFAULT 0").run(); results.push('OK: failed_count'); }
+  catch(e:any){ if(e.message?.includes('duplicate')) results.push('SKIP: failed_count'); else errors.push('FAIL: failed_count: '+e.message); }
+
+  try { await c.env.DB.prepare("ALTER TABLE broadcasts ADD COLUMN error_summary TEXT").run(); results.push('OK: error_summary'); }
+  catch(e:any){ if(e.message?.includes('duplicate')) results.push('SKIP: error_summary'); else errors.push('FAIL: error_summary: '+e.message); }
+
+  return c.json({ success: errors.length===0, results, errors });
+});
+
 export { migrationRunner };

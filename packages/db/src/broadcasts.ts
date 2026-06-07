@@ -17,6 +17,10 @@ export interface Broadcast {
   sent_at: string | null;
   total_count: number;
   success_count: number;
+  /** 配信失敗人数（バッチ送信で弾かれた件数） */
+  failed_count: number;
+  /** 失敗理由の要約（LINE APIエラー本文など。成功時は null） */
+  error_summary: string | null;
   created_at: string;
 }
 
@@ -159,6 +163,8 @@ export async function deleteBroadcast(db: D1Database, id: string): Promise<void>
 export interface BroadcastStatusCounts {
   totalCount?: number;
   successCount?: number;
+  failedCount?: number;
+  errorSummary?: string | null;
 }
 
 export async function updateBroadcastStatus(
@@ -182,10 +188,33 @@ export async function updateBroadcastStatus(
     fields.push('success_count = ?');
     values.push(counts.successCount);
   }
-
   values.push(id);
   await db
     .prepare(`UPDATE broadcasts SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...values)
     .run();
+
+  // failed_count / error_summary はマイグレーション未適用環境では列が存在しないため、
+  // 本体の status 更新とは分離して best-effort で更新する（列が無くても配信処理を壊さない）。
+  if (counts?.failedCount !== undefined || counts?.errorSummary !== undefined) {
+    const extraFields: string[] = [];
+    const extraValues: unknown[] = [];
+    if (counts?.failedCount !== undefined) {
+      extraFields.push('failed_count = ?');
+      extraValues.push(counts.failedCount);
+    }
+    if (counts?.errorSummary !== undefined) {
+      extraFields.push('error_summary = ?');
+      extraValues.push(counts.errorSummary);
+    }
+    extraValues.push(id);
+    try {
+      await db
+        .prepare(`UPDATE broadcasts SET ${extraFields.join(', ')} WHERE id = ?`)
+        .bind(...extraValues)
+        .run();
+    } catch (e) {
+      console.error('failed_count/error_summary 更新をスキップ（列未追加の可能性）:', e);
+    }
+  }
 }

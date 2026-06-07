@@ -35,6 +35,8 @@ function serializeBroadcast(row: DbBroadcast) {
     sentAt: row.sent_at,
     totalCount: row.total_count,
     successCount: row.success_count,
+    failedCount: row.failed_count ?? 0,
+    errorSummary: row.error_summary ?? null,
     createdAt: row.created_at,
   };
 }
