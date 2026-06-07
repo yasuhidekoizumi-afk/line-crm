@@ -41,6 +41,8 @@ export async function processBroadcastSend(
   const message = buildMessage(finalType, finalContent, altText || undefined);
   let totalCount = 0;
   let successCount = 0;
+  let failedCount = 0;
+  const errorMessages: string[] = [];
 
   try {
     if (broadcast.target_type === 'all') {
@@ -95,7 +97,9 @@ export async function processBroadcastSend(
           }
         } catch (err) {
           console.error(`Multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
-          // Continue with next batch; failed batch is not logged
+          // 失敗バッチの件数と理由を記録（握りつぶさず可視化する）
+          failedCount += batch.length;
+          errorMessages.push(err instanceof Error ? err.message : String(err));
         }
       }
     } else if (broadcast.target_type === 'individual') {
@@ -135,6 +139,8 @@ export async function processBroadcastSend(
           }
         } catch (err) {
           console.error(`Individual multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
+          failedCount += batch.length;
+          errorMessages.push(err instanceof Error ? err.message : String(err));
         }
       }
     } else if (broadcast.target_type === 'segment') {
@@ -179,11 +185,23 @@ export async function processBroadcastSend(
           }
         } catch (err) {
           console.error(`Segment multicast batch ${batchIndex} failed:`, err);
+          failedCount += batch.length;
+          errorMessages.push(err instanceof Error ? err.message : String(err));
         }
       }
     }
 
-    await updateBroadcastStatus(db, broadcastId, 'sent', { totalCount, successCount });
+    // 失敗理由は重複を除いて先頭3件までを要約として保存（成功時は null）
+    const errorSummary =
+      errorMessages.length > 0
+        ? Array.from(new Set(errorMessages)).slice(0, 3).join(' | ').slice(0, 500)
+        : null;
+    await updateBroadcastStatus(db, broadcastId, 'sent', {
+      totalCount,
+      successCount,
+      failedCount,
+      errorSummary,
+    });
   } catch (err) {
     // On failure, reset to draft so it can be retried
     await updateBroadcastStatus(db, broadcastId, 'draft');

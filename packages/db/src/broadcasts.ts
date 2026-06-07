@@ -17,6 +17,10 @@ export interface Broadcast {
   sent_at: string | null;
   total_count: number;
   success_count: number;
+  /** 配信失敗人数（バッチ送信で弾かれた件数） */
+  failed_count: number;
+  /** 失敗理由の要約（LINE APIエラー本文など。成功時は null） */
+  error_summary: string | null;
   created_at: string;
 }
 
@@ -159,6 +163,8 @@ export async function deleteBroadcast(db: D1Database, id: string): Promise<void>
 export interface BroadcastStatusCounts {
   totalCount?: number;
   successCount?: number;
+  failedCount?: number;
+  errorSummary?: string | null;
 }
 
 export async function updateBroadcastStatus(
@@ -181,6 +187,14 @@ export async function updateBroadcastStatus(
   if (counts?.successCount !== undefined) {
     fields.push('success_count = ?');
     values.push(counts.successCount);
+  }
+  if (counts?.failedCount !== undefined) {
+    fields.push('failed_count = ?');
+    values.push(counts.failedCount);
+  }
+  if (counts?.errorSummary !== undefined) {
+    fields.push('error_summary = ?');
+    values.push(counts.errorSummary);
   }
 
   values.push(id);

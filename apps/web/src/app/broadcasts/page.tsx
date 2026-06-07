@@ -423,9 +423,20 @@ function BroadcastsPageInner() {
                     {/* Stats */}
                     <td className="px-4 py-3 text-sm text-gray-500">
                       {broadcast.status === 'sent' ? (
-                        <span>
-                          {broadcast.successCount.toLocaleString('ja-JP')} / {broadcast.totalCount.toLocaleString('ja-JP')} 件
-                        </span>
+                        <div className="space-y-0.5">
+                          <span>
+                            成功 {broadcast.successCount.toLocaleString('ja-JP')} / {broadcast.totalCount.toLocaleString('ja-JP')} 件
+                          </span>
+                          {(broadcast.failedCount ?? 0) > 0 && (
+                            <span
+                              className="block text-xs font-medium text-red-600 cursor-help"
+                              title={broadcast.errorSummary ?? '理由は記録されていません'}
+                            >
+                              ⚠ 失敗 {broadcast.failedCount.toLocaleString('ja-JP')} 件
+                              {broadcast.errorSummary ? '（ホバーで理由表示）' : ''}
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         '-'
                       )}
