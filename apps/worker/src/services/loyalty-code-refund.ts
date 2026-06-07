@@ -172,17 +172,22 @@ export async function refundUnusedPointCode(
     shopifyCustomerId,
   });
 
-  // 返還の経緯を履歴に残す（経路で文言を変える）
-  const sourceLabel =
-    source === 'order_paid' ? '別決済で未使用のため自動返還'
-    : source === 'cron' ? '期限内未使用のため自動返還'
-    : '未使用削除';
+  // 返還の経緯を履歴に残す。
+  // この reason はそのまま顧客のマイページ「ポイント履歴」に表示されるため、
+  // 「なぜポイントが戻ったのか」が顧客に伝わる平易な文言にする。
+  //  - manual            : 顧客自身がマイページでコードを取り消した
+  //  - order_paid / cron : システム側が自動で返還した（＝発行時減算の不具合補填）
+  // ※ 元の利用(redeem)行は下で [取り消し済み] になり、マイページでは打ち消し線表示になる。
+  const customerReason =
+    source === 'manual'
+      ? `割引コードの取り消しにより、未使用のポイントを返還しました（コード: ${normalizedCode}）`
+      : `ポイントシステムの不具合により消滅していたポイントを返還しました（未使用の割引コード分 / コード: ${normalizedCode}）`;
   await addLoyaltyTransaction(db, {
     friendId: point.friend_id,
     type: 'adjust',
     points: refundPoints,
     balanceAfter: newBalance + newLimitedBalance,
-    reason: `コード取り消しによるポイント返還（${normalizedCode} ${sourceLabel} / 復元: limited=${refundLimited},balance=${refundBalance}）`,
+    reason: customerReason,
   });
 
   // 元の redeem を「取り消し済み」にマーク（二重返還防止・pending_code もこれで解消）
