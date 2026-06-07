@@ -264,6 +264,9 @@ export async function upsertCustomer(
         display_name = COALESCE(excluded.display_name, display_name),
         region = COALESCE(excluded.region, region),
         language = COALESCE(excluded.language, language),
+        -- Shopify顧客タグは新しい値が来たときだけ更新（NULLなら既存維持）。
+        -- これが無いと、タグ同期(webhook/バックフィル)で既存顧客のタグが更新されない。
+        tags = COALESCE(excluded.tags, tags),
         -- 購入データ系は「0/NULL より大きい・有効な値が来たときだけ」更新する。
         -- webhook やフォーム経由の呼び出し元は order_count/ltv を渡さず 0/NULL で bind するため、
         -- 単純な excluded 上書きだと既存の注文回数を 0 に潰してしまう。バックフィルだけが正しい値を書ける。
