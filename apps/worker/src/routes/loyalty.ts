@@ -33,6 +33,7 @@ import {
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { backfillPendingOrders } from '../services/loyalty-backfill.js';
 import { refundUnusedPointCode } from '../services/loyalty-code-refund.js';
+import { runPurchaseBackfill } from '../services/loyalty-backfill-purchases.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
@@ -1340,6 +1341,30 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to cancel code' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/backfill-purchases
+//   新システム移管後(既定 2026-04-15〜)の「付与漏れ購入ポイント」を補填する管理用バッチ。
+//   - 認証必須(authMiddleware: Bearer API_KEY)。
+//   - 対象 = since以降の有効注文(Shopify を直接読む) × 会員 × award未付与。
+//     ※付与漏れと同じ原因で自社台帳 shopify_orders も 5/8 以降が欠落しているため、
+//       台帳ではなく Shopify を直接読む（取りこぼし防止）。
+//   - LINE通知は送らず、マイページ履歴(reason)に残すのみ。冪等(同一order_idは二重付与しない)。
+//   body: { since?: 'YYYY-MM-DD', dryRun?: boolean(既定true), maxAward?: number, maxPages?: number }
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/backfill-purchases', async (c) => {
+  try {
+    const body = await c.req
+      .json<{ since?: string; dryRun?: boolean; maxAward?: number; maxPages?: number }>()
+      .catch(() => ({} as { since?: string; dryRun?: boolean; maxAward?: number; maxPages?: number }));
+    const summary = await runPurchaseBackfill(c.env, {
+      since: body.since, dryRun: body.dryRun, maxAward: body.maxAward, maxPages: body.maxPages,
+    });
+    return c.json({ success: true, data: summary });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'backfill-purchases failed' }, 500);
   }
 });
 
