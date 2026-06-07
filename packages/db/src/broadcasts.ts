@@ -188,18 +188,33 @@ export async function updateBroadcastStatus(
     fields.push('success_count = ?');
     values.push(counts.successCount);
   }
-  if (counts?.failedCount !== undefined) {
-    fields.push('failed_count = ?');
-    values.push(counts.failedCount);
-  }
-  if (counts?.errorSummary !== undefined) {
-    fields.push('error_summary = ?');
-    values.push(counts.errorSummary);
-  }
-
   values.push(id);
   await db
     .prepare(`UPDATE broadcasts SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...values)
     .run();
+
+  // failed_count / error_summary はマイグレーション未適用環境では列が存在しないため、
+  // 本体の status 更新とは分離して best-effort で更新する（列が無くても配信処理を壊さない）。
+  if (counts?.failedCount !== undefined || counts?.errorSummary !== undefined) {
+    const extraFields: string[] = [];
+    const extraValues: unknown[] = [];
+    if (counts?.failedCount !== undefined) {
+      extraFields.push('failed_count = ?');
+      extraValues.push(counts.failedCount);
+    }
+    if (counts?.errorSummary !== undefined) {
+      extraFields.push('error_summary = ?');
+      extraValues.push(counts.errorSummary);
+    }
+    extraValues.push(id);
+    try {
+      await db
+        .prepare(`UPDATE broadcasts SET ${extraFields.join(', ')} WHERE id = ?`)
+        .bind(...extraValues)
+        .run();
+    } catch (e) {
+      console.error('failed_count/error_summary 更新をスキップ（列未追加の可能性）:', e);
+    }
+  }
 }
