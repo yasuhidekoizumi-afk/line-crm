@@ -192,19 +192,29 @@ function leafToSql(cond: SegmentLeafCondition): QueryPart {
       return { sql: `${sqlField} <= ?`, bindings: [value] };
     case 'in': {
       const arr = Array.isArray(value) ? value : [value];
+      // tags / preferred_products はカンマ区切り文字列で保存されるため、
+      // 完全一致(IN)ではなく各値の部分一致(LIKE)の OR で「いずれかを含む」を表現する。
+      // 例: 値「いちご」→ タグ列「dokopoi,いちご購入者,…」にヒットする。
+      if (field === 'tags' || field === 'preferred_products') {
+        const sql = arr.map(() => `${sqlField} LIKE ?`).join(' OR ');
+        return { sql: `(${sql})`, bindings: arr.map((v) => `%${v}%`) };
+      }
       const placeholders = arr.map(() => '?').join(', ');
       return { sql: `${sqlField} IN (${placeholders})`, bindings: arr };
     }
     case 'not_in': {
       const arr = Array.isArray(value) ? value : [value];
+      // tags / preferred_products は「指定値のいずれも含まない」を AND の NOT LIKE で表現する
+      if (field === 'tags' || field === 'preferred_products') {
+        const sql = arr.map(() => `${sqlField} NOT LIKE ?`).join(' AND ');
+        return { sql: `(${sql})`, bindings: arr.map((v) => `%${v}%`) };
+      }
       const placeholders = arr.map(() => '?').join(', ');
       return { sql: `${sqlField} NOT IN (${placeholders})`, bindings: arr };
     }
     case 'contains':
-      // JSON 配列フィールド（tags, preferred_products）は LIKE で対応
-      if (field === 'tags' || field === 'preferred_products') {
-        return { sql: `${sqlField} LIKE ?`, bindings: [`%"${value}"%`] };
-      }
+      // tags / preferred_products もカンマ区切り保存のため、クォート無しの素の部分一致で照合する。
+      // （旧実装は `%"値"%` と JSON 配列前提だったため、カンマ区切りデータに一致しなかった）
       return { sql: `${sqlField} LIKE ?`, bindings: [`%${value}%`] };
     case 'starts_with':
       return { sql: `${sqlField} LIKE ?`, bindings: [`${value}%`] };

@@ -198,7 +198,8 @@ async function handleShopifyWebhook(
         region,
         language: region === 'JP' ? 'ja' : 'en',
         [shopifyIdField]: shopifyCustomer.shopify_id ?? null,
-        tags: shopifyCustomer.tags ? JSON.stringify(shopifyCustomer.tags) : null,
+        // タグはカンマ区切りで保存（バックフィルおよびセグメント照合と形式を統一）
+        tags: shopifyCustomer.tags?.length ? shopifyCustomer.tags.join(',') : null,
         source: `shopify_${region.toLowerCase()}`,
       });
     }
