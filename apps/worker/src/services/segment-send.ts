@@ -53,7 +53,11 @@ export async function processSegmentSend(
     for (let i = 0; i < friends.length; i += MULTICAST_BATCH_SIZE) {
       const batchIndex = Math.floor(i / MULTICAST_BATCH_SIZE);
       const batch = friends.slice(i, i + MULTICAST_BATCH_SIZE);
-      const lineUserIds = batch.map((f) => f.line_user_id);
+      // 宛先が無効(line_user_id が null/空)の友だちを除外する。
+      // 1件でも無効なIDが混ざると LINE の multicast がバッチ全体(最大500件)を弾くため、事前に取り除く。
+      const validFriends = batch.filter((f) => !!f.line_user_id);
+      const lineUserIds = validFriends.map((f) => f.line_user_id);
+      if (lineUserIds.length === 0) continue;
 
       // Stealth: stagger delays between batches
       if (batchIndex > 0) {
@@ -69,10 +73,10 @@ export async function processSegmentSend(
 
       try {
         await lineClient.multicast(lineUserIds, [batchMessage]);
-        successCount += batch.length;
+        successCount += validFriends.length;
 
         // Log successfully sent messages
-        for (const friend of batch) {
+        for (const friend of validFriends) {
           const logId = crypto.randomUUID();
           await db
             .prepare(
