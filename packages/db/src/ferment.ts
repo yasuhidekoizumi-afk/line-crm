@@ -214,8 +214,10 @@ export async function getCustomers(
   const limit = opts?.limit ?? 50;
   const offset = opts?.offset ?? 0;
 
+  // 並び順: 購入の多い人・購入額の高い人・最近買った人を上に（取り込み直後の名前なし非購入者が
+  // 先頭に来て埋もれるのを防ぐ）。同条件は作成日の新しい順。
   const result = await db
-    .prepare(`SELECT * FROM customers ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .prepare(`SELECT * FROM customers ${where} ORDER BY order_count DESC, ltv DESC, last_order_at DESC, created_at DESC LIMIT ? OFFSET ?`)
     .bind(...bindings, limit, offset)
     .all<Customer>();
   return result.results;
