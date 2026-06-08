@@ -1,7 +1,6 @@
 import {
   getLoyaltyPointByShopifyCustomerId,
-  upsertLoyaltyPoint,
-  addLoyaltyTransaction,
+  mutateLoyaltyPoint,
   determineRank,
   calculatePoints,
   getLoyaltySetting,
@@ -112,6 +111,19 @@ export async function runPurchaseBackfill(
     return row;
   };
 
+  // 会員(shopify_customer_id を持つ loyalty_points)の ID 集合を「1クエリ」で取得する。
+  //   旧実装はスキャンする全注文の顧客を 1件ずつ getMember で読んでいたため、
+  //   2000件超の注文で会員照会のDB読みが数百〜千回に達し、Cloudflare Workers の
+  //   サブリクエスト上限(約1000)に到達して付与が大量に失敗していた。
+  //   会員かどうかの判定はこの集合で行い（DB読みゼロ）、実際に残高を積む対象注文の
+  //   ぶんだけ getMember で行を読む（= 読み回数を「対象注文数」程度まで激減させる）。
+  const memberIdRows = await env.DB
+    .prepare(`SELECT shopify_customer_id FROM loyalty_points WHERE shopify_customer_id IS NOT NULL`)
+    .all<{ shopify_customer_id: string }>();
+  const memberIdSet = new Set<string>(
+    (memberIdRows.results ?? []).map((r) => String(r.shopify_customer_id)),
+  );
+
   const seen = new Set<string>();
 
   // Shopify 注文をページング取得（created_at 昇順）
@@ -144,18 +156,20 @@ export async function runPurchaseBackfill(
         processedAt: raw.processed_at ?? null,
       };
 
-      // 会員判定（非同期なので isMember を都度評価）
-      const member = o.scid ? await getMember(o.scid) : null;
+      // 会員判定は「会員ID集合」で行う（ここでは一切DBを読まない＝サブリクエスト節約）
       const decision = classifyBackfillOrder(
         o,
         (id) => awardedSet.has(id),
-        () => member != null,
+        (scid) => memberIdSet.has(scid),
         seen,
       );
       if (!decision.ok) continue;
       seen.add(o.id);
 
-      const rank = determineRank(member!.total_spent ?? 0);
+      // 対象注文のぶんだけ、ここで初めて会員行を読む（残高・累計・ランク計算に必要）。
+      const member = await getMember(o.scid);
+      if (!member) continue; // 集合にはあるが行が取れない等の異常時は安全側でスキップ
+      const rank = determineRank(member.total_spent ?? 0);
       // 5/24-26 はニコニコdays（5%固定・ランク倍率なし）。それ以外は通常(1%×ランク)。
       const isNikoniko = NIKONIKO_5X_DATES.has(toJstDate(o.processedAt));
       const pts = isNikoniko ? Math.floor(o.amount * NIKONIKO_RATE) : calculatePoints(o.amount, rank, pointRate);
@@ -168,23 +182,31 @@ export async function runPurchaseBackfill(
       if (pts <= 0) continue;
 
       try {
-        // 同一顧客の複数注文を順に積む（キャッシュ値を更新）
-        const cur = member!;
-        const newBalance = cur.balance + pts;
-        const newSpent = (cur.total_spent ?? 0) + o.amount;
-        await upsertLoyaltyPoint(env.DB, cur.friend_id, {
-          balance: newBalance, totalSpent: newSpent, rank: determineRank(newSpent), shopifyCustomerId: o.scid,
-        });
-        await addLoyaltyTransaction(env.DB, {
-          friendId: cur.friend_id, type: 'award', points: pts,
-          balanceAfter: newBalance + (cur.limited_balance ?? 0),
+        // 残高更新＋履歴記録を「1つの D1 batch」で atomic に実行する。
+        //   mutateLoyaltyPoint は内部で UPSERT(loyalty_points) と INSERT(loyalty_transactions) を
+        //   同一 batch にまとめるため、「残高だけ増えて履歴が残らない」中途半端な書き込みが
+        //   原理的に発生しない（途中失敗時は両方ロールバック）。冪等性は order_id の
+        //   awardedSet チェックで担保（同一注文を二度 award しない）。
+        await mutateLoyaltyPoint(env.DB, {
+          friendId: member.friend_id,
+          deltaBalance: pts,
+          deltaTotalSpent: o.amount,
+          txType: 'award',
           reason: isNikoniko
             ? `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}・ニコニコdays5倍 5%）`
             : `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}）`,
-          orderId: o.id, expiryDays,
+          orderId: o.id,
+          shopifyCustomerId: o.scid,
+          expiryDays,
         });
-        // キャッシュ更新（次の同一顧客注文に反映）＋ 二重付与防止セットにも追加
-        memberCache.set(o.scid, { ...cur, balance: newBalance, total_spent: newSpent });
+        // 同一顧客の次の注文で正しいランク/集計を使うため、キャッシュの累計を進める。
+        // （残高自体は mutateLoyaltyPoint が毎回 DB から最新値を読んで積むので、
+        //   ここでの balance 更新はキャッシュ整合のためのみ）
+        memberCache.set(o.scid, {
+          ...member,
+          balance: member.balance + pts,
+          total_spent: (member.total_spent ?? 0) + o.amount,
+        });
         awardedSet.add(o.id);
         summary.awarded++;
         summary.awardedPoints += pts;
