@@ -1392,8 +1392,9 @@ loyalty.post('/api/loyalty/admin/backfill-purchases', async (c) => {
 //   バグB(未使用ポイント割引コードの返金)の【実態把握・読み取り専用】試算。
 //   返金候補のうち Shopify で本当に未使用/存在しないコードを数え、実際の返金件数・
 //   ポイントを返す。DB にも Shopify にも一切書き込まない（返金は行わない）。
-//   レート制限のため limit は小さめ(既定20)。offset を進めて複数回で全件を見る。
-//   例: ?limit=20&offset=0   （hasMore=true の間 offset を +limit して再実行）
+//   Shopify 照合は GraphQL codeDiscountNodeByCode のエイリアス一括(50件/回)で行うため、
+//   全候補(~200件)を1回の実行でまとめて数えられる。
+//   省略可クエリ: limit(候補上限・既定1000) / graceDays(既定14)。
 //   認証必須(authMiddleware: Bearer API_KEY)。
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/preview-unused-code-refunds', async (c) => {
@@ -1406,7 +1407,6 @@ loyalty.post('/api/loyalty/admin/preview-unused-code-refunds', async (c) => {
     };
     const result = await previewUnusedCodeRefunds(c.env, {
       limit: toIntQ(q.limit),
-      offset: toIntQ(q.offset),
       graceDays: toIntQ(q.graceDays),
     });
     return c.json({ success: true, data: result });

@@ -9,62 +9,89 @@ import type { RefundCodeEnv } from './loyalty-code-refund.js';
 //   既に存在しない」コードが何件・何ポイントあるかを、DBにもShopifyにも一切
 //   書き込まずに数える。小泉さんへの正確な報告と、実行前の規模確定に使う。
 //
-// 重要(取りこぼし対策):
-//   既存の cancel-code 系は price_rules を 250 件だけ取得して title 検索するため、
-//   割引が 250 件を超えると「見つからない=削除済み」と誤判定し、まだ使えるコードを
-//   未使用とみなす危険がある。ここでは Shopify の discount code 直接ルックアップ
-//   (`/discount_codes/lookup.json?code=`) を使い、件数に依存せず確実に判定する。
-//     - 404                : コードが存在しない（=使えない）→ 返金対象
-//     - 200 & usage_count>0 : 使用済み（正常利用）→ 返金しない
-//     - 200 & usage_count=0 : 未使用で存在 → 返金対象
-//
-// ※ Shopify REST のレート制限(バースト40)があるため、limit は小さめ(既定20)にして
-//   offset でページングし、複数回に分けて全件を見る想定。
+// 照合方式(効率と確実性):
+//   1コードずつ REST で照会するとCloudflareのサブリクエスト上限にすぐ達するため、
+//   Shopify GraphQL の codeDiscountNodeByCode を「エイリアスで一括(既定50件/回)」呼び、
+//   数リクエストで全候補の使用回数(asyncUsageCount)をまとめて取得する。
+//     - codeDiscount が null     : コードが存在しない（=使えない）→ 返金対象
+//     - asyncUsageCount > 0       : 使用済み（正常利用）→ 返金しない
+//     - asyncUsageCount === 0     : 未使用で存在 → 返金対象
+//   コード単位で一意化して数える（実際の返金もコード単位で1回のため）。
 // ────────────────────────────────────────────────────────────────────
 
 export interface PreviewRefundResult {
-  scanned: number;          // この回でチェックしたコード数
+  candidates: number;       // 候補 redeem 行数（猶予超過・未解決・会員）
+  uniqueCodes: number;      // 一意なコード数（実際の照合対象）
   refundable: number;       // 返金対象（未使用 or Shopify上に存在しない）
   refundablePoints: number; // 返金対象の合計ポイント
   used: number;             // 使用済み（返金しない）
   skippedNoAmount: number;  // コード/金額が読めず対象外
-  errors: number;           // Shopify照会エラー等（次回再試行可）
+  errors: number;           // 照会できなかったコード数（次回再試行可）
   errorSamples: string[];   // エラー実文言（先頭5件）
-  offset: number;
-  limit: number;
-  hasMore: boolean;         // まだ後続の候補が残っている（offset を進めて再実行）
+  graceDays: number;
 }
 
-/** Shopify 上のコードの状態を確実に判定する（読み取りのみ） */
-async function lookupCodeUsage(
+const GQL_BATCH = 50; // 1 GraphQL リクエストでまとめて照会するコード数
+
+/** GraphQL エイリアスで複数コードの使用状況をまとめて取得（read-only） */
+async function fetchUsageMap(
   shopDomain: string,
   adminToken: string,
-  code: string,
-): Promise<{ exists: boolean; usageCount: number }> {
-  // discount code 直接ルックアップ。存在すれば 303→対象リソースへ追従し usage_count を得る。
-  const res = await fetch(
-    `https://${shopDomain}/admin/api/2024-10/discount_codes/lookup.json?code=${encodeURIComponent(code)}`,
-    { headers: { 'X-Shopify-Access-Token': adminToken } },
-  );
-  if (res.status === 404) return { exists: false, usageCount: 0 };
-  if (!res.ok) throw new Error(`lookup ${res.status}`);
-  const data = (await res.json()) as { discount_code?: { usage_count?: number } };
-  if (!data.discount_code) return { exists: false, usageCount: 0 };
-  return { exists: true, usageCount: data.discount_code.usage_count ?? 0 };
+  codes: string[],
+  onError: (msg: string) => void,
+): Promise<Map<string, { exists: boolean; usageCount: number }>> {
+  const map = new Map<string, { exists: boolean; usageCount: number }>();
+  for (let i = 0; i < codes.length; i += GQL_BATCH) {
+    const batch = codes.slice(i, i + GQL_BATCH);
+    const aliases = batch
+      .map(
+        (code, j) =>
+          `c${j}: codeDiscountNodeByCode(code: ${JSON.stringify(code)}) { codeDiscount { __typename ... on DiscountCodeBasic { asyncUsageCount } } }`,
+      )
+      .join('\n');
+    const query = `query {\n${aliases}\n}`;
+    try {
+      const res = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+        method: 'POST',
+        headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) {
+        onError(`graphql ${res.status} (batch ${i}-${i + batch.length})`);
+        continue; // このバッチのコードは map 未登録 → 呼び出し側で errors 扱い
+      }
+      const json = (await res.json()) as {
+        data?: Record<string, { codeDiscount?: { asyncUsageCount?: number } | null } | null>;
+        errors?: unknown;
+      };
+      if (json.errors) {
+        onError(`graphql errors: ${JSON.stringify(json.errors).slice(0, 200)}`);
+        continue;
+      }
+      batch.forEach((code, j) => {
+        const node = json.data?.[`c${j}`];
+        const cd = node?.codeDiscount;
+        if (!cd) map.set(code, { exists: false, usageCount: 0 });
+        else map.set(code, { exists: true, usageCount: cd.asyncUsageCount ?? 0 });
+      });
+    } catch (e) {
+      onError(`batch ${i}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return map;
 }
 
 export async function previewUnusedCodeRefunds(
   env: RefundCodeEnv,
-  opts: { limit?: number; offset?: number; graceDays?: number } = {},
+  opts: { limit?: number; graceDays?: number } = {},
 ): Promise<PreviewRefundResult> {
-  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 50);
-  const offset = Math.max(opts.offset ?? 0, 0);
+  const maxCandidates = Math.min(Math.max(opts.limit ?? 1000, 1), 5000);
   const graceDays = opts.graceDays ?? 14;
   const cutoffIso = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000).toISOString();
 
   const result: PreviewRefundResult = {
-    scanned: 0, refundable: 0, refundablePoints: 0, used: 0,
-    skippedNoAmount: 0, errors: 0, errorSamples: [], offset, limit, hasMore: false,
+    candidates: 0, uniqueCodes: 0, refundable: 0, refundablePoints: 0, used: 0,
+    skippedNoAmount: 0, errors: 0, errorSamples: [], graceDays,
   };
 
   const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
@@ -72,10 +99,9 @@ export async function previewUnusedCodeRefunds(
   if (!shopDomain || !adminToken) throw new Error('Shopify credentials not configured');
 
   // 返金候補: 未解決(取り消し/利用済みでない)・猶予期間超過・会員、の redeem を古い順。
-  // hasMore 判定のため limit+1 件取得。
   const rows = await env.DB
     .prepare(
-      `SELECT lt.reason AS reason, lp.shopify_customer_id AS scid
+      `SELECT lt.reason AS reason
        FROM loyalty_transactions lt
        JOIN loyalty_points lp ON lp.friend_id = lt.friend_id
        WHERE lt.type = 'redeem'
@@ -84,40 +110,46 @@ export async function previewUnusedCodeRefunds(
          AND lt.created_at < ?
          AND lp.shopify_customer_id IS NOT NULL
        ORDER BY lt.created_at ASC
-       LIMIT ? OFFSET ?`,
+       LIMIT ?`,
     )
-    .bind(cutoffIso, limit + 1, offset)
-    .all<{ reason: string; scid: string }>();
+    .bind(cutoffIso, maxCandidates)
+    .all<{ reason: string }>();
 
-  const list = rows.results ?? [];
-  result.hasMore = list.length > limit;
-  const batch = list.slice(0, limit);
-
-  for (const row of batch) {
-    result.scanned++;
-    const codeMatch = row.reason?.match(/コード: ([A-Z0-9-]+)/);
-    const amountMatch = row.reason?.match(/¥(\d+)割引/);
-    const code = codeMatch?.[1];
-    const pts = amountMatch ? parseInt(amountMatch[1], 10) : 0;
-    if (!code || pts <= 0) {
+  // コード単位で一意化（返金はコード単位で1回のため）。金額は最初の出現を採用。
+  const codeToPts = new Map<string, number>();
+  for (const row of rows.results ?? []) {
+    result.candidates++;
+    const code = row.reason?.match(/コード: ([A-Z0-9-]+)/)?.[1];
+    const pts = parseInt(row.reason?.match(/¥(\d+)割引/)?.[1] ?? '0', 10);
+    if (!code || !Number.isFinite(pts) || pts <= 0) {
       result.skippedNoAmount++;
       continue;
     }
-    try {
-      const { exists, usageCount } = await lookupCodeUsage(shopDomain, adminToken, code);
-      if (exists && usageCount > 0) {
-        result.used++;
-        continue;
-      }
-      // 未使用 or Shopify上に存在しない → 返金対象
-      result.refundable++;
-      result.refundablePoints += pts;
-    } catch (e) {
+    if (!codeToPts.has(code)) codeToPts.set(code, pts);
+  }
+
+  const codes = [...codeToPts.keys()];
+  result.uniqueCodes = codes.length;
+
+  const usageMap = await fetchUsageMap(shopDomain, adminToken, codes, (msg) => {
+    // エラー件数はコード単位で下のループで加算する。ここでは文言サンプルのみ保持。
+    if (result.errorSamples.length < 5) result.errorSamples.push(msg);
+  });
+
+  for (const code of codes) {
+    const u = usageMap.get(code);
+    if (!u) {
+      // 照会できなかった（バッチ失敗等）→ 安全側で返金対象に含めない
       result.errors++;
-      if (result.errorSamples.length < 5) {
-        result.errorSamples.push(`code=${code}: ${e instanceof Error ? e.message : String(e)}`);
-      }
+      continue;
     }
+    if (u.exists && u.usageCount > 0) {
+      result.used++;
+      continue;
+    }
+    // 未使用 or Shopify上に存在しない → 返金対象
+    result.refundable++;
+    result.refundablePoints += codeToPts.get(code) ?? 0;
   }
 
   return result;
