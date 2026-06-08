@@ -196,7 +196,9 @@ export async function getCustomers(
   db: D1Database,
   opts?: { limit?: number; offset?: number; region?: string; subscribed_email?: boolean },
 ): Promise<Customer[]> {
-  const conditions: string[] = [];
+  // LINE公式アカウント登録者（line_user_id あり）のみを対象にする。
+  // メール専用機能を切り離し、LINE中心の顧客管理に限定する方針。
+  const conditions: string[] = ['line_user_id IS NOT NULL'];
   const bindings: unknown[] = [];
 
   if (opts?.region) {
@@ -323,7 +325,10 @@ export async function updateCustomer(
 }
 
 export async function countCustomers(db: D1Database): Promise<number> {
-  const row = await db.prepare('SELECT COUNT(*) as cnt FROM customers').first<{ cnt: number }>();
+  // 顧客一覧と件数を揃えるため、LINE登録者（line_user_id あり）のみ数える。
+  const row = await db
+    .prepare('SELECT COUNT(*) as cnt FROM customers WHERE line_user_id IS NOT NULL')
+    .first<{ cnt: number }>();
   return row?.cnt ?? 0;
 }
 

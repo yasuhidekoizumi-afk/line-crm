@@ -281,10 +281,12 @@ function rulesGroupToSql(group: SegmentGroupCondition): QueryPart {
  ): Promise<string[]> {
    const { sql: whereSql, bindings } = rulesGroupToSql(rules);
 
+   // LINE公式アカウント登録者（line_user_id あり）のみを対象にする。
+   // メール専用機能を切り離し、LINE配信のためのセグメントに限定する方針。
    const query = `
      SELECT c.customer_id
      FROM customers c
-     WHERE ${whereSql}
+     WHERE c.line_user_id IS NOT NULL AND (${whereSql})
      ORDER BY c.created_at DESC
      LIMIT 10000
    `;
@@ -315,10 +317,10 @@ export async function computeSegment(segmentId: string, db: D1Database): Promise
     throw new Error(`Invalid segment rules JSON: ${segment.rules}`);
   }
 
-  // ルールが空の場合は全顧客を対象（最大10000件に制限: Workersメモリ対策）
+  // ルールが空の場合はLINE登録者（line_user_id あり）全員を対象（最大10000件に制限: Workersメモリ対策）
   if (!rules.conditions || rules.conditions.length === 0) {
     const result = await db
-      .prepare('SELECT customer_id FROM customers ORDER BY created_at DESC LIMIT 10000')
+      .prepare('SELECT customer_id FROM customers WHERE line_user_id IS NOT NULL ORDER BY created_at DESC LIMIT 10000')
       .all<{ customer_id: string }>();
     const ids = result.results.map((r) => r.customer_id);
     await replaceSegmentMembers(db, segmentId, ids);
