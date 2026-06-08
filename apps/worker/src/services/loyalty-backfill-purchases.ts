@@ -1,7 +1,6 @@
 import {
   getLoyaltyPointByShopifyCustomerId,
-  upsertLoyaltyPoint,
-  addLoyaltyTransaction,
+  mutateLoyaltyPoint,
   determineRank,
   calculatePoints,
   getLoyaltySetting,
@@ -183,23 +182,31 @@ export async function runPurchaseBackfill(
       if (pts <= 0) continue;
 
       try {
-        // 同一顧客の複数注文を順に積む（キャッシュ値を更新）
-        const cur = member;
-        const newBalance = cur.balance + pts;
-        const newSpent = (cur.total_spent ?? 0) + o.amount;
-        await upsertLoyaltyPoint(env.DB, cur.friend_id, {
-          balance: newBalance, totalSpent: newSpent, rank: determineRank(newSpent), shopifyCustomerId: o.scid,
-        });
-        await addLoyaltyTransaction(env.DB, {
-          friendId: cur.friend_id, type: 'award', points: pts,
-          balanceAfter: newBalance + (cur.limited_balance ?? 0),
+        // 残高更新＋履歴記録を「1つの D1 batch」で atomic に実行する。
+        //   mutateLoyaltyPoint は内部で UPSERT(loyalty_points) と INSERT(loyalty_transactions) を
+        //   同一 batch にまとめるため、「残高だけ増えて履歴が残らない」中途半端な書き込みが
+        //   原理的に発生しない（途中失敗時は両方ロールバック）。冪等性は order_id の
+        //   awardedSet チェックで担保（同一注文を二度 award しない）。
+        await mutateLoyaltyPoint(env.DB, {
+          friendId: member.friend_id,
+          deltaBalance: pts,
+          deltaTotalSpent: o.amount,
+          txType: 'award',
           reason: isNikoniko
             ? `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}・ニコニコdays5倍 5%）`
             : `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}）`,
-          orderId: o.id, expiryDays,
+          orderId: o.id,
+          shopifyCustomerId: o.scid,
+          expiryDays,
         });
-        // キャッシュ更新（次の同一顧客注文に反映）＋ 二重付与防止セットにも追加
-        memberCache.set(o.scid, { ...cur, balance: newBalance, total_spent: newSpent });
+        // 同一顧客の次の注文で正しいランク/集計を使うため、キャッシュの累計を進める。
+        // （残高自体は mutateLoyaltyPoint が毎回 DB から最新値を読んで積むので、
+        //   ここでの balance 更新はキャッシュ整合のためのみ）
+        memberCache.set(o.scid, {
+          ...member,
+          balance: member.balance + pts,
+          total_spent: (member.total_spent ?? 0) + o.amount,
+        });
         awardedSet.add(o.id);
         summary.awarded++;
         summary.awardedPoints += pts;
