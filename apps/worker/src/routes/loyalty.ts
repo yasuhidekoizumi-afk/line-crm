@@ -1352,16 +1352,34 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) =>
 //     ※付与漏れと同じ原因で自社台帳 shopify_orders も 5/8 以降が欠落しているため、
 //       台帳ではなく Shopify を直接読む（取りこぼし防止）。
 //   - LINE通知は送らず、マイページ履歴(reason)に残すのみ。冪等(同一order_idは二重付与しない)。
-//   body: { since?: 'YYYY-MM-DD', dryRun?: boolean(既定true), maxAward?: number, maxPages?: number }
+//   指定方法は2通り（どちらでも可）:
+//     (a) URLクエリ:  ?dryRun=false&maxAward=1&since=2026-04-15   ← ターミナルから安全（推奨）
+//     (b) JSON body:  { since?, dryRun?(既定true), maxAward?, maxPages? }
+//   ※クエリと body の両方があればクエリを優先する。
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/backfill-purchases', async (c) => {
   try {
     const body = await c.req
       .json<{ since?: string; dryRun?: boolean; maxAward?: number; maxPages?: number }>()
       .catch(() => ({} as { since?: string; dryRun?: boolean; maxAward?: number; maxPages?: number }));
-    const summary = await runPurchaseBackfill(c.env, {
-      since: body.since, dryRun: body.dryRun, maxAward: body.maxAward, maxPages: body.maxPages,
-    });
+
+    // ── クエリパラメータ指定を優先する ──
+    // 背景: ターミナル(zsh)で `-d '{"dryRun":false,...}'` を渡すと、引用符や { } の
+    //   解釈で JSON body がサーバに届かず、安全側の dryRun(集計のみ)に化けることがある。
+    //   そこで URL クエリ(?dryRun=false&maxAward=1&since=2026-04-15)でも指定できるようにする。
+    const q = c.req.query();
+    const toInt = (v: string | undefined): number | undefined => {
+      if (v === undefined) return undefined;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : undefined; // 数値でなければ無視（暴走防止）
+    };
+    const since = q.since ?? body.since;
+    // dryRun は明示的に 'false' のときだけ false（それ以外は安全側=集計のみ）
+    const dryRun = q.dryRun !== undefined ? q.dryRun !== 'false' : body.dryRun;
+    const maxAward = toInt(q.maxAward) ?? body.maxAward;
+    const maxPages = toInt(q.maxPages) ?? body.maxPages;
+
+    const summary = await runPurchaseBackfill(c.env, { since, dryRun, maxAward, maxPages });
     return c.json({ success: true, data: summary });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'backfill-purchases failed' }, 500);
