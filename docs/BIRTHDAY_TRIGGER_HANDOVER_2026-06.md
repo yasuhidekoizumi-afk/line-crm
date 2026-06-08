@@ -67,6 +67,37 @@ jobs.push(processBirthdayCoupons(env));  // ← import も追加
 
 ---
 
+## 2.5. 日次cronの仕組み（誕生日処理が乗る土台）
+
+**cronは Cloudflare Workers の Cron Triggers で管理**されている。外部cronサーバーやGASではなく、Cloudflare自身がスケジュール実行する。
+
+### 設定場所: `apps/worker/wrangler.toml`
+```toml
+[triggers]
+crons = ["*/5 * * * *", "0 * * * *", "0 0 * * *"]
+```
+
+### 仕組み（4ステップ）
+1. `wrangler.toml` に cron式を記載
+2. `wrangler deploy` で設定がCloudflareに登録される
+3. 指定時刻にCloudflareが Worker の `scheduled()` 関数（`index.ts` 243行目）を自動実行
+4. `scheduled()` 内で `event.cron` を見て、どのcronが発火したかで処理を振り分け
+
+### 現在稼働中の3本
+| cron式 | 頻度 | 用途 |
+|---|---|---|
+| `*/5 * * * *` | 5分毎 | LINEステップ配信・ブロードキャスト・FERMENTキャンペーン・異常検知 |
+| `0 * * * *` | 1時間毎 | セグメント再計算・Shopify注文マッチング・ポイント整合性チェック |
+| **`0 0 * * *`** | **毎日0:00 UTC（＝9:00 JST）** | 日次サマリー・顧客インサイト再計算 |
+
+### 誕生日処理の乗せ方（重要）
+- **新しいcron式は追加しない。** 既存の `0 0 * * *`（毎日9:00 JST）ブランチに `processBirthdayCoupons(env)` を1行足すだけ。
+- → 配信時刻は実質**毎朝9:00 JST**（誕生日の朝に届く＝良いタイミング）。
+- → `wrangler.toml` の編集は**不要**（既存スケジュールに相乗り）。
+- ⚠️ ただし**コードを変えたら `wrangler deploy` での本番デプロイが必須**（🟡確認必須ゾーンの操作。本番反映時は小泉さんに確認を取ること）。
+
+---
+
 ## 3. 配信文面（確定・`BIRTHDAY_TRIGGER_MESSAGES_2026-06.md` に全文＋Flex JSON）
 
 - **LINE = Flex（画像カード）**。hero画像（お祝い文焼き込み済み・水彩イラスト版）は CRM の R2 にアップロード済み:
