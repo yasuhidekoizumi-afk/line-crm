@@ -44,6 +44,7 @@ import { shopifyOrders } from './routes/shopify-orders.js';
 import { shopifyProducts } from './routes/shopify-products.js';
 import { shopifyAutoMatch } from './routes/shopify-auto-match.js';
 import { migrationRunner } from './routes/migration-runner.js';
+import { importLineUsers } from './routes/import-line-users.js';
 import { customerJourney } from './routes/customer-journey.js';
 import { help } from './routes/help.js';
 import { aiDraft } from './routes/ai-draft.js';
@@ -190,6 +191,7 @@ app.route('/', shopifyOrders);
 app.route('/', shopifyProducts);
 app.route('/', shopifyAutoMatch);
 app.route('/', migrationRunner);
+app.route('/', importLineUsers);
 app.route('/', customerJourney);
 app.route('/', help);
 // CS Phase 1
