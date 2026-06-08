@@ -79,8 +79,8 @@ export default function CustomersPage() {
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">統合顧客</h1>
-        <p className="text-sm text-gray-500 mt-1">メール × LINE 統合顧客プロファイル</p>
+        <h1 className="text-2xl font-bold text-gray-900">LINE顧客</h1>
+        <p className="text-sm text-gray-500 mt-1">LINE公式アカウント登録者の顧客プロファイル</p>
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
