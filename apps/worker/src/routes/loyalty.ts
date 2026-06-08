@@ -34,6 +34,7 @@ import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify
 import { backfillPendingOrders } from '../services/loyalty-backfill.js';
 import { refundUnusedPointCode } from '../services/loyalty-code-refund.js';
 import { runPurchaseBackfill } from '../services/loyalty-backfill-purchases.js';
+import { previewUnusedCodeRefunds } from '../services/loyalty-code-refund-preview.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
@@ -1383,6 +1384,34 @@ loyalty.post('/api/loyalty/admin/backfill-purchases', async (c) => {
     return c.json({ success: true, data: summary });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'backfill-purchases failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/preview-unused-code-refunds
+//   バグB(未使用ポイント割引コードの返金)の【実態把握・読み取り専用】試算。
+//   返金候補のうち Shopify で本当に未使用/存在しないコードを数え、実際の返金件数・
+//   ポイントを返す。DB にも Shopify にも一切書き込まない（返金は行わない）。
+//   レート制限のため limit は小さめ(既定20)。offset を進めて複数回で全件を見る。
+//   例: ?limit=20&offset=0   （hasMore=true の間 offset を +limit して再実行）
+//   認証必須(authMiddleware: Bearer API_KEY)。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/preview-unused-code-refunds', async (c) => {
+  try {
+    const q = c.req.query();
+    const toIntQ = (v: string | undefined): number | undefined => {
+      if (v === undefined) return undefined;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const result = await previewUnusedCodeRefunds(c.env, {
+      limit: toIntQ(q.limit),
+      offset: toIntQ(q.offset),
+      graceDays: toIntQ(q.graceDays),
+    });
+    return c.json({ success: true, data: result });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'preview-unused-code-refunds failed' }, 500);
   }
 });
 
