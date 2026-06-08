@@ -52,6 +52,19 @@ export interface BackfillSummary {
 const SHOPIFY_API_VERSION = '2024-10';
 const PAGE_SIZE = 250;
 
+// ニコニコdays（ポイント5倍 = 5%固定・ランク倍率なし）の対象日（JST）。
+// 2026-05-24〜26 の3日間。今後 5倍デー等が増えたらここに足す。
+const NIKONIKO_5X_DATES = new Set(['2026-05-24', '2026-05-25', '2026-05-26']);
+const NIKONIKO_RATE = 0.05;
+
+/** ISO日時(UTC/+09:00 どちらでも)を JST の YYYY-MM-DD に変換する */
+function toJstDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  return new Date(t + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 /** Link ヘッダから rel="next" の URL を取り出す */
 function parseNextLink(linkHeader: string | null): string | null {
   if (!linkHeader) return null;
@@ -143,7 +156,9 @@ export async function runPurchaseBackfill(
       seen.add(o.id);
 
       const rank = determineRank(member!.total_spent ?? 0);
-      const pts = calculatePoints(o.amount, rank, pointRate);
+      // 5/24-26 はニコニコdays（5%固定・ランク倍率なし）。それ以外は通常(1%×ランク)。
+      const isNikoniko = NIKONIKO_5X_DATES.has(toJstDate(o.processedAt));
+      const pts = isNikoniko ? Math.floor(o.amount * NIKONIKO_RATE) : calculatePoints(o.amount, rank, pointRate);
       summary.targetOrders++;
       summary.targetAmountJpy += o.amount;
       summary.estimatedPoints += pts;
@@ -163,7 +178,9 @@ export async function runPurchaseBackfill(
         await addLoyaltyTransaction(env.DB, {
           friendId: cur.friend_id, type: 'award', points: pts,
           balanceAfter: newBalance + (cur.limited_balance ?? 0),
-          reason: `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}）`,
+          reason: isNikoniko
+            ? `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}・ニコニコdays5倍 5%）`
+            : `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}）`,
           orderId: o.id, expiryDays,
         });
         // キャッシュ更新（次の同一顧客注文に反映）＋ 二重付与防止セットにも追加
