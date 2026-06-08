@@ -112,6 +112,19 @@ export async function runPurchaseBackfill(
     return row;
   };
 
+  // 会員(shopify_customer_id を持つ loyalty_points)の ID 集合を「1クエリ」で取得する。
+  //   旧実装はスキャンする全注文の顧客を 1件ずつ getMember で読んでいたため、
+  //   2000件超の注文で会員照会のDB読みが数百〜千回に達し、Cloudflare Workers の
+  //   サブリクエスト上限(約1000)に到達して付与が大量に失敗していた。
+  //   会員かどうかの判定はこの集合で行い（DB読みゼロ）、実際に残高を積む対象注文の
+  //   ぶんだけ getMember で行を読む（= 読み回数を「対象注文数」程度まで激減させる）。
+  const memberIdRows = await env.DB
+    .prepare(`SELECT shopify_customer_id FROM loyalty_points WHERE shopify_customer_id IS NOT NULL`)
+    .all<{ shopify_customer_id: string }>();
+  const memberIdSet = new Set<string>(
+    (memberIdRows.results ?? []).map((r) => String(r.shopify_customer_id)),
+  );
+
   const seen = new Set<string>();
 
   // Shopify 注文をページング取得（created_at 昇順）
@@ -144,18 +157,20 @@ export async function runPurchaseBackfill(
         processedAt: raw.processed_at ?? null,
       };
 
-      // 会員判定（非同期なので isMember を都度評価）
-      const member = o.scid ? await getMember(o.scid) : null;
+      // 会員判定は「会員ID集合」で行う（ここでは一切DBを読まない＝サブリクエスト節約）
       const decision = classifyBackfillOrder(
         o,
         (id) => awardedSet.has(id),
-        () => member != null,
+        (scid) => memberIdSet.has(scid),
         seen,
       );
       if (!decision.ok) continue;
       seen.add(o.id);
 
-      const rank = determineRank(member!.total_spent ?? 0);
+      // 対象注文のぶんだけ、ここで初めて会員行を読む（残高・累計・ランク計算に必要）。
+      const member = await getMember(o.scid);
+      if (!member) continue; // 集合にはあるが行が取れない等の異常時は安全側でスキップ
+      const rank = determineRank(member.total_spent ?? 0);
       // 5/24-26 はニコニコdays（5%固定・ランク倍率なし）。それ以外は通常(1%×ランク)。
       const isNikoniko = NIKONIKO_5X_DATES.has(toJstDate(o.processedAt));
       const pts = isNikoniko ? Math.floor(o.amount * NIKONIKO_RATE) : calculatePoints(o.amount, rank, pointRate);
@@ -169,7 +184,7 @@ export async function runPurchaseBackfill(
 
       try {
         // 同一顧客の複数注文を順に積む（キャッシュ値を更新）
-        const cur = member!;
+        const cur = member;
         const newBalance = cur.balance + pts;
         const newSpent = (cur.total_spent ?? 0) + o.amount;
         await upsertLoyaltyPoint(env.DB, cur.friend_id, {
