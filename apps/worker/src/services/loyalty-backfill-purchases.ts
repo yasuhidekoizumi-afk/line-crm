@@ -1,6 +1,7 @@
 import {
   getLoyaltyPointByShopifyCustomerId,
-  mutateLoyaltyPoint,
+  upsertLoyaltyPoint,
+  addLoyaltyTransaction,
   determineRank,
   calculatePoints,
   getLoyaltySetting,
@@ -44,6 +45,7 @@ export interface BackfillSummary {
   awarded: number;           // 実際に付与した件数(execute時)
   awardedPoints: number;     // 実際に付与したpt
   errors: number;
+  errorSamples: string[];    // 付与失敗の実エラー文言（先頭数件。原因調査用）
   pagesFetched: number;
   hitPageCap: boolean;       // ページ上限に達した(=取得しきれていない可能性)
 }
@@ -86,7 +88,8 @@ export async function runPurchaseBackfill(
 
   const summary: BackfillSummary = {
     dryRun, since, scannedOrders: 0, targetOrders: 0, targetAmountJpy: 0,
-    estimatedPoints: 0, awarded: 0, awardedPoints: 0, errors: 0, pagesFetched: 0, hitPageCap: false,
+    estimatedPoints: 0, awarded: 0, awardedPoints: 0, errors: 0, errorSamples: [],
+    pagesFetched: 0, hitPageCap: false,
   };
 
   const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
@@ -182,36 +185,35 @@ export async function runPurchaseBackfill(
       if (pts <= 0) continue;
 
       try {
-        // 残高更新＋履歴記録を「1つの D1 batch」で atomic に実行する。
-        //   mutateLoyaltyPoint は内部で UPSERT(loyalty_points) と INSERT(loyalty_transactions) を
-        //   同一 batch にまとめるため、「残高だけ増えて履歴が残らない」中途半端な書き込みが
-        //   原理的に発生しない（途中失敗時は両方ロールバック）。冪等性は order_id の
-        //   awardedSet チェックで担保（同一注文を二度 award しない）。
-        await mutateLoyaltyPoint(env.DB, {
-          friendId: member.friend_id,
-          deltaBalance: pts,
-          deltaTotalSpent: o.amount,
-          txType: 'award',
+        // 付与（残高更新→履歴記録）。実績のある2ステップ方式に戻す。
+        //   ※atomic化(mutateLoyaltyPoint)を試したが本番で全件失敗したため一旦撤回。
+        //     バルク会員照会の修正によりサブリクエスト上限に当たらなくなったので、
+        //     2ステップでも途中失敗（中途半端書き込み）は実質発生しない。
+        const cur = member;
+        const newBalance = cur.balance + pts;
+        const newSpent = (cur.total_spent ?? 0) + o.amount;
+        await upsertLoyaltyPoint(env.DB, cur.friend_id, {
+          balance: newBalance, totalSpent: newSpent, rank: determineRank(newSpent), shopifyCustomerId: o.scid,
+        });
+        await addLoyaltyTransaction(env.DB, {
+          friendId: cur.friend_id, type: 'award', points: pts,
+          balanceAfter: newBalance + (cur.limited_balance ?? 0),
           reason: isNikoniko
             ? `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}・ニコニコdays5倍 5%）`
             : `システム不具合により付与されていなかった購入ポイントを補填しました（注文 ${o.id}）`,
-          orderId: o.id,
-          shopifyCustomerId: o.scid,
-          expiryDays,
+          orderId: o.id, expiryDays,
         });
-        // 同一顧客の次の注文で正しいランク/集計を使うため、キャッシュの累計を進める。
-        // （残高自体は mutateLoyaltyPoint が毎回 DB から最新値を読んで積むので、
-        //   ここでの balance 更新はキャッシュ整合のためのみ）
-        memberCache.set(o.scid, {
-          ...member,
-          balance: member.balance + pts,
-          total_spent: (member.total_spent ?? 0) + o.amount,
-        });
+        // キャッシュ更新（次の同一顧客注文に反映）＋ 二重付与防止セットにも追加
+        memberCache.set(o.scid, { ...cur, balance: newBalance, total_spent: newSpent });
         awardedSet.add(o.id);
         summary.awarded++;
         summary.awardedPoints += pts;
       } catch (e) {
         summary.errors++;
+        // 原因調査用に実エラー文言を先頭5件だけ保持して応答に返す
+        if (summary.errorSamples.length < 5) {
+          summary.errorSamples.push(`order=${o.id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
         console.error(`[backfill-purchases] order=${o.id} 付与失敗:`, e);
       }
     }
