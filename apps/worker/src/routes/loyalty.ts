@@ -1445,6 +1445,47 @@ loyalty.post('/api/loyalty/admin/refund-unused-codes', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/refund-specific-codes
+//   指定したコードだけをピンポイント返金する管理用ツール（③消失=取り戻せない人の個別救済）。
+//   items に「顧客ID:コード」をカンマ区切りで列挙（JSON body不要・URLクエリ）。
+//   例: ?items=8036778115231:ORYZAE-115231-MOJW0F7I,6345312469151:ORYZAE-469151-MOWSRDY5
+//   各コードは共通の refundUnusedPointCode で処理するため、万一「使用済み(Shopifyで回数≧1)」の
+//   コードを指定しても used 判定で返金されない（安全装置は共通）。冪等(返金済みは [取り消し済み] 除外)。
+//   ※消失コードは Shopify で使用回数を確認できないため、呼ぶ前に注文履歴で「未使用」を確認済みのものだけ渡すこと。
+//   認証必須(authMiddleware: Bearer API_KEY)。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/refund-specific-codes', async (c) => {
+  try {
+    const itemsRaw = (c.req.query('items') ?? '').trim();
+    const items = itemsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (items.length === 0) {
+      return c.json({ success: false, error: 'items は「顧客ID:コード」のカンマ区切りで指定してください' }, 400);
+    }
+    if (items.length > 50) {
+      return c.json({ success: false, error: 'items は一度に最大50件まで' }, 400);
+    }
+    const results: Array<{ scid: string; code: string; refunded: boolean; refundPoints?: number; reason: string }> = [];
+    for (const item of items) {
+      const idx = item.indexOf(':');
+      if (idx <= 0) {
+        results.push({ scid: '', code: item, refunded: false, reason: 'bad_format' });
+        continue;
+      }
+      const scid = item.slice(0, idx).trim();
+      const code = item.slice(idx + 1).trim();
+      // 自動返還と同じ文言('cron')で記録：「未使用の割引コード分のポイントをお戻ししました」
+      const r = await refundUnusedPointCode(c.env, scid, code, 'cron');
+      results.push({ scid, code, refunded: r.refunded, refundPoints: r.refundPoints, reason: r.reason });
+    }
+    const refunded = results.filter((r) => r.refunded).length;
+    const refundedPoints = results.reduce((s, r) => s + (r.refunded ? (r.refundPoints ?? 0) : 0), 0);
+    return c.json({ success: true, data: { refunded, refundedPoints, results } });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'refund-specific-codes failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
 // POST /api/loyalty/campaign-award — キャンペーンポイント付与（LP 等から呼ぶ）
 //
 // 8周年 LINE 連携特典など、定義済みキャンペーン (campaign_key) に対して
