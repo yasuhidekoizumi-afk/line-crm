@@ -14,8 +14,7 @@ const CHANNEL_LABEL: Record<string, string> = {
 const SAMPLE_RULE = JSON.stringify({
   operator: 'AND',
   conditions: [
-    { field: 'subscribed_email', operator: '=', value: 1 },
-    { field: 'ltv', operator: '>=', value: 5000 },
+    { field: 'friend_tag', operator: '=', value: '' },
   ],
 })
 
@@ -30,7 +29,7 @@ export default function SegmentsPage() {
   const [form, setForm] = useState({
     name: '',
     description: '',
-    channel_scope: 'all',
+    channel_scope: 'line',
     rules: SAMPLE_RULE,
   })
   const [saving, setSaving] = useState(false)
@@ -53,7 +52,7 @@ export default function SegmentsPage() {
   const resetForm = () => setForm({
     name: '',
     description: '',
-    channel_scope: 'all',
+    channel_scope: 'line',
     rules: SAMPLE_RULE,
   })
 
@@ -173,15 +172,11 @@ export default function SegmentsPage() {
               </div>
               <div className="col-span-2 sm:col-span-1">
                 <label className="block text-sm font-medium text-gray-700 mb-1">チャネル</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  value={form.channel_scope}
-                  onChange={(e) => setForm({ ...form, channel_scope: e.target.value })}
-                >
-                  {Object.entries(CHANNEL_LABEL).map(([k, v]) => (
-                    <option key={k} value={k}>{v}</option>
-                  ))}
-                </select>
+                {/* LINE専用運用のため固定。メール配信は使わない方針。 */}
+                <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-600 flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+                  LINE配信（固定）
+                </div>
               </div>
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">説明</label>
@@ -189,7 +184,7 @@ export default function SegmentsPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="例: メール購読中かつLTV5,000円以上のアクティブな顧客"
+                  placeholder="例: 「いちご購入者」タグ かつ 累計購入5,000円以上"
                 />
               </div>
             </div>
