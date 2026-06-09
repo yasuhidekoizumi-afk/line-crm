@@ -35,6 +35,7 @@ import { backfillPendingOrders } from '../services/loyalty-backfill.js';
 import { refundUnusedPointCode } from '../services/loyalty-code-refund.js';
 import { runPurchaseBackfill } from '../services/loyalty-backfill-purchases.js';
 import { previewUnusedCodeRefunds } from '../services/loyalty-code-refund-preview.js';
+import { sweepUnusedPointCodes } from '../services/loyalty-unused-code-sweep.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
@@ -1412,6 +1413,34 @@ loyalty.post('/api/loyalty/admin/preview-unused-code-refunds', async (c) => {
     return c.json({ success: true, data: result });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'preview-unused-code-refunds failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/refund-unused-codes
+//   バグB(未使用ポイント割引コードの返金)の【手動・少量ずつ】実行トリガー。
+//   B2スイープを force=true で呼び、1回あたり max 件まで返金する（既定20=サブリクエスト上限内）。
+//   未使用コードのみ返金（使用済みは [利用済み] 印を付けてスキップ）。冪等(返金済みは
+//   [取り消し済み] 除外)。返り値に refunded/usedSkipped/errors/errorSamples を含め、毎回確認可能。
+//   例: ?max=20&graceDays=14   （hasMore 的に scanned<候補数の間は再実行して消化）
+//   認証必須(authMiddleware: Bearer API_KEY)。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/refund-unused-codes', async (c) => {
+  try {
+    const q = c.req.query();
+    const toIntQ = (v: string | undefined): number | undefined => {
+      if (v === undefined) return undefined;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const result = await sweepUnusedPointCodes(c.env, {
+      force: true,
+      limit: toIntQ(q.max) ?? toIntQ(q.limit),
+      graceDays: toIntQ(q.graceDays),
+    });
+    return c.json({ success: true, data: result });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'refund-unused-codes failed' }, 500);
   }
 });
 
