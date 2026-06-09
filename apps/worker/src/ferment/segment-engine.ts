@@ -98,31 +98,45 @@ function leafToSql(cond: SegmentLeafCondition): QueryPart {
 
   // 派生フィールドの変換
   if (field === 'friend_tag') {
-    // LINE CRM の friend_tags をサブクエリで参照
+    // LINE CRM の friend_tags をサブクエリで参照。
+    // UI（ルールビルダー）は friend_tag を string 型として扱い contains / in / not_in /
+    // starts_with なども生成するため、= と != だけでなく全演算子に対応する。
+    // （以前は = / != 以外で例外を投げ、タグ条件のセグメントが0件になっていた）
+    const exists = (pred: string): string => `EXISTS (
+      SELECT 1 FROM friend_tags ft
+      JOIN tags t ON t.id = ft.tag_id
+      JOIN friends f ON f.id = ft.friend_id
+      WHERE f.line_user_id = c.line_user_id${pred}
+    )`;
+    const notExists = (pred: string): string => `NOT ${exists(pred)}`;
     const tagName = String(value ?? '');
     switch (op) {
       case '=':
-        return {
-          sql: `EXISTS (
-            SELECT 1 FROM friend_tags ft
-            JOIN tags t ON t.id = ft.tag_id
-            JOIN friends f ON f.id = ft.friend_id
-            WHERE f.line_user_id = c.line_user_id AND t.name = ?
-          )`,
-          bindings: [tagName],
-        };
+        return { sql: exists(' AND t.name = ?'), bindings: [tagName] };
       case '!=':
-        return {
-          sql: `NOT EXISTS (
-            SELECT 1 FROM friend_tags ft
-            JOIN tags t ON t.id = ft.tag_id
-            JOIN friends f ON f.id = ft.friend_id
-            WHERE f.line_user_id = c.line_user_id AND t.name = ?
-          )`,
-          bindings: [tagName],
-        };
+        return { sql: notExists(' AND t.name = ?'), bindings: [tagName] };
+      case 'contains':
+        return { sql: exists(' AND t.name LIKE ?'), bindings: [`%${tagName}%`] };
+      case 'starts_with':
+        return { sql: exists(' AND t.name LIKE ?'), bindings: [`${tagName}%`] };
+      case 'in': {
+        const arr = Array.isArray(value) ? value : [value];
+        const ph = arr.map(() => '?').join(', ');
+        return { sql: exists(` AND t.name IN (${ph})`), bindings: arr.map((v) => String(v ?? '')) };
+      }
+      case 'not_in': {
+        const arr = Array.isArray(value) ? value : [value];
+        const ph = arr.map(() => '?').join(', ');
+        return { sql: notExists(` AND t.name IN (${ph})`), bindings: arr.map((v) => String(v ?? '')) };
+      }
+      case 'is_not_null':
+        // 何らかのタグが付いている
+        return { sql: exists(''), bindings: [] };
+      case 'is_null':
+        // タグが一つも付いていない
+        return { sql: notExists(''), bindings: [] };
       default:
-        throw new Error(`friend_tag で未対応の演算子: ${op}（= または != のみ対応）`);
+        throw new Error(`friend_tag で未対応の演算子: ${op}`);
     }
   }
 
