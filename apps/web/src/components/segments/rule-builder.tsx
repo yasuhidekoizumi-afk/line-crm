@@ -31,25 +31,25 @@ interface FieldDef {
   unit?: string
 }
 
+// LINE専用運用に合わせて整理。普段使う「タグ（手動）」を先頭に。
+// メール専用項目（メール購読・メールバウンス・メールアドレス）は配信に使わないため除外。
 const FIELDS: FieldDef[] = [
+  // タグ（手動付与）= この管理画面で手で付けるタグ。CRM PLUSの「タグ」に相当。普段の絞り込みはこれ。
+  { value: 'friend_tag',       label: 'タグ（手動）',        type: 'string' },
+  // 購入タグ = Shopify側で自動的に付くタグ（いちご購入者 など）
+  { value: 'tags',             label: '購入タグ（Shopify）', type: 'string' },
   { value: 'ltv',              label: '累計購入金額',     type: 'number', unit: '円' },
   { value: 'order_count',      label: '注文回数',         type: 'number', unit: '回' },
   { value: 'avg_order_value',  label: '平均購入単価',     type: 'number', unit: '円' },
   { value: 'days_since_last_order', label: '最終注文からの経過日数', type: 'number', unit: '日' },
   { value: 'days_since_created',    label: '登録からの経過日数',    type: 'number', unit: '日' },
-  { value: 'subscribed_email', label: 'メール購読',       type: 'boolean' },
-  { value: 'subscribed_line',  label: 'LINE受信同意',     type: 'boolean' },
-  { value: 'email_bounced',    label: 'メールバウンス',   type: 'boolean' },
-  { value: 'region',           label: '地域',             type: 'string' },
-  { value: 'language',         label: '言語',             type: 'string' },
-  { value: 'email',            label: 'メールアドレス',   type: 'string' },
-  { value: 'tags',             label: '顧客タグ',         type: 'string' },
-  { value: 'friend_tag',       label: 'LINE友だちタグ',   type: 'string' },
   { value: 'last_order_at',    label: '最終注文日',       type: 'date' },
-  { value: 'created_at',       label: '登録日',           type: 'date' },
   { value: 'first_order_at',   label: '初回注文日',       type: 'date' },
-  { value: 'source',           label: '流入元',           type: 'string' },
+  { value: 'created_at',       label: '登録日',           type: 'date' },
+  { value: 'subscribed_line',  label: 'LINE受信同意',     type: 'boolean' },
+  { value: 'region',           label: '地域',             type: 'string' },
   { value: 'display_name',     label: '表示名',           type: 'string' },
+  { value: 'source',           label: '流入元',           type: 'string' },
   // ロイヤルティ
   { value: 'loyalty_rank',     label: 'ロイヤルティランク', type: 'string' },
   { value: 'loyalty_balance',  label: 'ポイント残高',      type: 'number', unit: 'pt' },
@@ -96,7 +96,7 @@ function getApplicableOps(field: string): OpDef[] {
 }
 
 function createEmptyCondition(): LeafCondition {
-  return { field: 'ltv', operator: '>=', value: '' }
+  return { field: 'friend_tag', operator: '=', value: '' }
 }
 
 function createEmptyGroup(): GroupCondition {
