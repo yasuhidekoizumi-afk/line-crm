@@ -32,19 +32,22 @@ export interface SweepResult {
   refundedPoints: number;
   usedSkipped: number;
   errors: number;
+  errorSamples: string[]; // 失敗の実エラー文言（先頭5件。原因調査用）
 }
 
 export async function sweepUnusedPointCodes(
   env: RefundCodeEnv,
-  opts: { graceDays?: number; limit?: number } = {},
+  // force=true のとき設定フラグを無視して動かす（管理用の手動トリガーから使う）。
+  opts: { graceDays?: number; limit?: number; force?: boolean } = {},
 ): Promise<SweepResult> {
   const result: SweepResult = {
-    enabled: false, scanned: 0, refunded: 0, refundedPoints: 0, usedSkipped: 0, errors: 0,
+    enabled: false, scanned: 0, refunded: 0, refundedPoints: 0, usedSkipped: 0, errors: 0, errorSamples: [],
   };
 
-  // 安全装置①: 設定が '1' のときだけ動く（デフォルト OFF）
+  // 安全装置①: 設定が '1' のときだけ動く（デフォルト OFF）。
+  //   ただし force=true（管理用の手動トリガー）のときは、その呼び出し自体が許可なので無視。
   const enabled = await getLoyaltySetting(env.DB, 'unused_code_auto_refund_enabled').catch(() => null);
-  if (enabled !== '1') return result;
+  if (!opts.force && enabled !== '1') return result;
   result.enabled = true;
 
   const graceDays = opts.graceDays ?? DEFAULT_GRACE_DAYS;
@@ -95,6 +98,9 @@ export async function sweepUnusedPointCodes(
       // それ以外(no_redeem / shopify_error 等)は印を付けず、次回再試行する。
     } catch (e) {
       result.errors++;
+      if (result.errorSamples.length < 5) {
+        result.errorSamples.push(`code=${code}: ${e instanceof Error ? e.message : String(e)}`);
+      }
       console.error(`[unused-code-sweep] code=${code} 返還失敗:`, e);
     }
   }
