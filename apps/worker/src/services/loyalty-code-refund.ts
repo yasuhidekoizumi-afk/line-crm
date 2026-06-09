@@ -205,7 +205,7 @@ export async function refundUnusedPointCode(
   const customerReason =
     source === 'manual'
       ? `割引コードの取り消しにより、未使用のポイントを返還しました（コード: ${normalizedCode}）`
-      : `ポイントシステムの不具合により消滅していたポイントを返還しました（未使用の割引コード分 / コード: ${normalizedCode}）`;
+      : `未使用の割引コード分のポイントをお戻ししました（コード: ${normalizedCode}）`;
   await addLoyaltyTransaction(db, {
     friendId: point.friend_id,
     type: 'adjust',
