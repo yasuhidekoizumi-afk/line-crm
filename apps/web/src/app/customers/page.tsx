@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { fermentApi, type Customer } from '@/lib/ferment-api'
+import { api } from '@/lib/api'
+
+type TagItem = { id: string; name: string; color: string }
 
 function fmt(iso: string | null) {
   if (!iso) return '-'
@@ -22,11 +25,17 @@ export default function CustomersPage() {
   const [profile, setProfile] = useState<{
     friend: { id: string; is_following: number } | null
     points: { balance: number; rank: string } | null
-    tags: string[]
+    friendTags: TagItem[]
+    shopifyTags: string[]
     orders: { shopify_order_number: string | null; total_price: number; processed_at: string }[]
     birthday: string | null
   } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  // タグ管理用
+  const [allTags, setAllTags] = useState<TagItem[]>([])
+  const [tagToAdd, setTagToAdd] = useState('')
+  const [newTagName, setNewTagName] = useState('')
+  const [tagBusy, setTagBusy] = useState(false)
 
   const LIMIT = 50
 
@@ -63,16 +72,77 @@ export default function CustomersPage() {
     load(newOffset)
   }
 
+  // 全タグ一覧（タグ追加プルダウン用）を初回に取得
+  useEffect(() => {
+    api.tags.list().then((res) => {
+      if (res.success && res.data) setAllTags(res.data as TagItem[])
+    }).catch(() => {})
+  }, [])
+
+  const loadProfile = useCallback(async (customerId: string) => {
+    const res = await fermentApi.customers.profile(customerId)
+    if (res.success && res.data) setProfile(res.data)
+  }, [])
+
   const handleSelectCustomer = async (customer: Customer) => {
     setSelectedId(customer.customer_id)
     setDetail(customer)
     setProfile(null)
+    setTagToAdd('')
+    setNewTagName('')
     setDetailLoading(true)
     try {
-      const res = await fermentApi.customers.profile(customer.customer_id)
-      if (res.success && res.data) setProfile(res.data)
+      await loadProfile(customer.customer_id)
     } finally {
       setDetailLoading(false)
+    }
+  }
+
+  // タグを友だちに付与（既存タグ）
+  const handleAddTag = async () => {
+    if (!profile?.friend || !tagToAdd || !detail) return
+    setTagBusy(true)
+    try {
+      await api.friends.addTag(profile.friend.id, tagToAdd)
+      setTagToAdd('')
+      await loadProfile(detail.customer_id)
+    } catch {
+      setError('タグの追加に失敗しました')
+    } finally {
+      setTagBusy(false)
+    }
+  }
+
+  // 新規タグを作成して付与
+  const handleCreateAndAddTag = async () => {
+    if (!profile?.friend || !newTagName.trim() || !detail) return
+    setTagBusy(true)
+    try {
+      const created = await api.tags.create({ name: newTagName.trim(), color: '#06C755' })
+      if (created.success && created.data) {
+        setAllTags((prev) => [...prev, created.data as TagItem])
+        await api.friends.addTag(profile.friend.id, created.data.id)
+        setNewTagName('')
+        await loadProfile(detail.customer_id)
+      }
+    } catch {
+      setError('タグの作成に失敗しました')
+    } finally {
+      setTagBusy(false)
+    }
+  }
+
+  // タグを友だちから外す
+  const handleRemoveTag = async (tagId: string) => {
+    if (!profile?.friend || !detail) return
+    setTagBusy(true)
+    try {
+      await api.friends.removeTag(profile.friend.id, tagId)
+      await loadProfile(detail.customer_id)
+    } catch {
+      setError('タグの削除に失敗しました')
+    } finally {
+      setTagBusy(false)
     }
   }
 
@@ -253,18 +323,94 @@ export default function CustomersPage() {
               </div>
             </div>
 
-            {/* タグ */}
+            {/* タグ管理（LINE友だちタグ） */}
             <div className="border-t border-gray-100 pt-3 mb-3">
-              <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">タグ</h4>
+              <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">タグ管理</h4>
               {!profile ? (
                 <p className="text-xs text-gray-400">読み込み中...</p>
-              ) : profile.tags.length === 0 ? (
-                <p className="text-xs text-gray-400">タグなし</p>
+              ) : !profile.friend ? (
+                <p className="text-xs text-gray-400">LINE連携がないためタグを付けられません</p>
               ) : (
-                <div className="flex flex-wrap gap-1">
-                  {profile.tags.map((t) => (
-                    <span key={t} className="text-[11px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">{t}</span>
-                  ))}
+                <>
+                  {/* 付与済みタグ（×で削除） */}
+                  {profile.friendTags.length === 0 ? (
+                    <p className="text-xs text-gray-400 mb-2">タグなし</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {profile.friendTags.map((t) => (
+                        <span
+                          key={t.id}
+                          className="inline-flex items-center gap-1 text-[11px] text-white px-1.5 py-0.5 rounded"
+                          style={{ backgroundColor: t.color || '#06C755' }}
+                        >
+                          {t.name}
+                          <button
+                            onClick={() => handleRemoveTag(t.id)}
+                            disabled={tagBusy}
+                            className="leading-none hover:opacity-70 disabled:opacity-40"
+                            title="タグを外す"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 既存タグを追加 */}
+                  <div className="flex gap-1 mb-1.5">
+                    <select
+                      value={tagToAdd}
+                      onChange={(e) => setTagToAdd(e.target.value)}
+                      disabled={tagBusy}
+                      className="flex-1 min-w-0 border border-gray-300 rounded px-1.5 py-1 text-xs"
+                    >
+                      <option value="">タグを選んで追加…</option>
+                      {allTags
+                        .filter((t) => !profile.friendTags.some((ft) => ft.id === t.id))
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                    </select>
+                    <button
+                      onClick={handleAddTag}
+                      disabled={tagBusy || !tagToAdd}
+                      className="text-xs bg-green-600 text-white px-2 py-1 rounded disabled:opacity-40 hover:bg-green-700 shrink-0"
+                    >
+                      追加
+                    </button>
+                  </div>
+
+                  {/* 新規タグを作成して追加 */}
+                  <div className="flex gap-1">
+                    <input
+                      value={newTagName}
+                      onChange={(e) => setNewTagName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleCreateAndAddTag() }}
+                      disabled={tagBusy}
+                      placeholder="新しいタグ名を作成"
+                      className="flex-1 min-w-0 border border-gray-300 rounded px-1.5 py-1 text-xs"
+                    />
+                    <button
+                      onClick={handleCreateAndAddTag}
+                      disabled={tagBusy || !newTagName.trim()}
+                      className="text-xs border border-green-600 text-green-700 px-2 py-1 rounded disabled:opacity-40 hover:bg-green-50 shrink-0"
+                    >
+                      作成
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Shopifyタグ（読み取り専用） */}
+              {profile && profile.shopifyTags.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[10px] text-gray-400 mb-1">Shopifyタグ（自動・編集不可）</p>
+                  <div className="flex flex-wrap gap-1">
+                    {profile.shopifyTags.map((t) => (
+                      <span key={t} className="text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{t}</span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

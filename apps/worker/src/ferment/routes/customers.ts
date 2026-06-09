@@ -120,13 +120,15 @@ customerRoutes.get('/:id/profile', async (c) => {
     let friend: { id: string; is_following: number } | null = null;
     let points: { balance: number; rank: string } | null = null;
     let orders: unknown[] = [];
-    const tagSet = new Set<string>();
+    // friendTags: 編集可能なLINE友だちタグ（ID付き・タグ管理用）。shopifyTags: 読み取り専用のShopify顧客タグ。
+    let friendTags: { id: string; name: string; color: string }[] = [];
+    const shopifyTags: string[] = [];
 
-    // customers.tags（カンマ区切り）を統合
+    // customers.tags（カンマ区切り・Shopify由来）は読み取り専用として返す
     if (customer.tags) {
       for (const t of customer.tags.split(',')) {
         const v = t.trim();
-        if (v) tagSet.add(v);
+        if (v) shopifyTags.push(v);
       }
     }
 
@@ -137,7 +139,7 @@ customerRoutes.get('/:id/profile', async (c) => {
         const lp = await getLoyaltyPoint(c.env.DB, f.id);
         if (lp) points = { balance: lp.balance, rank: lp.rank };
         const ftags = await getFriendTags(c.env.DB, f.id);
-        for (const t of ftags) tagSet.add(t.name);
+        friendTags = ftags.map((t) => ({ id: t.id, name: t.name, color: t.color }));
         const ord = await c.env.DB
           .prepare(
             'SELECT shopify_order_number, total_price, processed_at FROM shopify_orders WHERE friend_id = ? AND cancelled_at IS NULL ORDER BY processed_at DESC LIMIT 30',
@@ -170,7 +172,7 @@ customerRoutes.get('/:id/profile', async (c) => {
 
     return c.json({
       success: true,
-      data: { customer, friend, points, tags: Array.from(tagSet), orders, birthday },
+      data: { customer, friend, points, friendTags, shopifyTags, orders, birthday },
     });
   } catch (err) {
     console.error('GET /api/customers/:id/profile error:', err);

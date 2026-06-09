@@ -314,7 +314,8 @@ export const fermentApi = {
         customer: Customer
         friend: { id: string; is_following: number } | null
         points: { balance: number; rank: string } | null
-        tags: string[]
+        friendTags: { id: string; name: string; color: string }[]
+        shopifyTags: string[]
         orders: { shopify_order_number: string | null; total_price: number; processed_at: string }[]
         birthday: string | null
       }>>(`/api/customers/${id}/profile`),
