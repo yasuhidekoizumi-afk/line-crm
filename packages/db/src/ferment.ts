@@ -194,7 +194,7 @@ export function generateFermentId(prefix: string): string {
 
 export async function getCustomers(
   db: D1Database,
-  opts?: { limit?: number; offset?: number; region?: string; subscribed_email?: boolean },
+  opts?: { limit?: number; offset?: number; region?: string; subscribed_email?: boolean; search?: string },
 ): Promise<Customer[]> {
   // LINE公式アカウント登録者（line_user_id あり）のみを対象にする。
   // メール専用機能を切り離し、LINE中心の顧客管理に限定する方針。
@@ -208,6 +208,15 @@ export async function getCustomers(
   if (opts?.subscribed_email !== undefined) {
     conditions.push('subscribed_email = ?');
     bindings.push(opts.subscribed_email ? 1 : 0);
+  }
+  // フリーワード検索: 名前・メール・LINE IDを部分一致（全件対象。表示中ページ内だけでなくDB全体を検索）
+  if (opts?.search) {
+    const term = opts.search.trim();
+    if (term) {
+      conditions.push('(display_name LIKE ? OR email LIKE ? OR line_user_id LIKE ?)');
+      const like = `%${term}%`;
+      bindings.push(like, like, like);
+    }
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -326,10 +335,36 @@ export async function updateCustomer(
     .run();
 }
 
-export async function countCustomers(db: D1Database): Promise<number> {
+export async function countCustomers(
+  db: D1Database,
+  opts?: { region?: string; subscribed_email?: boolean; search?: string },
+): Promise<number> {
   // 顧客一覧と件数を揃えるため、LINE登録者（line_user_id あり）のみ数える。
+  // 一覧側(getCustomers)と同じフィルタを適用して件数・ページネーションを一致させる。
+  const conditions: string[] = ['line_user_id IS NOT NULL'];
+  const bindings: unknown[] = [];
+
+  if (opts?.region) {
+    conditions.push('region = ?');
+    bindings.push(opts.region);
+  }
+  if (opts?.subscribed_email !== undefined) {
+    conditions.push('subscribed_email = ?');
+    bindings.push(opts.subscribed_email ? 1 : 0);
+  }
+  if (opts?.search) {
+    const term = opts.search.trim();
+    if (term) {
+      conditions.push('(display_name LIKE ? OR email LIKE ? OR line_user_id LIKE ?)');
+      const like = `%${term}%`;
+      bindings.push(like, like, like);
+    }
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
   const row = await db
-    .prepare('SELECT COUNT(*) as cnt FROM customers WHERE line_user_id IS NOT NULL')
+    .prepare(`SELECT COUNT(*) as cnt FROM customers ${where}`)
+    .bind(...bindings)
     .first<{ cnt: number }>();
   return row?.cnt ?? 0;
 }
