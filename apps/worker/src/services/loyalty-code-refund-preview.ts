@@ -27,6 +27,7 @@ export interface PreviewRefundResult {
   used: number;             // ②使用済み: コードが存在・使用回数≧1（=買い物で消費）→ 絶対に救済しない
   gone: number;             // ③消失: Shopify上にコードが無い（=取り戻せない）→ 救済候補(実返金前に注文照合)
   gonePoints: number;
+  goneList: Array<{ code: string; scid: string; points: number }>; // ③消失の明細（コード・顧客ID・pt）
   skippedNoAmount: number;  // コード/金額が読めず対象外
   errors: number;           // 照会できなかったコード数（次回再試行可）
   errorSamples: string[];   // エラー実文言（先頭5件）
@@ -92,7 +93,7 @@ export async function previewUnusedCodeRefunds(
   const cutoffIso = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000).toISOString();
 
   const result: PreviewRefundResult = {
-    candidates: 0, uniqueCodes: 0, held: 0, heldPoints: 0, used: 0, gone: 0, gonePoints: 0,
+    candidates: 0, uniqueCodes: 0, held: 0, heldPoints: 0, used: 0, gone: 0, gonePoints: 0, goneList: [],
     skippedNoAmount: 0, errors: 0, errorSamples: [], graceDays,
   };
 
@@ -103,7 +104,7 @@ export async function previewUnusedCodeRefunds(
   // 返金候補: 未解決(取り消し/利用済みでない)・猶予期間超過・会員、の redeem を古い順。
   const rows = await env.DB
     .prepare(
-      `SELECT lt.reason AS reason
+      `SELECT lt.reason AS reason, lp.shopify_customer_id AS scid
        FROM loyalty_transactions lt
        JOIN loyalty_points lp ON lp.friend_id = lt.friend_id
        WHERE lt.type = 'redeem'
@@ -115,10 +116,10 @@ export async function previewUnusedCodeRefunds(
        LIMIT ?`,
     )
     .bind(cutoffIso, maxCandidates)
-    .all<{ reason: string }>();
+    .all<{ reason: string; scid: string }>();
 
-  // コード単位で一意化（返金はコード単位で1回のため）。金額は最初の出現を採用。
-  const codeToPts = new Map<string, number>();
+  // コード単位で一意化（返金はコード単位で1回のため）。金額・顧客IDは最初の出現を採用。
+  const codeToInfo = new Map<string, { pts: number; scid: string }>();
   for (const row of rows.results ?? []) {
     result.candidates++;
     const code = row.reason?.match(/コード: ([A-Z0-9-]+)/)?.[1];
@@ -127,10 +128,10 @@ export async function previewUnusedCodeRefunds(
       result.skippedNoAmount++;
       continue;
     }
-    if (!codeToPts.has(code)) codeToPts.set(code, pts);
+    if (!codeToInfo.has(code)) codeToInfo.set(code, { pts, scid: String(row.scid) });
   }
 
-  const codes = [...codeToPts.keys()];
+  const codes = [...codeToInfo.keys()];
   result.uniqueCodes = codes.length;
 
   const usageMap = await fetchUsageMap(shopDomain, adminToken, codes, (msg) => {
@@ -140,7 +141,8 @@ export async function previewUnusedCodeRefunds(
 
   for (const code of codes) {
     const u = usageMap.get(code);
-    const pts = codeToPts.get(code) ?? 0;
+    const info = codeToInfo.get(code);
+    const pts = info?.pts ?? 0;
     if (!u) {
       // 照会できなかった（バッチ失敗等）→ 安全側でどこにも数えない（救済対象に含めない）
       result.errors++;
@@ -162,6 +164,7 @@ export async function previewUnusedCodeRefunds(
     //     “使った後に消えた”を排除してから救済する（別ステップ）。
     result.gone++;
     result.gonePoints += pts;
+    result.goneList.push({ code, scid: info?.scid ?? '', points: pts });
   }
 
   return result;
