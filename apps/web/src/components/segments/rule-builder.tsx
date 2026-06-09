@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { api } from '@/lib/api'
+import { fermentApi } from '@/lib/ferment-api'
 
 // ─── 型定義（segment-engine.ts に合わせる） ───
 
@@ -31,28 +33,17 @@ interface FieldDef {
   unit?: string
 }
 
-// LINE専用運用に合わせて整理。普段使う「タグ（手動）」を先頭に。
-// メール専用項目（メール購読・メールバウンス・メールアドレス）は配信に使わないため除外。
+// LINE専用運用＆「他の人でも迷わない」ことを優先し、よく使う6項目だけに絞る。
+// タグ（手動）/ 購入タグ（Shopify）の値は、打たずにプルダウンから選べる（下の値入力部）。
 const FIELDS: FieldDef[] = [
   // タグ（手動付与）= この管理画面で手で付けるタグ。CRM PLUSの「タグ」に相当。普段の絞り込みはこれ。
   { value: 'friend_tag',       label: 'タグ（手動）',        type: 'string' },
   // 購入タグ = Shopify側で自動的に付くタグ（いちご購入者 など）
   { value: 'tags',             label: '購入タグ（Shopify）', type: 'string' },
-  { value: 'ltv',              label: '累計購入金額',     type: 'number', unit: '円' },
-  { value: 'order_count',      label: '注文回数',         type: 'number', unit: '回' },
-  { value: 'avg_order_value',  label: '平均購入単価',     type: 'number', unit: '円' },
-  { value: 'days_since_last_order', label: '最終注文からの経過日数', type: 'number', unit: '日' },
-  { value: 'days_since_created',    label: '登録からの経過日数',    type: 'number', unit: '日' },
-  { value: 'last_order_at',    label: '最終注文日',       type: 'date' },
-  { value: 'first_order_at',   label: '初回注文日',       type: 'date' },
-  { value: 'created_at',       label: '登録日',           type: 'date' },
-  { value: 'subscribed_line',  label: 'LINE受信同意',     type: 'boolean' },
-  { value: 'region',           label: '地域',             type: 'string' },
-  { value: 'display_name',     label: '表示名',           type: 'string' },
-  { value: 'source',           label: '流入元',           type: 'string' },
-  // ロイヤルティ
-  { value: 'loyalty_rank',     label: 'ロイヤルティランク', type: 'string' },
-  { value: 'loyalty_balance',  label: 'ポイント残高',      type: 'number', unit: 'pt' },
+  { value: 'ltv',              label: '累計購入金額',        type: 'number', unit: '円' },
+  { value: 'order_count',      label: '注文回数',            type: 'number', unit: '回' },
+  { value: 'last_order_at',    label: '最終注文日',          type: 'date' },
+  { value: 'loyalty_rank',     label: 'ロイヤルティランク',  type: 'string' },
 ]
 
 const FIELD_MAP = Object.fromEntries(FIELDS.map((f) => [f.value, f]))
@@ -202,6 +193,47 @@ export default function SegmentRuleBuilder({ value, onChange }: RuleBuilderProps
 
   const [localRoot, setLocalRoot] = useState<GroupCondition>(root)
 
+  // タグの値をプルダウンから選べるようにするため、一覧を取得
+  const [manualTags, setManualTags] = useState<string[]>([])
+  const [shopifyTags, setShopifyTags] = useState<string[]>([])
+  useEffect(() => {
+    api.tags.list().then((res) => {
+      if (res.success && res.data) setManualTags(res.data.map((t) => t.name))
+    }).catch(() => {})
+    fermentApi.customers.shopifyTags().then((res) => {
+      if (res.success && res.data) setShopifyTags(res.data)
+    }).catch(() => {})
+  }, [])
+
+  // タグ用のプルダウン（候補が無ければ自由入力にフォールバック）
+  const renderTagSelect = (options: string[], current: string, onPick: (v: string) => void, placeholder: string) => {
+    if (options.length === 0) {
+      return (
+        <input
+          type="text"
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+          value={current}
+          onChange={(e) => onPick(e.target.value)}
+          placeholder={placeholder}
+        />
+      )
+    }
+    const hasCurrent = current === '' || options.includes(current)
+    return (
+      <select
+        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white"
+        value={current}
+        onChange={(e) => onPick(e.target.value)}
+      >
+        <option value="">選択...</option>
+        {!hasCurrent && current && <option value={current}>{current}（現在）</option>}
+        {options.map((t) => (
+          <option key={t} value={t}>{t}</option>
+        ))}
+      </select>
+    )
+  }
+
   const emitChange = useCallback((newRoot: GroupCondition) => {
     setLocalRoot(newRoot)
     onChange(JSON.stringify(conditionToJSON(newRoot), null, 2))
@@ -344,13 +376,27 @@ export default function SegmentRuleBuilder({ value, onChange }: RuleBuilderProps
                       <option value="シルバー">🥉 シルバー</option>
                       <option value="レギュラー">レギュラー</option>
                     </select>
+                  ) : cond.field === 'friend_tag' ? (
+                    renderTagSelect(
+                      manualTags,
+                      String(cond.value ?? ''),
+                      (v) => updateCondition(localRoot, idx, { value: v }),
+                      'タグ名（例: VIP）',
+                    )
+                  ) : cond.field === 'tags' ? (
+                    renderTagSelect(
+                      shopifyTags,
+                      String(cond.value ?? ''),
+                      (v) => updateCondition(localRoot, idx, { value: v }),
+                      '購入タグ名',
+                    )
                   ) : (
                     <input
                       type="text"
                       className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
                       value={cond.value ?? ''}
                       onChange={(e) => updateCondition(localRoot, idx, { value: e.target.value })}
-                      placeholder={cond.field === 'friend_tag' ? 'タグ名（例: VIP）' : '値'}
+                      placeholder="値"
                     />
                   )}
                 </div>

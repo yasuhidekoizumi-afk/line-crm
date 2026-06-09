@@ -56,6 +56,28 @@ customerRoutes.get('/', async (c) => {
   }
 });
 
+// Shopify購入タグの一覧（セグメント条件のプルダウン用）。
+// customers.tags（カンマ区切り）から重複を除いて返す。LINE登録者が持つタグのみ。
+// 注意: '/:id' より前に登録すること（でないと id='shopify-tags' として解釈される）。
+customerRoutes.get('/shopify-tags', async (c) => {
+  try {
+    const rows = await c.env.DB
+      .prepare("SELECT DISTINCT tags FROM customers WHERE tags IS NOT NULL AND tags != '' AND line_user_id IS NOT NULL")
+      .all<{ tags: string }>();
+    const set = new Set<string>();
+    for (const r of rows.results ?? []) {
+      for (const t of (r.tags ?? '').split(',')) {
+        const v = t.trim();
+        if (v) set.add(v);
+      }
+    }
+    const list = Array.from(set).sort((a, b) => a.localeCompare(b, 'ja'));
+    return c.json({ success: true, data: list });
+  } catch (err) {
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // 単一取得
 customerRoutes.get('/:id', async (c) => {
   try {

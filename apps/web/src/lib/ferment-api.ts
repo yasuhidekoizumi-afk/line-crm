@@ -320,6 +320,9 @@ export const fermentApi = {
         orders: { shopify_order_number: string | null; total_price: number; processed_at: string }[]
         birthday: string | null
       }>>(`/api/customers/${id}/profile`),
+    // セグメント条件のプルダウン用：実際に使われているShopify購入タグの一覧
+    shopifyTags: () =>
+      fetchApi<ApiResult<string[]>>('/api/customers/shopify-tags'),
   },
 
   // ---- ログ ----
