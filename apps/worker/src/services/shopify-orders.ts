@@ -173,7 +173,7 @@ export async function persistShopifyOrder(
          customer_orders_count,
          processed_at, created_at_shopify, updated_at_shopify, ingested_via,
          customer_name
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(shopify_order_id) DO UPDATE SET
          shopify_order_number  = excluded.shopify_order_number,
          customer_id           = COALESCE(excluded.customer_id, shopify_orders.customer_id),
