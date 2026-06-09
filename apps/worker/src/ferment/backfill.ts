@@ -383,24 +383,31 @@ backfillRoutes.post('/shopify-customer', async (c) => {
   // 3) その顧客の注文を取得して保存（購入履歴用。friend_idは改善版resolveLinkedIdsが解決）
   let ordersBackfilled = 0
   let ordersFailed = 0
+  let ordersFetched = 0
+  const orderErrors: string[] = []
   try {
     const ordersRes = await fetch(
       `https://${shopifyDomain}/admin/api/2024-01/customers/${encodeURIComponent(shopifyIdStr)}/orders.json?status=any&limit=250`,
       { headers },
     )
-    if (ordersRes.ok) {
+    if (!ordersRes.ok) {
+      orderErrors.push(`orders API ${ordersRes.status}: ${(await ordersRes.text()).slice(0, 150)}`)
+    } else {
       const { orders } = await ordersRes.json<{ orders: ShopifyOrderPayload[] }>()
+      ordersFetched = (orders ?? []).length
       for (const o of orders ?? []) {
         try {
           await persistShopifyOrder(db, o, 'backfill', shopifyDomain)
           ordersBackfilled++
-        } catch {
+        } catch (e) {
           ordersFailed++
+          // スキーマ系のエラー文のみ（個人情報なし）。先頭3件だけ収集。
+          if (orderErrors.length < 3) orderErrors.push(String((e as Error)?.message ?? e).slice(0, 200))
         }
       }
     }
   } catch (e) {
-    console.error('single-customer order backfill failed:', e)
+    orderErrors.push(`fetch threw: ${String((e as Error)?.message ?? e).slice(0, 150)}`)
   }
 
   // 4) 結果（個人情報は返さず、件数・フラグのみ）
@@ -413,8 +420,10 @@ backfillRoutes.post('/shopify-customer', async (c) => {
     data: {
       customer_synced: true,
       was_existing: !!existing,
+      orders_fetched: ordersFetched,
       orders_backfilled: ordersBackfilled,
       orders_failed: ordersFailed,
+      order_errors: orderErrors,
       result: after,
     },
   })
