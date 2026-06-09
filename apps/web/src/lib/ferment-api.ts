@@ -309,6 +309,15 @@ export const fermentApi = {
       fetchApi<ApiResult<unknown[]>>(`/api/customers/${id}/events?limit=${limit}`),
     emails: (id: string, limit = 50) =>
       fetchApi<ApiResult<EmailLog[]>>(`/api/customers/${id}/emails?limit=${limit}`),
+    profile: (id: string) =>
+      fetchApi<ApiResult<{
+        customer: Customer
+        friend: { id: string; is_following: number } | null
+        points: { balance: number; rank: string } | null
+        tags: string[]
+        orders: { shopify_order_number: string | null; total_price: number; processed_at: string }[]
+        birthday: string | null
+      }>>(`/api/customers/${id}/profile`),
   },
 
   // ---- ログ ----

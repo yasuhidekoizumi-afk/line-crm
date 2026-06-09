@@ -19,7 +19,13 @@ export default function CustomersPage() {
   const [total, setTotal] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Customer | null>(null)
-  const [detailEmails, setDetailEmails] = useState<unknown[]>([])
+  const [profile, setProfile] = useState<{
+    friend: { id: string; is_following: number } | null
+    points: { balance: number; rank: string } | null
+    tags: string[]
+    orders: { shopify_order_number: string | null; total_price: number; processed_at: string }[]
+    birthday: string | null
+  } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
   const LIMIT = 50
@@ -60,10 +66,11 @@ export default function CustomersPage() {
   const handleSelectCustomer = async (customer: Customer) => {
     setSelectedId(customer.customer_id)
     setDetail(customer)
+    setProfile(null)
     setDetailLoading(true)
     try {
-      const res = await fermentApi.customers.emails(customer.customer_id, 20)
-      if (res.success && res.data) setDetailEmails(res.data)
+      const res = await fermentApi.customers.profile(customer.customer_id)
+      if (res.success && res.data) setProfile(res.data)
     } finally {
       setDetailLoading(false)
     }
@@ -211,15 +218,29 @@ export default function CustomersPage() {
 
             <div className="space-y-1.5 text-sm mb-4">
               <div className="flex justify-between">
-                <span className="text-gray-500">メール</span>
-                <span className="text-gray-800 truncate ml-2 max-w-[160px]">{detail.email ?? '-'}</span>
+                <span className="text-gray-500">LINE ID</span>
+                <span className="text-gray-800 truncate ml-2 max-w-[170px] text-xs" title={detail.line_user_id ?? ''}>{detail.line_user_id ?? '-'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">フォロー状態</span>
+                <span className={profile?.friend?.is_following ? 'text-green-600' : 'text-gray-400'}>
+                  {profile?.friend ? (profile.friend.is_following ? '友だち' : 'ブロック/解除') : '-'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">誕生日</span>
+                <span className="text-gray-800">{profile?.birthday ?? '-'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">ポイント</span>
+                <span className="text-gray-800">{profile?.points ? `${profile.points.balance.toLocaleString()}pt（${profile.points.rank}）` : '-'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">地域</span>
                 <span className="text-gray-800">{detail.region}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">LTV</span>
+                <span className="text-gray-500">累計購入額(LTV)</span>
                 <span className="text-gray-800 font-medium">¥{detail.ltv.toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
@@ -227,54 +248,41 @@ export default function CustomersPage() {
                 <span className="text-gray-800">{detail.order_count}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">最終注文</span>
-                <span className="text-gray-800">{fmt(detail.last_order_at)}</span>
+                <span className="text-gray-500">メール</span>
+                <span className="text-gray-800 truncate ml-2 max-w-[160px]">{detail.email ?? '-'}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">メール購読</span>
-                <span className={detail.subscribed_email ? 'text-green-600' : 'text-gray-400'}>
-                  {detail.subscribed_email ? '購読中' : '未購読'}
-                </span>
-              </div>
-              {detail.tags && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">タグ</span>
-                  <span className="text-gray-800 text-xs">{detail.tags}</span>
+            </div>
+
+            {/* タグ */}
+            <div className="border-t border-gray-100 pt-3 mb-3">
+              <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">タグ</h4>
+              {!profile ? (
+                <p className="text-xs text-gray-400">読み込み中...</p>
+              ) : profile.tags.length === 0 ? (
+                <p className="text-xs text-gray-400">タグなし</p>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {profile.tags.map((t) => (
+                    <span key={t} className="text-[11px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">{t}</span>
+                  ))}
                 </div>
               )}
             </div>
 
+            {/* 購入履歴 */}
             <div className="border-t border-gray-100 pt-3">
-              <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">メール履歴</h4>
+              <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">購入履歴</h4>
               {detailLoading ? (
                 <p className="text-xs text-gray-400 py-2">読み込み中...</p>
-              ) : detailEmails.length === 0 ? (
-                <p className="text-xs text-gray-400 py-2">メール履歴なし</p>
+              ) : !profile || profile.orders.length === 0 ? (
+                <p className="text-xs text-gray-400 py-2">購入履歴なし</p>
               ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {(detailEmails as Array<{
-                    log_id: string
-                    subject: string | null
-                    status: string
-                    queued_at: string
-                    opened_at: string | null
-                  }>).map((log) => (
-                    <div key={log.log_id} className="text-xs">
-                      <div className="flex justify-between items-start gap-1">
-                        <span className="text-gray-700 truncate flex-1">{log.subject ?? '(件名なし)'}</span>
-                        <span className={`shrink-0 px-1 py-0.5 rounded text-[10px] font-medium ${
-                          log.status === 'opened' ? 'bg-green-100 text-green-700' :
-                          log.status === 'sent' ? 'bg-blue-100 text-blue-700' :
-                          log.status === 'failed' ? 'bg-red-100 text-red-600' :
-                          'bg-gray-100 text-gray-500'
-                        }`}>
-                          {log.status === 'opened' ? '開封' :
-                           log.status === 'sent' ? '送信済' :
-                           log.status === 'failed' ? '失敗' :
-                           log.status}
-                        </span>
-                      </div>
-                      <div className="text-gray-400 mt-0.5">{fmt(log.queued_at)}</div>
+                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                  {profile.orders.map((o, i) => (
+                    <div key={(o.shopify_order_number ?? '') + i} className="text-xs flex justify-between items-center gap-2">
+                      <span className="text-gray-700">{o.shopify_order_number ? `#${o.shopify_order_number}` : '注文'}</span>
+                      <span className="text-gray-800 font-medium">¥{Math.round(o.total_price).toLocaleString()}</span>
+                      <span className="text-gray-400 shrink-0">{fmt(o.processed_at)}</span>
                     </div>
                   ))}
                 </div>
