@@ -93,7 +93,13 @@ async function resolveLinkedIds(
             OR (?2 IS NOT NULL AND email = ?2)
        UNION ALL
        SELECT 'friend' AS kind, friend_id AS id FROM loyalty_points
-         WHERE ?1 IS NOT NULL AND shopify_customer_id = ?1`,
+         WHERE ?1 IS NOT NULL AND shopify_customer_id = ?1
+       UNION ALL
+       SELECT 'friend' AS kind, f.id AS id FROM customers c
+         JOIN friends f ON f.line_user_id = c.line_user_id
+         WHERE c.line_user_id IS NOT NULL
+           AND ((?1 IS NOT NULL AND (c.shopify_customer_id_jp = ?1 OR c.shopify_customer_id_us = ?1))
+                OR (?2 IS NOT NULL AND c.email = ?2))`,
     )
     .bind(shopifyCustomerId, emailLower)
     .all<{ kind: string; id: string }>();
