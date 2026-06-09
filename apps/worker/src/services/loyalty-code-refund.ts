@@ -93,34 +93,58 @@ export async function refundUnusedPointCode(
   const adminToken = await getShopifyAdminToken(env);
   if (!shopDomain || !adminToken) return { refunded: false, reason: 'shopify_unconfigured' };
 
-  // Shopify の Price Rule を title で検索
-  const searchRes = await fetch(
-    `https://${shopDomain}/admin/api/2024-10/price_rules.json?limit=250`,
-    { headers: { 'X-Shopify-Access-Token': adminToken } },
-  );
-  if (!searchRes.ok) return { refunded: false, reason: 'shopify_error' };
-  const { price_rules } = (await searchRes.json()) as { price_rules: { id: number; title: string }[] };
-  const rule = price_rules.find((r) => r.title === `ポイント割引 ${normalizedCode}`);
+  // Shopify 上のコード状態を「確実に」判定する。
+  //   旧実装は price_rules を 250 件だけ取得して title 検索していたため、割引が 250 件を
+  //   超えると目的のコードを取りこぼし「見つからない=削除済み」と誤判定 → 使用済み確認を
+  //   スキップしてしまい、まだ使える/使用済みのコードを未使用とみなして誤返金する危険が
+  //   あった（会社側の損）。GraphQL codeDiscountNodeByCode で件数に依存せず1発で判定する。
+  //     - node が null        : Shopify 上に存在しない（=使えない）→ そのまま返金（削除不要）
+  //     - asyncUsageCount > 0 : 使用済み（正常利用）→ 返金しない
+  //     - asyncUsageCount = 0 : 未使用で存在 → コード削除（再利用防止）してから返金
+  const lookupRes = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+    method: 'POST',
+    headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: `query($c:String!){ codeDiscountNodeByCode(code:$c){ id codeDiscount{ __typename ... on DiscountCodeBasic { asyncUsageCount } } } }`,
+      variables: { c: normalizedCode },
+    }),
+  });
+  if (!lookupRes.ok) return { refunded: false, reason: 'shopify_error' };
+  const lookupJson = (await lookupRes.json()) as {
+    data?: { codeDiscountNodeByCode?: { id?: string; codeDiscount?: { asyncUsageCount?: number } | null } | null };
+    errors?: unknown;
+  };
+  if (lookupJson.errors) return { refunded: false, reason: 'shopify_error' };
+  const node = lookupJson.data?.codeDiscountNodeByCode ?? null;
 
-  if (rule) {
-    // 使用状況を確認。使用済み(>0)なら正常利用なので返金しない。
-    const dcRes = await fetch(
-      `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}/discount_codes.json`,
-      { headers: { 'X-Shopify-Access-Token': adminToken } },
-    );
-    if (!dcRes.ok) return { refunded: false, reason: 'shopify_error' };
-    const { discount_codes } = (await dcRes.json()) as { discount_codes: { usage_count: number }[] };
-    if ((discount_codes[0]?.usage_count ?? 0) > 0) {
+  if (node) {
+    if ((node.codeDiscount?.asyncUsageCount ?? 0) > 0) {
+      // 使用済み（正常利用）→ 返金しない
       return { refunded: false, reason: 'used' };
     }
-    // 未使用 → Price Rule（＝割引コード）を削除して再利用を防ぐ
-    const delRes = await fetch(
-      `https://${shopDomain}/admin/api/2024-10/price_rules/${rule.id}.json`,
-      { method: 'DELETE', headers: { 'X-Shopify-Access-Token': adminToken } },
-    );
-    if (!delRes.ok && delRes.status !== 404) return { refunded: false, reason: 'shopify_error' };
+    // 未使用で存在 → コードを削除して再利用を防ぐ
+    if (node.id) {
+      const delRes = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+        method: 'POST',
+        headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `mutation($id:ID!){ discountCodeDelete(id:$id){ deletedCodeDiscountId userErrors{ field message } } }`,
+          variables: { id: node.id },
+        }),
+      });
+      if (!delRes.ok) return { refunded: false, reason: 'shopify_error' };
+      const delJson = (await delRes.json()) as {
+        data?: { discountCodeDelete?: { userErrors?: { message: string }[] } };
+        errors?: unknown;
+      };
+      const userErrors = delJson.data?.discountCodeDelete?.userErrors ?? [];
+      if (delJson.errors || userErrors.length > 0) {
+        // 削除失敗 → 「使えるコードのまま返金」事故を避けるため返金しない（次回再試行）
+        return { refunded: false, reason: 'shopify_error' };
+      }
+    }
   }
-  // rule が見つからない場合（=既に削除済み）も DB 側の返還は続行する
+  // node が null（=Shopify 上に存在しない=使えない）場合も DB 側の返還は続行する（安全）
 
   // 返還対象の redeem を特定（[取り消し済み] は除外 = 二重返還防止）
   const latestRedeem = await db

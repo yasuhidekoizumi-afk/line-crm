@@ -20,7 +20,10 @@ import { refundUnusedPointCode, type RefundCodeEnv } from './loyalty-code-refund
 // ────────────────────────────────────────────────────────────────────
 
 const DEFAULT_GRACE_DAYS = 14; // 発行から何日たった未使用を対象にするか
-const DEFAULT_LIMIT = 50;      // 1回の実行で処理する最大件数
+// 1回の実行で処理する最大件数。返金は1件あたり Shopify へ「照合＋削除」でアクセスする
+// (=外部サブリクエストを消費する)ため、Cloudflare のサブリクエスト上限(~50)に当たらない
+// 小さめの値にする。日次cronなので数日かけて消化する想定。
+const DEFAULT_LIMIT = 20;
 
 export interface SweepResult {
   enabled: boolean;
