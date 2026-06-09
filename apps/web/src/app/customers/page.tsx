@@ -16,6 +16,7 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [regionFilter, setRegionFilter] = useState('')
   const [emailFilter, setEmailFilter] = useState<'' | 'subscribed' | 'unsubscribed'>('')
   const [offset, setOffset] = useState(0)
@@ -50,6 +51,7 @@ export default function CustomersPage() {
       if (regionFilter) params.region = regionFilter
       if (emailFilter === 'subscribed') params.subscribed_email = true
       if (emailFilter === 'unsubscribed') params.subscribed_email = false
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
       const res = await fermentApi.customers.list(params)
       if (res.success && res.data) {
         setCustomers(res.data)
@@ -60,7 +62,13 @@ export default function CustomersPage() {
     } finally {
       setLoading(false)
     }
-  }, [regionFilter, emailFilter])
+  }, [regionFilter, emailFilter, debouncedSearch])
+
+  // 入力を300msデバウンスしてからサーバー検索（全件対象）
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
 
   useEffect(() => {
     setOffset(0)
@@ -146,12 +154,8 @@ export default function CustomersPage() {
     }
   }
 
-  const displayed = search
-    ? customers.filter((c) =>
-        (c.display_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (c.email ?? '').toLowerCase().includes(search.toLowerCase())
-      )
-    : customers
+  // サーバー側で検索・絞り込み済みなので、そのまま表示する
+  const displayed = customers
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
@@ -166,7 +170,7 @@ export default function CustomersPage() {
       <div className="flex flex-wrap gap-3 mb-4">
         <input
           className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-56"
-          placeholder="名前・メールで絞り込み"
+          placeholder="名前・メール・LINE IDで検索（全件）"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

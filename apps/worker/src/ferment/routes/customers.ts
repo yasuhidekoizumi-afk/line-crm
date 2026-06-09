@@ -30,17 +30,20 @@ customerRoutes.get('/', async (c) => {
   try {
     const region = c.req.query('region');
     const subscribed = c.req.query('subscribed_email');
+    const search = c.req.query('q') ?? c.req.query('search');
     const limit = Number(c.req.query('limit') ?? 50);
     const offset = Number(c.req.query('offset') ?? 0);
+    const subscribedEmail = subscribed !== undefined ? subscribed === 'true' : undefined;
 
     const [items, total] = await Promise.all([
       getCustomers(c.env.DB, {
         region,
-        subscribed_email: subscribed !== undefined ? subscribed === 'true' : undefined,
+        subscribed_email: subscribedEmail,
+        search,
         limit,
         offset,
       }),
-      countCustomers(c.env.DB),
+      countCustomers(c.env.DB, { region, subscribed_email: subscribedEmail, search }),
     ]);
 
     return c.json({
