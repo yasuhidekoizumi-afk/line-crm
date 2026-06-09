@@ -22,9 +22,11 @@ import type { RefundCodeEnv } from './loyalty-code-refund.js';
 export interface PreviewRefundResult {
   candidates: number;       // 候補 redeem 行数（猶予超過・未解決・会員）
   uniqueCodes: number;      // 一意なコード数（実際の照合対象）
-  refundable: number;       // 返金対象（未使用 or Shopify上に存在しない）
-  refundablePoints: number; // 返金対象の合計ポイント
-  used: number;             // 使用済み（返金しない）
+  held: number;             // ①保持中: コードが存在・未使用（=マイページに「保留中」表示）→ 残す(救済しない)
+  heldPoints: number;
+  used: number;             // ②使用済み: コードが存在・使用回数≧1（=買い物で消費）→ 絶対に救済しない
+  gone: number;             // ③消失: Shopify上にコードが無い（=取り戻せない）→ 救済候補(実返金前に注文照合)
+  gonePoints: number;
   skippedNoAmount: number;  // コード/金額が読めず対象外
   errors: number;           // 照会できなかったコード数（次回再試行可）
   errorSamples: string[];   // エラー実文言（先頭5件）
@@ -90,7 +92,7 @@ export async function previewUnusedCodeRefunds(
   const cutoffIso = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000).toISOString();
 
   const result: PreviewRefundResult = {
-    candidates: 0, uniqueCodes: 0, refundable: 0, refundablePoints: 0, used: 0,
+    candidates: 0, uniqueCodes: 0, held: 0, heldPoints: 0, used: 0, gone: 0, gonePoints: 0,
     skippedNoAmount: 0, errors: 0, errorSamples: [], graceDays,
   };
 
@@ -138,18 +140,28 @@ export async function previewUnusedCodeRefunds(
 
   for (const code of codes) {
     const u = usageMap.get(code);
+    const pts = codeToPts.get(code) ?? 0;
     if (!u) {
-      // 照会できなかった（バッチ失敗等）→ 安全側で返金対象に含めない
+      // 照会できなかった（バッチ失敗等）→ 安全側でどこにも数えない（救済対象に含めない）
       result.errors++;
       continue;
     }
     if (u.exists && u.usageCount > 0) {
+      // ②使用済み（買い物で消費）→ 絶対に救済しない
       result.used++;
       continue;
     }
-    // 未使用 or Shopify上に存在しない → 返金対象
-    result.refundable++;
-    result.refundablePoints += codeToPts.get(code) ?? 0;
+    if (u.exists) {
+      // ①保持中（存在・未使用）→ 残す（マイページの「保留中」表示で本人に委ねる）
+      result.held++;
+      result.heldPoints += pts;
+      continue;
+    }
+    // ③消失（Shopify上にコードが無い）→ 取り戻せない救済候補。
+    //   ※実際の返金前に「その人がそのコードで注文したか」を注文履歴で照合し、
+    //     “使った後に消えた”を排除してから救済する（別ステップ）。
+    result.gone++;
+    result.gonePoints += pts;
   }
 
   return result;
