@@ -11,6 +11,7 @@
 import { Hono } from 'hono'
 import { generateFermentId, upsertCustomer } from '@line-crm/db'
 import { getShopifyAdminToken } from '../utils/shopify-token.js'
+import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js'
 import type { FermentEnv } from './types'
 
 const BATCH_SIZE = 50
@@ -284,6 +285,137 @@ backfillRoutes.post('/shopify-customers', async (c) => {
       skipped,
       next_page_info: nextPageInfo,
       done: !nextPageInfo,
+    },
+  })
+})
+
+/**
+ * POST /shopify-customer - Shopify顧客IDを「1件だけ」指定してバックフィル（実証・個別修正用）
+ *
+ * Body: { shopify_customer_id: string, region?: 'JP' | 'US' }
+ * - その顧客のプロフィール（名前・メール・LTV・注文数・タグ）を customers に流し込み（既存行に合体）
+ * - その顧客の注文も取得して shopify_orders に保存（購入履歴の表示用）
+ * - 既存の line_user_id は COALESCE で保持（LINE連携は壊さない）
+ * - レスポンスは件数・フラグのみ（個人情報は返さない）
+ */
+backfillRoutes.post('/shopify-customer', async (c) => {
+  const body = await c.req.json<{ shopify_customer_id?: string; region?: 'JP' | 'US' }>()
+    .catch(() => ({} as { shopify_customer_id?: string; region?: 'JP' | 'US' }))
+  const shopifyIdStr = (body.shopify_customer_id ?? '').trim()
+  const region = body.region ?? 'JP'
+  if (!shopifyIdStr) {
+    return c.json({ success: false, error: 'shopify_customer_id は必須です' }, 400)
+  }
+
+  const db = c.env.DB
+  const shopifyDomain = c.env.SHOPIFY_SHOP_DOMAIN
+  const shopifyToken = await getShopifyAdminToken(c.env)
+  if (!shopifyDomain || !shopifyToken) {
+    return c.json({ success: false, error: 'Shopify credentials not configured' }, 500)
+  }
+  const headers = { 'X-Shopify-Access-Token': shopifyToken, 'Content-Type': 'application/json' }
+  const shopifyIdField = region === 'US' ? 'shopify_customer_id_us' : 'shopify_customer_id_jp'
+
+  // 1) Shopify顧客を1件取得
+  const custRes = await fetch(
+    `https://${shopifyDomain}/admin/api/2024-01/customers/${encodeURIComponent(shopifyIdStr)}.json`,
+    { headers },
+  )
+  if (!custRes.ok) {
+    const text = await custRes.text()
+    return c.json({ success: false, error: `Shopify customers API ${custRes.status}: ${text.slice(0, 200)}` }, 500)
+  }
+  const { customer: sc } = await custRes.json<{
+    customer: {
+      id: number
+      email: string | null
+      first_name: string | null
+      last_name: string | null
+      orders_count: number
+      total_spent: string
+      tags: string
+      updated_at: string
+      accepts_marketing: boolean
+      email_marketing_consent?: { state: string } | null
+    } | null
+  }>()
+  if (!sc) {
+    return c.json({ success: false, error: 'Shopify customer not found' }, 404)
+  }
+
+  // 2) customers へ upsert（既存行に合体・line_user_idは保持）
+  const existing = await db.prepare(
+    `SELECT customer_id FROM customers WHERE ${shopifyIdField} = ? OR (email IS NOT NULL AND email = ?) LIMIT 1`,
+  ).bind(shopifyIdStr, sc.email ?? '').first<{ customer_id: string }>()
+  const customerId = existing?.customer_id ?? generateFermentId('cu')
+
+  const lpRow = await db.prepare(
+    'SELECT f.line_user_id, f.display_name FROM loyalty_points lp JOIN friends f ON f.id = lp.friend_id WHERE lp.shopify_customer_id = ? LIMIT 1',
+  ).bind(shopifyIdStr).first<{ line_user_id: string; display_name: string | null }>()
+
+  const rawDisplayName = sc.first_name || sc.last_name
+    ? `${sc.first_name ?? ''} ${sc.last_name ?? ''}`.trim()
+    : lpRow?.display_name ?? null
+  const INVALID_NAMES = new Set(['No Name', 'no name', 'NoName', 'なし', '-'])
+  const displayName = rawDisplayName && !INVALID_NAMES.has(rawDisplayName) ? rawDisplayName : null
+  const isSubscribed = sc.email
+    ? (sc.email_marketing_consent?.state === 'subscribed' || sc.accepts_marketing ? 1 : 0)
+    : 0
+  const tags: string[] = []
+  if (sc.tags) tags.push(...sc.tags.split(',').map((t) => t.trim()).filter(Boolean))
+
+  await upsertCustomer(db, {
+    customer_id: customerId,
+    email: sc.email,
+    line_user_id: lpRow?.line_user_id ?? null,
+    [shopifyIdField]: shopifyIdStr,
+    display_name: displayName,
+    region,
+    language: region === 'US' ? 'en' : 'ja',
+    ltv: Math.floor(parseFloat(sc.total_spent ?? '0')),
+    ltv_currency: region === 'US' ? 'USD' : 'JPY',
+    order_count: sc.orders_count,
+    last_order_at: sc.updated_at,
+    subscribed_email: isSubscribed,
+    tags: tags.length > 0 ? tags.join(',') : null,
+  } as Parameters<typeof upsertCustomer>[1])
+
+  // 3) その顧客の注文を取得して保存（購入履歴用。friend_idは改善版resolveLinkedIdsが解決）
+  let ordersBackfilled = 0
+  let ordersFailed = 0
+  try {
+    const ordersRes = await fetch(
+      `https://${shopifyDomain}/admin/api/2024-01/customers/${encodeURIComponent(shopifyIdStr)}/orders.json?status=any&limit=250`,
+      { headers },
+    )
+    if (ordersRes.ok) {
+      const { orders } = await ordersRes.json<{ orders: ShopifyOrderPayload[] }>()
+      for (const o of orders ?? []) {
+        try {
+          await persistShopifyOrder(db, o, 'backfill', shopifyDomain)
+          ordersBackfilled++
+        } catch {
+          ordersFailed++
+        }
+      }
+    }
+  } catch (e) {
+    console.error('single-customer order backfill failed:', e)
+  }
+
+  // 4) 結果（個人情報は返さず、件数・フラグのみ）
+  const after = await db.prepare(
+    'SELECT (display_name IS NOT NULL) AS has_name, (email IS NOT NULL) AS has_email, ltv, order_count, (line_user_id IS NOT NULL) AS has_line FROM customers WHERE customer_id = ?',
+  ).bind(customerId).first<{ has_name: number; has_email: number; ltv: number; order_count: number; has_line: number }>()
+
+  return c.json({
+    success: true,
+    data: {
+      customer_synced: true,
+      was_existing: !!existing,
+      orders_backfilled: ordersBackfilled,
+      orders_failed: ordersFailed,
+      result: after,
     },
   })
 })
