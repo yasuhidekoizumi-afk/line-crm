@@ -47,4 +47,88 @@ migrationRunner.post('/api/admin/run-migration-broadcast-stats', async (c) => {
   return c.json({ success: errors.length===0, results, errors });
 });
 
+// 複数メッセージ配信のための broadcasts.message_type CHECK 拡張（migration 040）。
+// SQLite は CHECK の ALTER 不可のためテーブル再作成。冪等：既に 'multi' があれば SKIP。
+migrationRunner.post('/api/admin/run-migration-multi-message', async (c) => {
+  const results: string[] = [];
+  const errors: string[] = [];
+
+  // Step 0: failed_count / error_summary を安全に追加（既にあれば SKIP）
+  try { await c.env.DB.prepare("ALTER TABLE broadcasts ADD COLUMN failed_count INTEGER NOT NULL DEFAULT 0").run(); results.push('OK: failed_count added'); }
+  catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('duplicate')) results.push('SKIP: failed_count'); else errors.push('FAIL: failed_count: ' + msg);
+  }
+  try { await c.env.DB.prepare("ALTER TABLE broadcasts ADD COLUMN error_summary TEXT").run(); results.push('OK: error_summary added'); }
+  catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('duplicate')) results.push('SKIP: error_summary'); else errors.push('FAIL: error_summary: ' + msg);
+  }
+
+  // Step 1: CHECK 制約に 'multi' があるか確認
+  let alreadyApplied = false;
+  try {
+    const row = await c.env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='broadcasts'").first<{ sql: string }>();
+    if (row?.sql?.includes("'multi'")) {
+      alreadyApplied = true;
+      results.push('SKIP: already applied (CHECK contains multi)');
+    }
+  } catch (e: unknown) {
+    errors.push('FAIL: schema check: ' + (e instanceof Error ? e.message : String(e)));
+  }
+
+  if (!alreadyApplied && errors.length === 0) {
+    try {
+      // Step 2: テーブル再作成
+      await c.env.DB.prepare("ALTER TABLE broadcasts RENAME TO broadcasts_old").run();
+      results.push('OK: renamed to broadcasts_old');
+
+      await c.env.DB.prepare(`CREATE TABLE broadcasts (
+        id              TEXT PRIMARY KEY,
+        title           TEXT NOT NULL,
+        message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'multi')),
+        message_content TEXT NOT NULL,
+        target_type     TEXT NOT NULL CHECK (target_type IN ('all', 'tag', 'segment', 'individual')) DEFAULT 'all',
+        target_tag_id   TEXT REFERENCES tags (id) ON DELETE SET NULL,
+        target_segment_id TEXT REFERENCES segments(segment_id) ON DELETE SET NULL,
+        target_friend_ids TEXT,
+        status          TEXT NOT NULL CHECK (status IN ('draft', 'scheduled', 'sending', 'sent')) DEFAULT 'draft',
+        scheduled_at    TEXT,
+        sent_at         TEXT,
+        total_count     INTEGER NOT NULL DEFAULT 0,
+        success_count   INTEGER NOT NULL DEFAULT 0,
+        failed_count    INTEGER NOT NULL DEFAULT 0,
+        error_summary   TEXT,
+        line_account_id TEXT,
+        alt_text        TEXT,
+        created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+      )`).run();
+      results.push('OK: new broadcasts created');
+
+      // 既存データ移行（Step 0 で failed_count/error_summary は確保済み）
+      await c.env.DB.prepare(`INSERT INTO broadcasts (
+        id, title, message_type, message_content, target_type, target_tag_id,
+        target_segment_id, target_friend_ids, status, scheduled_at, sent_at,
+        total_count, success_count, line_account_id, alt_text, created_at
+      )
+      SELECT
+        id, title, message_type, message_content, target_type, target_tag_id,
+        target_segment_id, target_friend_ids, status, scheduled_at, sent_at,
+        total_count, success_count, line_account_id, alt_text, created_at
+      FROM broadcasts_old`).run();
+      results.push('OK: data migrated');
+
+      await c.env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_broadcasts_status ON broadcasts (status)").run();
+      results.push('OK: index recreated');
+
+      await c.env.DB.prepare("DROP TABLE broadcasts_old").run();
+      results.push('OK: broadcasts_old dropped');
+    } catch (e: unknown) {
+      errors.push('FAIL: recreation: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
+  return c.json({ success: errors.length === 0, results, errors });
+});
+
 export { migrationRunner };

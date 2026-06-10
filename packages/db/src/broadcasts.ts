@@ -1,7 +1,8 @@
 import { jstNow } from './utils.js';
 export type BroadcastTargetType = 'all' | 'tag' | 'segment' | 'individual';
 export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent';
-export type BroadcastMessageType = 'text' | 'image' | 'flex';
+// 'multi' は複数メッセージ統合タイプ（message_content は [{type,content,altText?}, ...] の JSON 配列）
+export type BroadcastMessageType = 'text' | 'image' | 'flex' | 'multi';
 
 export interface Broadcast {
   id: string;
