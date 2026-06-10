@@ -30,7 +30,33 @@ declare const liff: {
   closeWindow(): void;
 };
 
-// Resolve LIFF ID: check query param first, then fallback to env var
+// LIFFは外部リンクをエンドポイントURLに転送するとき、元のクエリ全体を
+// `?liff.state=?page=...&liffId=...&xxx=...` のように **1パラメータにまとめて** 渡す。
+// このままだと `URLSearchParams.get('liffId')` 等が空になり、後続のロジックが全部壊れる。
+// 起動直後に liff.state を展開して URL を正規化する。
+function unwrapLiffState(): void {
+  if (typeof window === 'undefined') return;
+  const params = new URLSearchParams(window.location.search);
+  const state = params.get('liff.state');
+  if (!state) return;
+  const inner = state.startsWith('?') ? state.slice(1) : state;
+  if (!inner) return;
+  const stateParams = new URLSearchParams(inner);
+  params.delete('liff.state');
+  // 既存のクエリは温存しつつ、liff.state 内のキーで上書き（重複時は state を優先）
+  stateParams.forEach((v, k) => params.set(k, v));
+  const qs = params.toString();
+  const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+  try {
+    window.history.replaceState(null, '', newUrl);
+  } catch {
+    // history API が使えない環境は諦める（後続の detectLiffId が状態経由で取得する）
+  }
+}
+unwrapLiffState();
+
+// Resolve LIFF ID: check query param first, then fallback to env var.
+// 上の unwrapLiffState() でクエリは正規化済みのため、ここはシンプル。
 function detectLiffId(): string {
   const params = new URLSearchParams(window.location.search);
   const fromParam = params.get('liffId');
