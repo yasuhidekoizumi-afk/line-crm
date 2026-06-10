@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { checkCustomerSig } from '../utils/customer-sig.js';
 import {
   getRewardItems,
   getRewardItem,
@@ -40,6 +41,17 @@ rewards.post('/api/rewards/:id/exchange', async (c) => {
       shopifyCustomerId?: string;
       friendId?: string;
     }>();
+
+    // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）。
+    // フラグON時は friendId 単独指定を拒否し、署名付き shopifyCustomerId を必須にする
+    // （friendId は推測可能性があり、本人確認の代わりにならないため）。
+    if ((c.env as { REQUIRE_CUSTOMER_SIG?: string }).REQUIRE_CUSTOMER_SIG === '1') {
+      if (!body.shopifyCustomerId) {
+        return c.json({ success: false, error: '本人確認情報がありません。マイページを開き直してください。' }, 401);
+      }
+      const sigErr = await checkCustomerSig(c, body.shopifyCustomerId);
+      if (sigErr) return sigErr;
+    }
 
     // friend_id を解決
     let point = null;

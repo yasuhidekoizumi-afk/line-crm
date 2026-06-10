@@ -127,6 +127,9 @@ export type Env = {
     FERMENT_HMAC_SECRET?: string;
     LINK_SHOPIFY_DISABLED?: string;
     LINK_SHOPIFY_SIGNING_SECRET?: string;
+    // '1' で顧客向けAPI(ポイント残高/履歴/利用/特典交換)に署名による本人確認を必須化。
+    // Shopifyテーマ(Liquid)側が sig 付与に対応してからオンにする（段階導入）。
+    REQUIRE_CUSTOMER_SIG?: string;
     FERMENT_FROM_EMAIL_JP?: string;
     FERMENT_FROM_EMAIL_US?: string;
     FERMENT_FROM_NAME_JP?: string;

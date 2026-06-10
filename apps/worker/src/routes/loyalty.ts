@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { checkCustomerSig } from '../utils/customer-sig.js';
 import {
   getLoyaltyPoint,
   getLoyaltyPointByShopifyCustomerId,
@@ -754,6 +755,9 @@ loyalty.post('/api/loyalty/order-cancelled', async (c) => {
 // GET /api/loyalty/shopify/:shopifyCustomerId — ポイント残高確認
 loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
   try {
+    // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）
+    const sigErr = await checkCustomerSig(c, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
     const point = await getLoyaltyPointByShopifyCustomerId(
       c.env.DB,
       c.req.param('shopifyCustomerId'),
@@ -848,6 +852,9 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
 // GET /api/loyalty/shopify/:shopifyCustomerId/history — 取引履歴（Shopify マイページ）
 loyalty.get('/api/loyalty/shopify/:shopifyCustomerId/history', async (c) => {
   try {
+    // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）
+    const sigErr = await checkCustomerSig(c, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
     const limit = Math.min(Number(c.req.query('limit') ?? '10'), 50);
     const offset = Number(c.req.query('offset') ?? '0');
     const result = await getLoyaltyTransactionsByShopifyCustomerId(
@@ -864,6 +871,9 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId/history', async (c) => {
 // POST /api/loyalty/shopify/:shopifyCustomerId/profile-birthday — 誕生日登録 + 100pt付与
 loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (c) => {
   try {
+    // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）
+    const sigErr = await checkCustomerSig(c, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
     const shopifyCustomerId = c.req.param('shopifyCustomerId');
     const body = await c.req.json<{ birthday: string }>();
     const { birthday } = body;
@@ -1136,6 +1146,9 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
 // POST /api/loyalty/shopify/:shopifyCustomerId/redeem — ポイント → 割引コード発行
 loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
   try {
+    // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）
+    const sigErr = await checkCustomerSig(c, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
     const shopifyCustomerId = c.req.param('shopifyCustomerId');
     const body = await c.req.json<{ points: number }>(); // 使うポイント数（100pt単位）
 
@@ -1306,6 +1319,9 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redeem', async (c) => {
 // POST /api/loyalty/shopify/:shopifyCustomerId/cancel-code — 未使用割引コードをキャンセルしてポイント返還
 loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/cancel-code', async (c) => {
   try {
+    // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）
+    const sigErr = await checkCustomerSig(c, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
     const shopifyCustomerId = c.req.param('shopifyCustomerId');
     const body = await c.req.json<{ code: string }>();
 
