@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast, type FriendWithTags } from '@/lib/api'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
-import FlexPreviewComponent from '@/components/flex-preview'
-import ImageUploader from '@/components/messages/image-uploader'
-import FlexTemplates from '@/components/messages/flex-templates'
-import FlexEditor from '@/components/messages/flex-editor'
+import MessageBlocksEditor, {
+  type Block,
+  blocksToPayload,
+  payloadToBlocks,
+} from '@/components/messages/message-blocks-editor'
 import { useAccount } from '@/contexts/account-context'
 
 interface BroadcastFormProps {
@@ -19,18 +20,15 @@ interface BroadcastFormProps {
   editId?: string | null
 }
 
-const messageTypeLabels: Record<ApiBroadcast['messageType'], string> = {
-  text: 'テキスト',
-  image: '画像',
-  flex: 'Flexメッセージ',
-}
-
 type SendMode = 'draft' | 'now' | 'scheduled'
 
 interface FormState {
   title: string
+  // 互換のため messageType/messageContent も保持（initialDraft 受け取り用）
+  // 編集状態は blocks（複数メッセージ）に統一する
   messageType: ApiBroadcast['messageType']
   messageContent: string
+  blocks: Block[]
   targetType: ApiBroadcast['targetType']
   targetTagId: string
   targetSegmentId: string
@@ -41,10 +39,20 @@ interface FormState {
 
 export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft, segments = [], editId }: BroadcastFormProps) {
   const { selectedAccountId } = useAccount()
+  const initialBlocks: Block[] = (() => {
+    // 編集開始時：既存の messageType/messageContent を blocks に展開
+    const t = initialDraft?.messageType ?? 'text'
+    const c = initialDraft?.messageContent ?? ''
+    if (!c.trim()) return [{ id: 'b_init', type: 'text', text: '' } as Block]
+    const blocks = payloadToBlocks(t, c)
+    return blocks.length > 0 ? blocks : [{ id: 'b_init', type: 'text', text: '' } as Block]
+  })()
+
   const [form, setForm] = useState<FormState>({
     title: initialDraft?.title ?? '',
     messageType: initialDraft?.messageType ?? 'text',
     messageContent: initialDraft?.messageContent ?? '',
+    blocks: initialBlocks,
     targetType: initialDraft?.targetType ?? 'all',
     targetTagId: initialDraft?.targetTagId ?? '',
     targetSegmentId: initialDraft?.targetSegmentId ?? '',
@@ -84,9 +92,18 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
 
   const handleSave = async () => {
     if (!form.title.trim()) { setError('配信タイトルを入力してください'); return }
-    if (!form.messageContent.trim()) { setError('メッセージ内容を入力してください'); return }
-    if (form.messageType === 'flex') {
-      try { JSON.parse(form.messageContent) } catch { setError('FlexメッセージのJSONが無効です'); return }
+    // 複数メッセージ：1件以上＋各ブロックの中身検証
+    if (form.blocks.length === 0) { setError('メッセージブロックを1件以上追加してください'); return }
+    if (form.blocks.length > 5) { setError('1配信あたりのメッセージは最大5件です'); return }
+    for (let i = 0; i < form.blocks.length; i++) {
+      const b = form.blocks[i]
+      const n = `#${i + 1}`
+      if (b.type === 'text' && !b.text.trim()) { setError(`${n} テキストを入力してください`); return }
+      if (b.type === 'image' && !b.originalContentUrl.trim()) { setError(`${n} 画像URLを入力してください`); return }
+      if (b.type === 'flex') {
+        if (!b.contents.trim()) { setError(`${n} Flexの内容を入力してください`); return }
+        try { JSON.parse(b.contents) } catch { setError(`${n} FlexメッセージのJSONが無効です`); return }
+      }
     }
     if (form.targetType === 'individual' && form.targetFriendIds.length === 0) {
       setError('送信先の友だちを1人以上選択してください')
@@ -100,10 +117,12 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     setSaving(true)
     setError('')
     try {
+      // blocks → 保存形式（単一なら従来形式、複数なら 'multi'）
+      const msg = blocksToPayload(form.blocks)
       const payload = {
         title: form.title,
-        messageType: form.messageType,
-        messageContent: form.messageContent,
+        messageType: msg.messageType,
+        messageContent: msg.messageContent,
         targetType: form.targetType,
         targetTagId: form.targetType === 'tag' ? form.targetTagId || null : null,
         targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId || null : null,
@@ -141,7 +160,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
       <h2 className="text-sm font-semibold text-gray-800 mb-5">{editId ? '配信を編集' : '新規配信を作成'}</h2>
 
-      <div className={`space-y-4 ${form.messageType === 'flex' ? 'max-w-3xl' : 'max-w-lg'}`}>
+      <div className={`space-y-4 ${form.blocks.some((b) => b.type === 'flex') ? 'max-w-3xl' : 'max-w-lg'}`}>
         {/* Title */}
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -156,135 +175,16 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
           />
         </div>
 
-        {/* Message type */}
+        {/* メッセージ（複数ブロック）：テキスト/画像/Flex を縦に積めます。最大5件。 */}
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-2">メッセージ種別</label>
-          <div className="flex gap-2">
-            {(Object.keys(messageTypeLabels) as ApiBroadcast['messageType'][]).map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setForm({ ...form, messageType: type })}
-                className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
-                  form.messageType === type
-                    ? 'border-green-500 text-green-700 bg-green-50'
-                    : 'border-gray-300 text-gray-600 bg-white hover:border-gray-400'
-                }`}
-              >
-                {messageTypeLabels[type]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Message content */}
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">
-            メッセージ内容 <span className="text-red-500">*</span>
+          <label className="block text-xs font-medium text-gray-600 mb-2">
+            メッセージ <span className="text-red-500">*</span>
+            <span className="text-xs text-gray-400 ml-2">テキスト・画像・Flexを縦に追加できます（最大5件）</span>
           </label>
-
-          {/* ── Text type ───────────────────────────────────────────── */}
-          {form.messageType === 'text' && (
-            <textarea
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
-              rows={4}
-              placeholder="配信するメッセージを入力..."
-              value={form.messageContent}
-              onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
-            />
-          )}
-
-          {/* ── Image type: uploader + URL inputs ───────────────────── */}
-          {form.messageType === 'image' && (() => {
-            let parsed: { originalContentUrl?: string; previewImageUrl?: string } = {}
-            try { parsed = JSON.parse(form.messageContent) } catch { /* not yet valid */ }
-
-            const setImageUrl = (url: string) => {
-              setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: url, previewImageUrl: url }) })
-            }
-
-            return (
-              <div className="space-y-3 mb-3">
-                <ImageUploader onUploaded={setImageUrl} />
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">元画像URL (originalContentUrl)</label>
-                    <input
-                      type="url"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                      placeholder="https://example.com/image.png"
-                      value={parsed.originalContentUrl ?? ''}
-                      onChange={(e) => {
-                        const orig = e.target.value
-                        const prev = parsed.previewImageUrl ?? orig
-                        setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: orig, previewImageUrl: prev }) })
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">プレビュー画像URL (previewImageUrl)</label>
-                    <input
-                      type="url"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                      placeholder="https://example.com/preview.png (空欄で元画像と同じ)"
-                      value={parsed.previewImageUrl ?? ''}
-                      onChange={(e) => {
-                        const prev = e.target.value
-                        setForm({ ...form, messageContent: JSON.stringify({ originalContentUrl: parsed.originalContentUrl ?? '', previewImageUrl: prev }) })
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )
-          })()}
-
-          {/* ── Flex type: template selector + visual editor ────────── */}
-          {form.messageType === 'flex' && (
-            <div className="space-y-3 mb-3">
-              {!form.messageContent.trim() && (
-                <div>
-                  <p className="text-xs text-gray-500 mb-2">テンプレートを選択するか、JSONを直接編集してください</p>
-                  <FlexTemplates onSelect={(json) => setForm({ ...form, messageContent: json })} />
-                </div>
-              )}
-              {form.messageContent.trim() && (
-                <FlexEditor value={form.messageContent} onChange={(json) => setForm({ ...form, messageContent: json })} />
-              )}
-              {form.messageContent.trim() && (
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, messageContent: '' })}
-                  className="text-xs text-gray-400 hover:text-gray-600 underline"
-                >
-                  テンプレートを選び直す
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* ── Image advanced: collapsible JSON editor ─────────────── */}
-          {form.messageType === 'image' && form.messageContent && (
-            <details className="border border-gray-200 rounded-lg">
-              <summary className="text-xs text-gray-400 px-3 py-2 cursor-pointer hover:bg-gray-50">JSONを直接編集</summary>
-              <textarea
-                className="w-full border-t border-gray-200 px-3 py-2 text-xs font-mono focus:outline-none resize-y"
-                rows={3}
-                value={form.messageContent}
-                onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
-              />
-            </details>
-          )}
-
-          {/* ── Flex / Image fallback preview ───────────────────────── */}
-          {form.messageType === 'flex' && form.messageContent && (() => {
-            try { JSON.parse(form.messageContent); return true } catch { return false }
-          })() && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-gray-500 mb-2">プレビュー (簡易)</p>
-              <FlexPreviewComponent content={form.messageContent} maxWidth={300} />
-            </div>
-          )}
+          <MessageBlocksEditor
+            value={form.blocks}
+            onChange={(blocks) => setForm({ ...form, blocks })}
+          />
         </div>
 
         {/* Target */}

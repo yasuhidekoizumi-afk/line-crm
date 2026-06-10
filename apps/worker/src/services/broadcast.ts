@@ -38,7 +38,8 @@ export async function processBroadcastSend(
     finalContent = tracked.content;
   }
   const altText = (broadcast as unknown as Record<string, unknown>).alt_text as string | undefined;
-  const message = buildMessage(finalType, finalContent, altText || undefined);
+  // messages: 配列。'multi' なら複数、それ以外は1要素（後方互換）。
+  const messages = buildMessages(finalType, finalContent, altText || undefined);
   let totalCount = 0;
   let successCount = 0;
   let failedCount = 0;
@@ -47,7 +48,7 @@ export async function processBroadcastSend(
   try {
     if (broadcast.target_type === 'all') {
       // Use LINE broadcast API (sends to all followers)
-      await lineClient.broadcast([message]);
+      await lineClient.broadcast(messages);
       // We don't have exact count for broadcast API, set as 0 (unknown)
       totalCount = 0;
       successCount = 0;
@@ -74,14 +75,18 @@ export async function processBroadcastSend(
           await sleep(delay);
         }
 
-        // Stealth: add slight variation to text messages
-        let batchMessage = message;
-        if (message.type === 'text' && totalBatches > 1) {
-          batchMessage = { ...message, text: addMessageVariation(message.text, batchIndex) };
+        // Stealth: 先頭がテキストメッセージなら variation を追加（複数メッセージでも先頭だけ揺らす）
+        let batchMessages = messages;
+        if (totalBatches > 1 && messages[0]?.type === 'text') {
+          const head = messages[0] as { type: 'text'; text: string };
+          batchMessages = [
+            { ...head, text: addMessageVariation(head.text, batchIndex) },
+            ...messages.slice(1),
+          ];
         }
 
         try {
-          await lineClient.multicast(lineUserIds, [batchMessage]);
+          await lineClient.multicast(lineUserIds, batchMessages);
           successCount += batch.length;
 
           // Log only successfully sent messages
@@ -125,7 +130,7 @@ export async function processBroadcastSend(
         const batch = friends.slice(i, i + MULTICAST_BATCH_SIZE);
         const batchUserIds = batch.map((f) => f.line_user_id);
         try {
-          await lineClient.multicast(batchUserIds, [message]);
+          await lineClient.multicast(batchUserIds, messages);
           successCount += batch.length;
           for (const friend of batch) {
             const logId = crypto.randomUUID();
@@ -163,13 +168,18 @@ export async function processBroadcastSend(
           await sleep(delay);
         }
 
-        let batchMessage = message;
-        if (message.type === 'text' && totalBatches > 1) {
-          batchMessage = { ...message, text: addMessageVariation(message.text, batchIndex) };
+        // segment配信: 先頭がテキストなら variation を加える（複数メッセージでも先頭だけ）
+        let batchMessages = messages;
+        if (totalBatches > 1 && messages[0]?.type === 'text') {
+          const head = messages[0] as { type: 'text'; text: string };
+          batchMessages = [
+            { ...head, text: addMessageVariation(head.text, batchIndex) },
+            ...messages.slice(1),
+          ];
         }
 
         try {
-          await lineClient.multicast(batch, [batchMessage]);
+          await lineClient.multicast(batch, batchMessages);
           successCount += batch.length;
 
           // Log messages (friend_id unknown for segment sends, use placeholder)
@@ -268,4 +278,26 @@ function buildMessage(messageType: string, messageContent: string, altText?: str
   }
 
   return { type: 'text', text: messageContent };
+}
+
+/**
+ * messageType='multi' のとき message_content は [{type,content,altText?}, ...] の JSON 配列。
+ * それ以外の単一メッセージタイプは1要素配列として返す（後方互換）。
+ * LINE Messaging API は1リクエスト最大5メッセージ。
+ */
+export function buildMessages(messageType: string, messageContent: string, altText?: string): Message[] {
+  if (messageType !== 'multi') {
+    return [buildMessage(messageType, messageContent, altText)];
+  }
+  try {
+    const arr = JSON.parse(messageContent) as Array<{ type: string; content: string; altText?: string }>;
+    if (!Array.isArray(arr) || arr.length === 0) {
+      return [{ type: 'text', text: messageContent }];
+    }
+    // LINE仕様: 最大5件
+    const safe = arr.slice(0, 5);
+    return safe.map((m) => buildMessage(m.type, m.content, m.altText ?? altText));
+  } catch {
+    return [{ type: 'text', text: messageContent }];
+  }
 }
