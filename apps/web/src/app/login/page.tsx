@@ -1,12 +1,23 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const [apiKey, setApiKey] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+
+  // 401で強制ログアウトされて来た場合は、理由を表示する（黙って飛ばすと混乱の元）
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('lh_logout_reason') === 'session_expired') {
+        setNotice('セッションが切れたため、ログアウトしました。お手数ですがもう一度APIキーを入力してください。（APIキーを再生成した場合は、新しいキーが必要です）')
+        sessionStorage.removeItem('lh_logout_reason')
+      }
+    } catch { /* private mode 等は無視 */ }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -38,8 +49,10 @@ export default function LoginPage() {
           // Profile fetch is best-effort
         }
         router.push('/')
+      } else if (res.status === 401) {
+        setError('APIキーが正しくありません。キーが削除・再生成された場合は、管理者に新しいキーを発行してもらってください。')
       } else {
-        setError('APIキーが正しくありません')
+        setError(`サーバーエラーが発生しました（${res.status}）。少し待ってからもう一度お試しください。`)
       }
     } catch {
       setError('接続に失敗しました')
@@ -58,6 +71,12 @@ export default function LoginPage() {
           <h1 className="text-xl font-bold text-gray-900">LINE Harness</h1>
           <p className="text-sm text-gray-500 mt-1">管理画面にログイン</p>
         </div>
+
+        {notice && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 leading-relaxed">
+            {notice}
+          </div>
+        )}
 
         <form onSubmit={handleLogin}>
           <div className="mb-4">
