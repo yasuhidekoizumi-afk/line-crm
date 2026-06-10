@@ -96,7 +96,8 @@ CREATE INDEX IF NOT EXISTS idx_friend_scenarios_friend_id ON friend_scenarios (f
 CREATE TABLE IF NOT EXISTS broadcasts (
   id              TEXT PRIMARY KEY,
   title           TEXT NOT NULL,
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex')),
+  -- 'multi' のとき message_content は [{type,content,altText?}, ...] の JSON 配列（最大5件・LINE API仕様）
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'multi')),
   message_content TEXT NOT NULL,
   target_type     TEXT NOT NULL CHECK (target_type IN ('all', 'tag', 'segment')) DEFAULT 'all',
   target_tag_id   TEXT REFERENCES tags (id) ON DELETE SET NULL,
