@@ -71,7 +71,12 @@ export class LineClient {
   }
 
   async multicast(to: string[], messages: Message[]): Promise<void> {
-    const body: MulticastRequest = { to, messages };
+    // 多層防御: NULL/空文字のユーザーIDが1件でも混じると LINE API がリクエスト全体を
+    // 400 で弾き、バッチ全員(最大500人)への送信が失敗する。呼び出し側でも除外しているが、
+    // 最後の砦としてここでも除外する。
+    const validTo = to.filter((id) => typeof id === 'string' && id.trim() !== '');
+    if (validTo.length === 0) return; // 有効な宛先ゼロなら何もしない（空バッチはスキップ）
+    const body: MulticastRequest = { to: validTo, messages };
     await this.request('/message/multicast', body);
   }
 
