@@ -19,6 +19,12 @@ const ccPrompts = [
 ]
 
 interface DashboardStats { friendCount: number | null; activeScenarioCount: number | null; broadcastCount: number | null; templateCount: number | null; automationCount: number | null; scoringRuleCount: number | null }
+// JSTで今月(YYYY-MM)を取得
+function thisMonthJst(): string {
+  const now = new Date()
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000)
+  return jst.toISOString().slice(0, 7) // 'YYYY-MM'
+}
 interface FermentStats { totalCustomers: number | null; emailSubscribers: number | null; emailTemplates: number | null; emailCampaigns: number | null; totalSent30d: number | null; totalOpened30d: number | null; totalClicked30d: number | null; attributedRevenue30d: number | null; predictedClvSum: number | null; highIntent: number | null; topCampaigns: Array<{ campaign_id: string; name: string; total_sent: number; total_opened: number; total_attributed_revenue: number }> }
 interface ApiResultGeneric<T> { success: boolean; data?: T; meta?: { total: number } }
 interface LoyaltyStats { totalMembers: number | null; rankBreakdown: { rank: string; count: number }[] | null; thisMonthAwarded: number | null; thisMonthRedeemed: number | null; thisMonthNewMembers: number | null; lastMonthAwarded: number | null; lastMonthRedeemed: number | null; lastMonthNewMembers: number | null }
@@ -66,14 +72,25 @@ export default function DashboardPage() {
 
   const loadStats = useCallback(async () => {
     try {
+      // 各カウントは選択中のアカウントで絞る（ダッシュボードとサブページの整合性を保つ）。
+      // 配信数は「今月実際に送信したLINE配信件数」を出す（合計ではなく月次）。
+      const accountId = selectedAccountId ?? undefined
+      const monthPrefix = thisMonthJst()
       const [friendCountRes, scenariosRes, broadcastsRes, templatesRes, automationsRes, scoringRes] = await Promise.allSettled([
-        api.friends.count({ accountId: selectedAccountId ?? undefined }),
-        api.scenarios.list(), api.broadcasts.list(), api.templates.list(), api.automations.list(), api.scoring.rules(),
+        api.friends.count({ accountId }),
+        api.scenarios.list({ accountId }),
+        api.broadcasts.list({ accountId }),
+        api.templates.list(),
+        api.automations.list(),
+        api.scoring.rules(),
       ])
       setStats({
         friendCount: friendCountRes.status === 'fulfilled' && friendCountRes.value.success ? friendCountRes.value.data.count : null,
         activeScenarioCount: scenariosRes.status === 'fulfilled' && scenariosRes.value.success ? scenariosRes.value.data.filter((s) => s.isActive).length : null,
-        broadcastCount: broadcastsRes.status === 'fulfilled' && broadcastsRes.value.success ? broadcastsRes.value.data.length : null,
+        // 今月の送信済み配信のみカウント（sent_at の年月が今月(JST)と一致する status='sent'）
+        broadcastCount: broadcastsRes.status === 'fulfilled' && broadcastsRes.value.success
+          ? broadcastsRes.value.data.filter((b) => b.status === 'sent' && (b.sentAt ?? '').slice(0, 7) === monthPrefix).length
+          : null,
         templateCount: templatesRes.status === 'fulfilled' && templatesRes.value.success ? templatesRes.value.data.length : null,
         automationCount: automationsRes.status === 'fulfilled' && automationsRes.value.success ? automationsRes.value.data.filter((a) => a.isActive).length : null,
         scoringRuleCount: scoringRes.status === 'fulfilled' && scoringRes.value.success ? scoringRes.value.data.length : null,
@@ -158,7 +175,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
         <StatCard title="友だち数" value={stats.friendCount} loading={loading} href="/customers" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} />
         <StatCard title="アクティブシナリオ数" value={stats.activeScenarioCount} loading={loading} href="/scenarios" accentColor="#3B82F6" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>} />
-        <StatCard title="配信数 (合計)" value={stats.broadcastCount} loading={loading} href="/broadcasts" accentColor="#8B5CF6" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>} />
+        <StatCard title="今月の配信数" value={stats.broadcastCount} loading={loading} href="/broadcasts" accentColor="#8B5CF6" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
