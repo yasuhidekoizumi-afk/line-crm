@@ -58,7 +58,9 @@ export async function processBroadcastSend(
       }
 
       const friends = await getFriendsByTag(db, broadcast.target_tag_id);
-      const followingFriends = friends.filter((f) => f.is_following);
+      // line_user_id が NULL/空の行が1件でも混じると LINE API がバッチ全体(最大500人)を
+      // 400 で弾いて全滅するため、フォロー中かつ有効なIDのみに絞る。
+      const followingFriends = friends.filter((f) => f.is_following && f.line_user_id);
       totalCount = followingFriends.length;
 
       // Send in batches with stealth delays to mimic human patterns
@@ -117,7 +119,7 @@ export async function processBroadcastSend(
       // Fetch line_user_id for each friend
       const result = await db
         .prepare(
-          `SELECT id, line_user_id FROM friends WHERE id IN (${friendIds.map(() => '?').join(',')}) AND is_following = 1`,
+          `SELECT id, line_user_id FROM friends WHERE id IN (${friendIds.map(() => '?').join(',')}) AND is_following = 1 AND line_user_id IS NOT NULL AND line_user_id != ''`,
         )
         .bind(...friendIds)
         .all<{ id: string; line_user_id: string }>();
