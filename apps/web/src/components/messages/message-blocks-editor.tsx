@@ -16,7 +16,8 @@ import FlexEditor from '@/components/messages/flex-editor'
 
 export type Block =
   | { id: string; type: 'text'; text: string }
-  | { id: string; type: 'image'; originalContentUrl: string; previewImageUrl: string }
+  // image: linkUrl が入っていれば、送信時に裏でFlexに変換して画像タップで遷移できるようにする
+  | { id: string; type: 'image'; originalContentUrl: string; previewImageUrl: string; linkUrl?: string }
   | { id: string; type: 'flex'; contents: string; altText?: string } // contents は JSON 文字列
 
 const MAX_BLOCKS = 5
@@ -46,9 +47,11 @@ export function blocksToPayload(blocks: Block[]): {
     if (b.type === 'image') {
       return {
         messageType: 'image',
+        // linkUrl を JSON に含める（Worker側がリンク有無で Flex 変換するかを判断）
         messageContent: JSON.stringify({
           originalContentUrl: b.originalContentUrl,
           previewImageUrl: b.previewImageUrl || b.originalContentUrl,
+          ...(b.linkUrl?.trim() ? { linkUrl: b.linkUrl.trim() } : {}),
         }),
       }
     }
@@ -63,6 +66,7 @@ export function blocksToPayload(blocks: Block[]): {
         content: JSON.stringify({
           originalContentUrl: b.originalContentUrl,
           previewImageUrl: b.previewImageUrl || b.originalContentUrl,
+          ...(b.linkUrl?.trim() ? { linkUrl: b.linkUrl.trim() } : {}),
         }),
       }
     }
@@ -92,12 +96,13 @@ function contentToBlock(type: string, content: string, altText?: string): Block 
   if (type === 'text') return { id: nextId(), type: 'text', text: content }
   if (type === 'image') {
     try {
-      const parsed = JSON.parse(content) as { originalContentUrl?: string; previewImageUrl?: string }
+      const parsed = JSON.parse(content) as { originalContentUrl?: string; previewImageUrl?: string; linkUrl?: string }
       return {
         id: nextId(),
         type: 'image',
         originalContentUrl: parsed.originalContentUrl ?? '',
         previewImageUrl: parsed.previewImageUrl ?? parsed.originalContentUrl ?? '',
+        ...(parsed.linkUrl ? { linkUrl: parsed.linkUrl } : {}),
       }
     } catch {
       return { id: nextId(), type: 'image', originalContentUrl: '', previewImageUrl: '' }
@@ -223,7 +228,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                     />
                     <div className="space-y-2">
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">元画像URL (originalContentUrl)</label>
+                        <label className="block text-xs text-gray-500 mb-1">画像URL <span className="text-gray-400">(必須)</span></label>
                         <input
                           type="url"
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -233,15 +238,35 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">プレビュー画像URL (previewImageUrl)</label>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          🔗 タップ時のリンクURL <span className="text-gray-400">(任意)</span>
+                        </label>
                         <input
                           type="url"
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                          placeholder="https://example.com/preview.png (空欄で元画像と同じ)"
-                          value={b.previewImageUrl}
-                          onChange={(e) => updateBlock(b.id, { previewImageUrl: e.target.value })}
+                          placeholder="https://oryzae.jp/products/... (空欄ならリンクなし)"
+                          value={b.linkUrl ?? ''}
+                          onChange={(e) => updateBlock(b.id, { linkUrl: e.target.value || undefined })}
                         />
+                        {b.linkUrl?.trim() && (
+                          <p className="text-[11px] text-gray-400 mt-1">
+                            ※ リンク付き画像はLINE仕様上Flexメッセージとして送信されます（動作は同じ）
+                          </p>
+                        )}
                       </div>
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-gray-400 hover:text-gray-600">詳細設定</summary>
+                        <div className="mt-2">
+                          <label className="block text-xs text-gray-500 mb-1">プレビュー画像URL <span className="text-gray-400">(任意・空欄で元画像と同じ)</span></label>
+                          <input
+                            type="url"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                            placeholder="https://example.com/preview.png"
+                            value={b.previewImageUrl}
+                            onChange={(e) => updateBlock(b.id, { previewImageUrl: e.target.value })}
+                          />
+                        </div>
+                      </details>
                     </div>
                   </div>
                 )}

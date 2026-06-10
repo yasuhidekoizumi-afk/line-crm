@@ -257,7 +257,35 @@ function buildMessage(messageType: string, messageContent: string, altText?: str
       const parsed = JSON.parse(messageContent) as {
         originalContentUrl: string;
         previewImageUrl: string;
+        linkUrl?: string;
       };
+      // リンクURLがある場合は LINE Messaging API の仕様上、単純な image メッセージでは
+      // 遷移を実現できないため、Flex メッセージ（imageコンポーネント + action.uri）に変換する。
+      const linkUrl = parsed.linkUrl?.trim();
+      if (linkUrl) {
+        return {
+          type: 'flex',
+          altText: altText || '画像メッセージ',
+          contents: {
+            type: 'bubble',
+            body: {
+              type: 'box',
+              layout: 'vertical',
+              paddingAll: '0px',
+              contents: [
+                {
+                  type: 'image',
+                  url: parsed.originalContentUrl,
+                  size: 'full',
+                  aspectMode: 'cover',
+                  aspectRatio: '1:1',
+                  action: { type: 'uri', uri: linkUrl },
+                },
+              ],
+            },
+          },
+        };
+      }
       return {
         type: 'image',
         originalContentUrl: parsed.originalContentUrl,
