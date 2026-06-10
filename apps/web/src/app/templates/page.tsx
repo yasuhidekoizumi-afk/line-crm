@@ -62,6 +62,8 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  // editingId が入っていれば「編集モード」、null なら「新規作成モード」
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [form, setForm] = useState<CreateFormState>({
     name: '',
@@ -99,7 +101,29 @@ export default function TemplatesPage() {
     new Set(templates.map((t) => t.category).filter(Boolean))
   )
 
-  const handleCreate = async () => {
+  // 編集開始（既存テンプレートをフォームに流し込み）
+  const handleStartEdit = (t: Template) => {
+    setEditingId(t.id)
+    setShowCreate(true)
+    setFormError('')
+    setForm({
+      name: t.name,
+      category: t.category,
+      messageType: t.messageType,
+      messageContent: t.messageContent,
+    })
+  }
+
+  // フォーム閉じる（編集モード解除）
+  const handleCloseForm = () => {
+    setShowCreate(false)
+    setEditingId(null)
+    setFormError('')
+    setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+  }
+
+  // 保存（編集中なら更新、それ以外は新規作成）
+  const handleSave = async () => {
     if (!form.name.trim()) {
       setFormError('テンプレート名を入力してください')
       return
@@ -115,21 +139,23 @@ export default function TemplatesPage() {
     setSaving(true)
     setFormError('')
     try {
-      const res = await api.templates.create({
+      const payload = {
         name: form.name,
         category: form.category,
         messageType: form.messageType,
         messageContent: form.messageContent,
-      })
+      }
+      const res = editingId
+        ? await api.templates.update(editingId, payload)
+        : await api.templates.create(payload)
       if (res.success) {
-        setShowCreate(false)
-        setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+        handleCloseForm()
         load()
       } else {
         setFormError(res.error)
       }
     } catch {
-      setFormError('作成に失敗しました')
+      setFormError(editingId ? '更新に失敗しました' : '作成に失敗しました')
     } finally {
       setSaving(false)
     }
@@ -151,7 +177,7 @@ export default function TemplatesPage() {
         title="LINEテンプレート"
         action={
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => { setEditingId(null); setForm({ name: '', category: '', messageType: 'text', messageContent: '' }); setFormError(''); setShowCreate(true) }}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
             style={{ backgroundColor: '#06C755' }}
           >
@@ -201,7 +227,9 @@ export default function TemplatesPage() {
       {/* Create form */}
       {showCreate && (
         <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">新規テンプレートを作成</h2>
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">
+            {editingId ? 'テンプレートを編集' : '新規テンプレートを作成'}
+          </h2>
           <div className="space-y-4 max-w-lg">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">テンプレート名 <span className="text-red-500">*</span></label>
@@ -250,15 +278,15 @@ export default function TemplatesPage() {
 
             <div className="flex gap-2">
               <button
-                onClick={handleCreate}
+                onClick={handleSave}
                 disabled={saving}
                 className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
                 style={{ backgroundColor: '#06C755' }}
               >
-                {saving ? '作成中...' : '作成'}
+                {saving ? '保存中...' : editingId ? '保存' : '作成'}
               </button>
               <button
-                onClick={() => { setShowCreate(false); setFormError('') }}
+                onClick={handleCloseForm}
                 className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
               >
                 キャンセル
@@ -309,7 +337,13 @@ export default function TemplatesPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {templates.map((template) => (
-                <tr key={template.id} className="hover:bg-gray-50 transition-colors">
+                <tr
+                  key={template.id}
+                  onClick={() => handleStartEdit(template)}
+                  className={`cursor-pointer transition-colors ${
+                    editingId === template.id ? 'bg-green-50' : 'hover:bg-gray-50'
+                  }`}
+                >
                   {/* Name */}
                   <td className="px-4 py-3">
                     <div>
@@ -340,12 +374,20 @@ export default function TemplatesPage() {
 
                   {/* Actions */}
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleDelete(template.id)}
-                      className="px-3 py-1 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
-                    >
-                      削除
-                    </button>
+                    <div className="inline-flex gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleStartEdit(template) }}
+                        className="px-3 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                      >
+                        編集
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDelete(template.id) }}
+                        className="px-3 py-1 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+                      >
+                        削除
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
