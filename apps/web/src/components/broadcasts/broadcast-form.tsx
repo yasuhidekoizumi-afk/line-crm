@@ -9,6 +9,7 @@ import MessageBlocksEditor, {
   blocksToPayload,
   payloadToBlocks,
 } from '@/components/messages/message-blocks-editor'
+import MessageBlocksPreview from '@/components/messages/message-blocks-preview'
 import { useAccount } from '@/contexts/account-context'
 
 interface BroadcastFormProps {
@@ -160,9 +161,10 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
       <h2 className="text-sm font-semibold text-gray-800 mb-5">{editId ? '配信を編集' : '新規配信を作成'}</h2>
 
-      <div className={`space-y-4 ${form.blocks.some((b) => b.type === 'flex') ? 'max-w-3xl' : 'max-w-lg'}`}>
+      {/* プレビュー枠を右に並べる関係で、メッセージ編集部だけは広めに。他のフィールドは max-w-lg。 */}
+      <div className="space-y-4 max-w-5xl">
         {/* Title */}
-        <div>
+        <div className="max-w-lg">
           <label className="block text-xs font-medium text-gray-600 mb-1">
             配信タイトル <span className="text-red-500">*</span>
           </label>
@@ -175,16 +177,22 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
           />
         </div>
 
-        {/* メッセージ（複数ブロック）：テキスト/画像/Flex を縦に積めます。最大5件。 */}
+        {/* メッセージ（複数ブロック）＋プレビュー。広い画面では左右2カラムで並び、
+            狭い画面では縦に並ぶ。 */}
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-2">
             メッセージ <span className="text-red-500">*</span>
             <span className="text-xs text-gray-400 ml-2">テキスト・画像・Flexを縦に追加できます（最大5件）</span>
           </label>
-          <MessageBlocksEditor
-            value={form.blocks}
-            onChange={(blocks) => setForm({ ...form, blocks })}
-          />
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+            <MessageBlocksEditor
+              value={form.blocks}
+              onChange={(blocks) => setForm({ ...form, blocks })}
+            />
+            <div className="lg:sticky lg:top-4 lg:self-start">
+              <MessageBlocksPreview blocks={form.blocks} />
+            </div>
+          </div>
         </div>
 
         {/* Target */}
