@@ -43,6 +43,9 @@ const LOCAL_STORAGE_AUTH_KEYS = ['lh_api_key', 'lh_staff_name', 'lh_staff_role',
 function logout() {
   if (typeof window === 'undefined') return
   LOCAL_STORAGE_AUTH_KEYS.forEach(k => localStorage.removeItem(k))
+  // ログイン画面で「なぜログアウトされたか」を表示するための理由を残す。
+  // （以前は黙って /login に飛ばされ、ユーザーが原因不明で混乱していた）
+  try { sessionStorage.setItem('lh_logout_reason', 'session_expired') } catch { /* private mode 等は無視 */ }
   const base = window.location.pathname.startsWith('/line-crm') ? '/line-crm' : ''
   window.location.replace(`${base}/login`)
 }
