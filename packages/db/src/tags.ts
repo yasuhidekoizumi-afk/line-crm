@@ -46,8 +46,49 @@ export async function createTag(
     .first<Tag>())!;
 }
 
+// タグの名前と色を変更。どちらか一方だけでもOK。
+export interface UpdateTagInput {
+  name?: string;
+  color?: string;
+}
+
+export async function updateTag(
+  db: D1Database,
+  id: string,
+  input: UpdateTagInput,
+): Promise<Tag | null> {
+  const sets: string[] = [];
+  const binds: (string | null)[] = [];
+  if (input.name !== undefined) { sets.push('name = ?'); binds.push(input.name); }
+  if (input.color !== undefined) { sets.push('color = ?'); binds.push(input.color); }
+  if (sets.length === 0) {
+    return (await db.prepare(`SELECT * FROM tags WHERE id = ?`).bind(id).first<Tag>()) ?? null;
+  }
+  binds.push(id);
+  await db.prepare(`UPDATE tags SET ${sets.join(', ')} WHERE id = ?`).bind(...binds).run();
+  return (await db.prepare(`SELECT * FROM tags WHERE id = ?`).bind(id).first<Tag>()) ?? null;
+}
+
 export async function deleteTag(db: D1Database, id: string): Promise<void> {
   await db.prepare(`DELETE FROM tags WHERE id = ?`).bind(id).run();
+}
+
+// タグ一覧 + 各タグの付与人数（タグ管理画面用）。LEFT JOIN で 0 件のタグも含める。
+export interface TagWithCount extends Tag {
+  friend_count: number;
+}
+
+export async function getTagsWithCount(db: D1Database): Promise<TagWithCount[]> {
+  const result = await db
+    .prepare(
+      `SELECT t.*, COUNT(ft.friend_id) AS friend_count
+       FROM tags t
+       LEFT JOIN friend_tags ft ON ft.tag_id = t.id
+       GROUP BY t.id
+       ORDER BY t.name ASC`,
+    )
+    .all<TagWithCount>();
+  return result.results;
 }
 
 export async function addTagToFriend(
