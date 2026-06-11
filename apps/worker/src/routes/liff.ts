@@ -1090,11 +1090,26 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
 
     let bonusAwarded = 0;
     if (bonusEnabled && bonusPoints > 0) {
+      // ① 自社DB上で既にボーナス付与済みかチェック（同じLINEで再連携してももう貰えない）
       const existingBonus = await c.env.DB
         .prepare(`SELECT 1 FROM loyalty_transactions WHERE friend_id = ? AND reason = 'LINE連携ボーナス' LIMIT 1`)
         .bind(friend.id)
         .first();
-      if (!existingBonus) {
+
+      // ② CRM Plus(SocialPLUS)時代に既に連携済みの顧客かチェック
+      //    Shopify Customer メタフィールド socialplus.line が入っていれば
+      //    CRM Plus 経由で既に連携済み → ボーナス付与スキップ（自社版への移行二重取り防止）
+      const { isAlreadyLinkedViaSocialPlus } = await import('../utils/socialplus-check.js');
+      const socialPlusCheck = await isAlreadyLinkedViaSocialPlus(c.env, shopifyCustomerId);
+      if (socialPlusCheck.linked) {
+        console.log(`[link-shopify] bonus skipped — SocialPLUS link present`, {
+          shopifyCustomerId,
+          friendId: friend.id,
+          lineUserId: socialPlusCheck.lineUserId,
+        });
+      }
+
+      if (!existingBonus && !socialPlusCheck.linked) {
         // LINE連携ボーナスは通常ポイント（balance、無期限）として付与
         // limited_balance / limited_expires_at は触らない（PR #112 で未指定なら既存値保持）
         const beforeBonus = await getLoyaltyPoint(c.env.DB, friend.id);
