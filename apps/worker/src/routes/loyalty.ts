@@ -1503,10 +1503,13 @@ loyalty.post('/api/loyalty/admin/refund-specific-codes', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// POST /api/loyalty/admin/rescue-socialplus-link?scid=<ShopifyCustomerId>
+// POST /api/loyalty/admin/rescue-socialplus-link?scid=<ShopifyCustomerId>&bonusSince=2026-04-15
 //   旧CRM PLUS(SocialPLUS)の id-connect-line ページでLINE連携したが、自社ポイントに
 //   未登録の顧客を救済する。Shopify顧客の `socialplus.line`(LINE UID) で自社に紐付け、
 //   未付与の **LINE連携ボーナス+300pt** と(誕生日登録済なら) **誕生日登録ボーナス+100pt** を付与。
+//   - bonusSince(YYYY-MM-DD・任意): 指定時、顧客作成日がそれ以降の人だけボーナス付与。
+//     それより古い顧客は「紐付けのみ」(linked_no_bonus)。移管(4/15)前から連携していた人は
+//     旧システム時代にボーナスを受けている可能性があり二重付与を避けるため（補填方針と同じ線引き）。
 //   - 冪等: 既に自社連携(loyalty_points に shopify_customer_id 行あり)なら何もしない。
 //     LINE UID 側に既存行がある場合は「紐付けのみ(ボーナス付与なし=二重防止)」。
 //   - 通知なし(addLoyaltyTransaction 直書き)。購入ポイントは別途 backfill-purchases で。
@@ -1517,6 +1520,10 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
   try {
     const scid = (c.req.query('scid') ?? '').trim();
     if (!scid) return c.json({ success: false, error: 'scid は必須です' }, 400);
+    const bonusSince = (c.req.query('bonusSince') ?? '').trim();
+    if (bonusSince && !/^\d{4}-\d{2}-\d{2}$/.test(bonusSince)) {
+      return c.json({ success: false, error: 'bonusSince は YYYY-MM-DD 形式で指定してください' }, 400);
+    }
 
     // 冪等①: 既に自社連携済みなら何もしない（二重付与防止）
     const existing = await getLoyaltyPointByShopifyCustomerId(c.env.DB, scid);
@@ -1533,13 +1540,13 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
       method: 'POST',
       headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query: `query($id:ID!){ customer(id:$id){ displayName line: metafield(namespace:"socialplus", key:"line"){ value } bday: metafield(namespace:"facts", key:"birth_date"){ value } } }`,
+        query: `query($id:ID!){ customer(id:$id){ displayName createdAt line: metafield(namespace:"socialplus", key:"line"){ value } bday: metafield(namespace:"facts", key:"birth_date"){ value } } }`,
         variables: { id: `gid://shopify/Customer/${scid}` },
       }),
     });
     if (!gqlRes.ok) return c.json({ success: false, error: `Shopify ${gqlRes.status}` }, 500);
     const gj = (await gqlRes.json()) as {
-      data?: { customer?: { displayName?: string | null; line?: { value?: string } | null; bday?: { value?: string } | null } | null };
+      data?: { customer?: { displayName?: string | null; createdAt?: string | null; line?: { value?: string } | null; bday?: { value?: string } | null } | null };
       errors?: unknown;
     };
     if (gj.errors) return c.json({ success: false, error: 'Shopify GraphQL error' }, 500);
@@ -1570,9 +1577,24 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
       return c.json({ success: true, data: { scid, friendId, action: 'linked_only_existing_row' } });
     }
 
-    // 新規: 自社連携＋未付与ボーナスを付与
-    const lineBonus = 300;
-    const birthdayBonus = birthDate ? 100 : 0;
+    // 新規: 自社連携＋未付与ボーナスを付与。
+    // bonusSince 指定時は「顧客作成日がそれ以降」の人だけボーナス（ISO同士の文字列比較でOK）。
+    const createdAt = (gj.data?.customer?.createdAt ?? '').trim();
+    const bonusEligible = !bonusSince || (!!createdAt && createdAt >= `${bonusSince}T00:00:00Z`);
+    const lineBonus = bonusEligible ? 300 : 0;
+    const birthdayBonus = bonusEligible && birthDate ? 100 : 0;
+
+    if (lineBonus === 0) {
+      // 紐付けのみ（移管前から連携していたと推定。今後の購入ポイントはこれで貯まるようになる）
+      step = 'upsertLoyaltyPoint(linkOnly)';
+      await upsertLoyaltyPoint(c.env.DB, friendId, {
+        balance: 0, totalSpent: 0, rank: determineRank(0), shopifyCustomerId: scid,
+      });
+      return c.json({
+        success: true,
+        data: { scid, friendId, lineUid, action: 'linked_no_bonus', createdAt: createdAt || null },
+      });
+    }
 
     // ① LINE連携ボーナス
     step = 'upsertLoyaltyPoint(line)';
@@ -1599,7 +1621,7 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
 
     return c.json({
       success: true,
-      data: { scid, friendId, lineUid, action: 'rescued', lineBonus, birthdayBonus, awarded: lineBonus + birthdayBonus, birthDate: birthDate || null },
+      data: { scid, friendId, lineUid, action: 'rescued', lineBonus, birthdayBonus, awarded: lineBonus + birthdayBonus, birthDate: birthDate || null, createdAt: createdAt || null },
     });
   } catch (e) {
     return c.json({ success: false, step, error: e instanceof Error ? e.message : 'rescue-socialplus-link failed' }, 500);
@@ -1653,7 +1675,9 @@ loyalty.post('/api/loyalty/admin/scan-socialplus-unlinked', async (c) => {
           linked++;
         } else {
           affected++;
-          if (affectedSample.length < 30) affectedSample.push(scid);
+          // 1バッチ(最大1000人)の affected を全件返す（実測最大37件/バッチなので50で十分）。
+          // 一括救済のとき、このリストをそのまま rescue-socialplus-link に渡す。
+          if (affectedSample.length < 50) affectedSample.push(scid);
         }
       }
       hasMore = !!conn?.pageInfo?.hasNextPage;
