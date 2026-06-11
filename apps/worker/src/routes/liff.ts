@@ -1089,12 +1089,16 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
     const bonusPoints = parseInt(bonusPointsSetting ?? '300', 10) || 300;
 
     let bonusAwarded = 0;
+    // UI で「すでに連携済みです」を出し分けるためのフラグ
+    let alreadyLinkedSelf = false;
+    let alreadyLinkedViaSocialPlus = false;
     if (bonusEnabled && bonusPoints > 0) {
       // ① 自社DB上で既にボーナス付与済みかチェック（同じLINEで再連携してももう貰えない）
       const existingBonus = await c.env.DB
         .prepare(`SELECT 1 FROM loyalty_transactions WHERE friend_id = ? AND reason = 'LINE連携ボーナス' LIMIT 1`)
         .bind(friend.id)
         .first();
+      if (existingBonus) alreadyLinkedSelf = true;
 
       // ② CRM Plus(SocialPLUS)時代に既に連携済みの顧客かチェック
       //    Shopify Customer メタフィールド socialplus.line が入っていれば
@@ -1102,6 +1106,7 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       const { isAlreadyLinkedViaSocialPlus } = await import('../utils/socialplus-check.js');
       const socialPlusCheck = await isAlreadyLinkedViaSocialPlus(c.env, shopifyCustomerId);
       if (socialPlusCheck.linked) {
+        alreadyLinkedViaSocialPlus = true;
         console.log(`[link-shopify] bonus skipped — SocialPLUS link present`, {
           shopifyCustomerId,
           friendId: friend.id,
@@ -1199,6 +1204,10 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
         promoPointsAwarded,
         backfilledOrders: backfill.processed,
         backfilledPoints: backfill.totalPointsAwarded,
+        // クライアントUIで「すでに連携済みです」を出すための判定材料。
+        // alreadyLinked が true で bonusAwarded === 0 のとき「既に連携済み」表示にする。
+        alreadyLinked: alreadyLinkedSelf || alreadyLinkedViaSocialPlus,
+        alreadyLinkedSource: alreadyLinkedViaSocialPlus ? 'crm_plus' : (alreadyLinkedSelf ? 'self' : null),
       },
     });
   } catch (err) {
