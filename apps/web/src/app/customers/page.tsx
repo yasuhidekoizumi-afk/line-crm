@@ -11,14 +11,18 @@ function fmt(iso: string | null) {
   return new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
+// 一覧でタグ列表示・タグフィルタ用に Customer に friend_tags を含む形を使う。
+type CustomerWithTags = Customer & { friend_tags?: TagItem[] }
+
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>([])
+  const [customers, setCustomers] = useState<CustomerWithTags[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [regionFilter, setRegionFilter] = useState('')
   const [emailFilter, setEmailFilter] = useState<'' | 'subscribed' | 'unsubscribed'>('')
+  const [tagFilter, setTagFilter] = useState('')  // タグID。空文字は「全て」
   const [offset, setOffset] = useState(0)
   const [total, setTotal] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -52,6 +56,7 @@ export default function CustomersPage() {
       if (emailFilter === 'subscribed') params.subscribed_email = true
       if (emailFilter === 'unsubscribed') params.subscribed_email = false
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
+      if (tagFilter) params.tag_id = tagFilter
       const res = await fermentApi.customers.list(params)
       if (res.success && res.data) {
         setCustomers(res.data)
@@ -62,7 +67,7 @@ export default function CustomersPage() {
     } finally {
       setLoading(false)
     }
-  }, [regionFilter, emailFilter, debouncedSearch])
+  }, [regionFilter, emailFilter, debouncedSearch, tagFilter])
 
   // 入力を300msデバウンスしてからサーバー検索（全件対象）
   useEffect(() => {
@@ -92,7 +97,7 @@ export default function CustomersPage() {
     if (res.success && res.data) setProfile(res.data)
   }, [])
 
-  const handleSelectCustomer = async (customer: Customer) => {
+  const handleSelectCustomer = async (customer: CustomerWithTags) => {
     setSelectedId(customer.customer_id)
     setDetail(customer)
     setProfile(null)
@@ -192,6 +197,17 @@ export default function CustomersPage() {
           <option value="subscribed">購読中</option>
           <option value="unsubscribed">未購読</option>
         </select>
+        <select
+          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value)}
+          aria-label="タグで絞り込み"
+        >
+          <option value="">タグ：全て</option>
+          {allTags.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
         <span className="text-sm text-gray-400 self-center ml-auto">
           {total.toLocaleString()}件
         </span>
@@ -215,6 +231,7 @@ export default function CustomersPage() {
                       <th className="text-right px-4 py-3 font-medium text-gray-600">LTV</th>
                       <th className="text-right px-4 py-3 font-medium text-gray-600 hidden md:table-cell">注文数</th>
                       <th className="text-left px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">最終注文</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">タグ</th>
                       <th className="text-center px-4 py-3 font-medium text-gray-600">メール</th>
                     </tr>
                   </thead>
@@ -246,6 +263,27 @@ export default function CustomersPage() {
                         </td>
                         <td className="px-4 py-2.5 text-gray-500 hidden lg:table-cell text-sm">
                           {fmt(c.last_order_at)}
+                        </td>
+                        <td className="px-4 py-2.5 hidden lg:table-cell">
+                          {c.friend_tags && c.friend_tags.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 max-w-[220px]">
+                              {c.friend_tags.slice(0, 3).map((t) => (
+                                <span
+                                  key={t.id}
+                                  className="inline-block px-1.5 py-0.5 rounded-full text-[10px] font-medium text-white whitespace-nowrap"
+                                  style={{ backgroundColor: t.color }}
+                                  title={t.name}
+                                >
+                                  {t.name}
+                                </span>
+                              ))}
+                              {c.friend_tags.length > 3 && (
+                                <span className="text-[10px] text-gray-500 self-center">+{c.friend_tags.length - 3}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-300">-</span>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           <span className={`inline-block w-2 h-2 rounded-full ${c.subscribed_email ? 'bg-green-400' : 'bg-gray-300'}`} />

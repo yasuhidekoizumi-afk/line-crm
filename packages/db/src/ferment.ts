@@ -192,10 +192,24 @@ export function generateFermentId(prefix: string): string {
 // customers クエリ
 // ============================================================
 
+// 一覧画面で各顧客についている LINE-CRM 側のタグ（friend_tags 経由）を併記するため、
+// Customer を拡張した形を返す。`friend_tags` 未登録の顧客は空配列で揃える。
+export interface CustomerWithFriendTags extends Customer {
+  friend_tags: { id: string; name: string; color: string }[];
+}
+
 export async function getCustomers(
   db: D1Database,
-  opts?: { limit?: number; offset?: number; region?: string; subscribed_email?: boolean; search?: string },
-): Promise<Customer[]> {
+  opts?: {
+    limit?: number;
+    offset?: number;
+    region?: string;
+    subscribed_email?: boolean;
+    search?: string;
+    /** LINE-CRMタグでの絞り込み。tags.id を指定。 */
+    tag_id?: string;
+  },
+): Promise<CustomerWithFriendTags[]> {
   // LINE公式アカウント登録者（line_user_id あり）のみを対象にする。
   // メール専用機能を切り離し、LINE中心の顧客管理に限定する方針。
   const conditions: string[] = ['line_user_id IS NOT NULL'];
@@ -218,6 +232,15 @@ export async function getCustomers(
       bindings.push(like, like, like);
     }
   }
+  // タグ絞り込み: customers.line_user_id → friends.id → friend_tags.tag_id
+  if (opts?.tag_id) {
+    conditions.push(`line_user_id IN (
+      SELECT f.line_user_id FROM friends f
+      JOIN friend_tags ft ON ft.friend_id = f.id
+      WHERE ft.tag_id = ?
+    )`);
+    bindings.push(opts.tag_id);
+  }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = opts?.limit ?? 50;
@@ -229,7 +252,36 @@ export async function getCustomers(
     .prepare(`SELECT * FROM customers ${where} ORDER BY order_count DESC, ltv DESC, last_order_at DESC, created_at DESC LIMIT ? OFFSET ?`)
     .bind(...bindings, limit, offset)
     .all<Customer>();
-  return result.results;
+
+  // 各顧客の LINE-CRM タグを 1 クエリでまとめて取得（N+1 回避）
+  const lineUserIds = result.results
+    .map((c) => c.line_user_id)
+    .filter((v): v is string => typeof v === 'string' && v.length > 0);
+  const tagsByLineUserId = new Map<string, { id: string; name: string; color: string }[]>();
+  if (lineUserIds.length > 0) {
+    const placeholders = lineUserIds.map(() => '?').join(',');
+    const tagRows = await db
+      .prepare(
+        `SELECT f.line_user_id AS line_user_id, t.id AS id, t.name AS name, t.color AS color
+         FROM friends f
+         JOIN friend_tags ft ON ft.friend_id = f.id
+         JOIN tags t ON t.id = ft.tag_id
+         WHERE f.line_user_id IN (${placeholders})
+         ORDER BY t.name ASC`,
+      )
+      .bind(...lineUserIds)
+      .all<{ line_user_id: string; id: string; name: string; color: string }>();
+    for (const row of tagRows.results) {
+      const arr = tagsByLineUserId.get(row.line_user_id) ?? [];
+      arr.push({ id: row.id, name: row.name, color: row.color });
+      tagsByLineUserId.set(row.line_user_id, arr);
+    }
+  }
+
+  return result.results.map((c) => ({
+    ...c,
+    friend_tags: c.line_user_id ? (tagsByLineUserId.get(c.line_user_id) ?? []) : [],
+  }));
 }
 
 export async function getCustomerById(db: D1Database, customerId: string): Promise<Customer | null> {
@@ -337,7 +389,7 @@ export async function updateCustomer(
 
 export async function countCustomers(
   db: D1Database,
-  opts?: { region?: string; subscribed_email?: boolean; search?: string },
+  opts?: { region?: string; subscribed_email?: boolean; search?: string; tag_id?: string },
 ): Promise<number> {
   // 顧客一覧と件数を揃えるため、LINE登録者（line_user_id あり）のみ数える。
   // 一覧側(getCustomers)と同じフィルタを適用して件数・ページネーションを一致させる。
@@ -359,6 +411,14 @@ export async function countCustomers(
       const like = `%${term}%`;
       bindings.push(like, like, like);
     }
+  }
+  if (opts?.tag_id) {
+    conditions.push(`line_user_id IN (
+      SELECT f.line_user_id FROM friends f
+      JOIN friend_tags ft ON ft.friend_id = f.id
+      WHERE ft.tag_id = ?
+    )`);
+    bindings.push(opts.tag_id);
   }
 
   const where = `WHERE ${conditions.join(' AND ')}`;
