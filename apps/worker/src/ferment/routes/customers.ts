@@ -31,6 +31,7 @@ customerRoutes.get('/', async (c) => {
     const region = c.req.query('region');
     const subscribed = c.req.query('subscribed_email');
     const search = c.req.query('q') ?? c.req.query('search');
+    const tagId = c.req.query('tag_id');
     const limit = Number(c.req.query('limit') ?? 50);
     const offset = Number(c.req.query('offset') ?? 0);
     const subscribedEmail = subscribed !== undefined ? subscribed === 'true' : undefined;
@@ -40,10 +41,11 @@ customerRoutes.get('/', async (c) => {
         region,
         subscribed_email: subscribedEmail,
         search,
+        tag_id: tagId,
         limit,
         offset,
       }),
-      countCustomers(c.env.DB, { region, subscribed_email: subscribedEmail, search }),
+      countCustomers(c.env.DB, { region, subscribed_email: subscribedEmail, search, tag_id: tagId }),
     ]);
 
     return c.json({

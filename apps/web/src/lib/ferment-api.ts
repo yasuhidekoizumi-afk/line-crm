@@ -290,14 +290,15 @@ export const fermentApi = {
 
   // ---- 顧客 ----
   customers: {
-    list: (params?: { region?: string; subscribed_email?: boolean; search?: string; limit?: number; offset?: number }) => {
+    list: (params?: { region?: string; subscribed_email?: boolean; search?: string; tag_id?: string; limit?: number; offset?: number }) => {
       const query = new URLSearchParams()
       if (params?.region) query.set('region', params.region)
       if (params?.subscribed_email !== undefined) query.set('subscribed_email', String(params.subscribed_email))
       if (params?.search) query.set('q', params.search)
+      if (params?.tag_id) query.set('tag_id', params.tag_id)
       if (params?.limit) query.set('limit', String(params.limit))
       if (params?.offset) query.set('offset', String(params.offset))
-      return fetchApi<ApiResult<Customer[]>>(`/api/customers?${query}`)
+      return fetchApi<ApiResult<(Customer & { friend_tags?: { id: string; name: string; color: string }[] })[]>>(`/api/customers?${query}`)
     },
     get: (id: string) =>
       fetchApi<ApiResult<Customer>>(`/api/customers/${id}`),
