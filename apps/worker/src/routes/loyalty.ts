@@ -1607,6 +1607,66 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/scan-socialplus-unlinked?limit=500&cursor=<endCursor>
+//   Shopify顧客を走査し「socialplus.line(旧CRM PLUS連携) がある × 自社loyalty未登録」=
+//   小川様と同じ被害の人数を数える。affectedSample に対象 scid を最大30件返す。
+//   1回 limit 件(既定500・最大1000)走査し、nextCursor/hasMore でページング(全件は繰り返し)。
+//   ※read-only(数えるだけ)。各顧客の socialplus.line は customers クエリで一括取得(追加subreqなし)、
+//     loyalty照合は D1。認証必須(authMiddleware: Bearer API_KEY)。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/scan-socialplus-unlinked', async (c) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(c.req.query('limit') ?? '500', 10) || 500, 50), 1000);
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = await getShopifyAdminToken(c.env);
+    if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+
+    const QUERY = `query($cursor:String){ customers(first:250, after:$cursor){ nodes{ legacyResourceId line: metafield(namespace:"socialplus", key:"line"){ value } } pageInfo{ hasNextPage endCursor } } }`;
+
+    let scanned = 0, withSocialplus = 0, linked = 0, affected = 0;
+    const affectedSample: string[] = [];
+    let nextCursor: string | null = c.req.query('cursor') || null;
+    let hasMore = true;
+
+    while (scanned < limit && hasMore) {
+      const res = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+        method: 'POST',
+        headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: QUERY, variables: { cursor: nextCursor } }),
+      });
+      if (!res.ok) return c.json({ success: false, error: `Shopify ${res.status}`, scanned, nextCursor }, 500);
+      const j = (await res.json()) as {
+        data?: { customers?: { nodes?: Array<{ legacyResourceId?: string; line?: { value?: string } | null }>; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } } };
+        errors?: unknown;
+      };
+      if (j.errors) return c.json({ success: false, error: 'Shopify GraphQL error', detail: JSON.stringify(j.errors).slice(0, 200) }, 500);
+      const conn = j.data?.customers;
+      for (const n of conn?.nodes ?? []) {
+        scanned++;
+        const sp = (n.line?.value ?? '').trim();
+        if (!sp) continue; // socialplus連携なし
+        withSocialplus++;
+        const scid = String(n.legacyResourceId ?? '');
+        if (!scid) continue;
+        const lp = await getLoyaltyPointByShopifyCustomerId(c.env.DB, scid).catch(() => null);
+        if (lp) {
+          linked++;
+        } else {
+          affected++;
+          if (affectedSample.length < 30) affectedSample.push(scid);
+        }
+      }
+      hasMore = !!conn?.pageInfo?.hasNextPage;
+      nextCursor = conn?.pageInfo?.endCursor ?? null;
+    }
+
+    return c.json({ success: true, data: { scanned, withSocialplus, linked, affected, affectedSample, nextCursor, hasMore } });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'scan-socialplus-unlinked failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
 // POST /api/loyalty/campaign-award — キャンペーンポイント付与（LP 等から呼ぶ）
 //
 // 8周年 LINE 連携特典など、定義済みキャンペーン (campaign_key) に対して
