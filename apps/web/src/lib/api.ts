@@ -162,9 +162,16 @@ export const api = {
   tags: {
     list: () =>
       fetchApi<ApiResponse<Tag[]>>('/api/tags'),
+    listWithCount: () =>
+      fetchApi<ApiResponse<(Tag & { friendCount: number })[]>>('/api/tags/with-count'),
     create: (data: { name: string; color: string }) =>
       fetchApi<ApiResponse<Tag>>('/api/tags', {
         method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: { name?: string; color?: string }) =>
+      fetchApi<ApiResponse<Tag>>(`/api/tags/${id}`, {
+        method: 'PATCH',
         body: JSON.stringify(data),
       }),
     delete: (id: string) =>
