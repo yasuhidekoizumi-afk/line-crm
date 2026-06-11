@@ -1513,6 +1513,7 @@ loyalty.post('/api/loyalty/admin/refund-specific-codes', async (c) => {
 //   認証必須(authMiddleware: Bearer API_KEY)。
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
+  let step = 'init';
   try {
     const scid = (c.req.query('scid') ?? '').trim();
     if (!scid) return c.json({ success: false, error: 'scid は必須です' }, 400);
@@ -1553,6 +1554,7 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
     // friends 行を取得/作成する。loyalty_points.friend_id は friends.id(UUID) を参照するため、
     // LINE UID をそのまま friend_id にすると FOREIGN KEY 制約に失敗する。upsertFriend は
     // line_user_id で既存を探し、無ければ作成して Friend(.id=UUID) を返す。
+    step = 'upsertFriend';
     const friend = await upsertFriend(c.env.DB, { lineUserId: lineUid, displayName });
     const friendId = friend.id;
 
@@ -1573,9 +1575,11 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
     const birthdayBonus = birthDate ? 100 : 0;
 
     // ① LINE連携ボーナス
+    step = 'upsertLoyaltyPoint(line)';
     await upsertLoyaltyPoint(c.env.DB, friendId, {
       balance: lineBonus, totalSpent: 0, rank: determineRank(0), shopifyCustomerId: scid,
     });
+    step = 'addLoyaltyTransaction(line)';
     await addLoyaltyTransaction(c.env.DB, {
       friendId, type: 'award', points: lineBonus, balanceAfter: lineBonus,
       reason: 'LINE連携ボーナス: +300pt', expiryDays: 0,
@@ -1598,7 +1602,7 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
       data: { scid, friendId, lineUid, action: 'rescued', lineBonus, birthdayBonus, awarded: lineBonus + birthdayBonus, birthDate: birthDate || null },
     });
   } catch (e) {
-    return c.json({ success: false, error: e instanceof Error ? e.message : 'rescue-socialplus-link failed' }, 500);
+    return c.json({ success: false, step, error: e instanceof Error ? e.message : 'rescue-socialplus-link failed' }, 500);
   }
 });
 
