@@ -26,6 +26,7 @@ import {
   RANK_THRESHOLDS,
   RANK_MULTIPLIERS,
   getFriendByLineUserId,
+  upsertFriend,
   type LoyaltyRank,
   type CampaignCondition,
   type CampaignActionType,
@@ -1531,25 +1532,31 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
       method: 'POST',
       headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query: `query($id:ID!){ customer(id:$id){ line: metafield(namespace:"socialplus", key:"line"){ value } bday: metafield(namespace:"facts", key:"birth_date"){ value } } }`,
+        query: `query($id:ID!){ customer(id:$id){ displayName line: metafield(namespace:"socialplus", key:"line"){ value } bday: metafield(namespace:"facts", key:"birth_date"){ value } } }`,
         variables: { id: `gid://shopify/Customer/${scid}` },
       }),
     });
     if (!gqlRes.ok) return c.json({ success: false, error: `Shopify ${gqlRes.status}` }, 500);
     const gj = (await gqlRes.json()) as {
-      data?: { customer?: { line?: { value?: string } | null; bday?: { value?: string } | null } | null };
+      data?: { customer?: { displayName?: string | null; line?: { value?: string } | null; bday?: { value?: string } | null } | null };
       errors?: unknown;
     };
     if (gj.errors) return c.json({ success: false, error: 'Shopify GraphQL error' }, 500);
     const lineUid = (gj.data?.customer?.line?.value ?? '').trim();
     const birthDate = (gj.data?.customer?.bday?.value ?? '').trim();
+    const displayName = (gj.data?.customer?.displayName ?? '').trim() || null;
     if (!lineUid) {
       // SocialPLUSのLINE UIDが無い＝LINE連携痕跡なし。救済対象外。
       return c.json({ success: true, data: { scid, action: 'no_socialplus_line' } });
     }
 
-    const friendId = lineUid;
-    // 冪等②: LINE UID 側に既存行がある場合は「紐付けのみ」（ボーナスは付与しない＝二重防止）
+    // friends 行を取得/作成する。loyalty_points.friend_id は friends.id(UUID) を参照するため、
+    // LINE UID をそのまま friend_id にすると FOREIGN KEY 制約に失敗する。upsertFriend は
+    // line_user_id で既存を探し、無ければ作成して Friend(.id=UUID) を返す。
+    const friend = await upsertFriend(c.env.DB, { lineUserId: lineUid, displayName });
+    const friendId = friend.id;
+
+    // 冪等②: この friend に既に loyalty 行がある場合は「紐付けのみ」（ボーナス付与なし＝二重防止）
     const byFriend = await getLoyaltyPoint(c.env.DB, friendId);
     if (byFriend) {
       await upsertLoyaltyPoint(c.env.DB, friendId, {
@@ -1588,7 +1595,7 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
 
     return c.json({
       success: true,
-      data: { scid, friendId, action: 'rescued', lineBonus, birthdayBonus, awarded: lineBonus + birthdayBonus, birthDate: birthDate || null },
+      data: { scid, friendId, lineUid, action: 'rescued', lineBonus, birthdayBonus, awarded: lineBonus + birthdayBonus, birthDate: birthDate || null },
     });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'rescue-socialplus-link failed' }, 500);
