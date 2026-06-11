@@ -371,7 +371,8 @@ CREATE TABLE IF NOT EXISTS templates (
   id              TEXT PRIMARY KEY,
   name            TEXT NOT NULL,
   category        TEXT NOT NULL DEFAULT 'general',
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'carousel')),
+  -- 'multi' のとき message_content は [{type,content,altText?}, ...] の JSON 配列（最大5件・LINE API仕様）
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'carousel', 'multi')),
   message_content TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
