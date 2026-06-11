@@ -1082,27 +1082,38 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       shopifyCustomerId,
     });
 
-    // LINE連携ボーナス（friend_id単位で1回のみ）
+    // LINE連携特典（friend_id単位で1回のみ）
+    // link_reward_type 設定で出し分け:
+    //   'points'（既定）   → ポイント付与（従来どおり300pt）
+    //   'free_shipping'    → 送料無料クーポン発行（2026-06-19 切替予定・6/22新LP対応）
+    // 切替方法: PUT /api/loyalty/settings/link_reward_type  value='free_shipping'
     const bonusEnabledSetting = await getLoyaltySetting(c.env.DB, 'link_bonus_enabled').catch(() => null);
     const bonusPointsSetting = await getLoyaltySetting(c.env.DB, 'link_bonus_points').catch(() => null);
+    const rewardTypeSetting = await getLoyaltySetting(c.env.DB, 'link_reward_type').catch(() => null);
+    const couponExpirySetting = await getLoyaltySetting(c.env.DB, 'link_coupon_expiry_days').catch(() => null);
     const bonusEnabled = (bonusEnabledSetting ?? '1') === '1';
     const bonusPoints = parseInt(bonusPointsSetting ?? '300', 10) || 300;
+    const rewardType = rewardTypeSetting === 'free_shipping' ? 'free_shipping' : 'points';
+    const couponExpiryDays = parseInt(couponExpirySetting ?? '30', 10) || 30;
 
     let bonusAwarded = 0;
+    let couponCode: string | null = null;
+    let couponExpiresAt: string | null = null;
     // UI で「すでに連携済みです」を出し分けるためのフラグ
     let alreadyLinkedSelf = false;
     let alreadyLinkedViaSocialPlus = false;
-    if (bonusEnabled && bonusPoints > 0) {
-      // ① 自社DB上で既にボーナス付与済みかチェック（同じLINEで再連携してももう貰えない）
+    if (bonusEnabled && (bonusPoints > 0 || rewardType === 'free_shipping')) {
+      // ① 自社DB上で既に特典受領済みかチェック（300pt・クーポンどちらの履歴でも対象。
+      //    同じLINEで再連携しても二重には貰えない）
       const existingBonus = await c.env.DB
-        .prepare(`SELECT 1 FROM loyalty_transactions WHERE friend_id = ? AND reason = 'LINE連携ボーナス' LIMIT 1`)
+        .prepare(`SELECT 1 FROM loyalty_transactions WHERE friend_id = ? AND (reason = 'LINE連携ボーナス' OR reason LIKE 'LINE連携特典クーポン%') LIMIT 1`)
         .bind(friend.id)
         .first();
       if (existingBonus) alreadyLinkedSelf = true;
 
       // ② CRM Plus(SocialPLUS)時代に既に連携済みの顧客かチェック
       //    Shopify Customer メタフィールド socialplus.line が入っていれば
-      //    CRM Plus 経由で既に連携済み → ボーナス付与スキップ（自社版への移行二重取り防止）
+      //    CRM Plus 経由で既に連携済み → 特典付与スキップ（自社版への移行二重取り防止）
       const { isAlreadyLinkedViaSocialPlus } = await import('../utils/socialplus-check.js');
       const socialPlusCheck = await isAlreadyLinkedViaSocialPlus(c.env, shopifyCustomerId);
       if (socialPlusCheck.linked) {
@@ -1115,25 +1126,47 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       }
 
       if (!existingBonus && !socialPlusCheck.linked) {
-        // LINE連携ボーナスは通常ポイント（balance、無期限）として付与
-        // limited_balance / limited_expires_at は触らない（PR #112 で未指定なら既存値保持）
-        const beforeBonus = await getLoyaltyPoint(c.env.DB, friend.id);
-        const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
-        await upsertLoyaltyPoint(c.env.DB, friend.id, {
-          balance: newBalance,
-          totalSpent: beforeBonus?.total_spent ?? 0,
-          rank: beforeBonus?.rank ?? 'レギュラー',
-          shopifyCustomerId,
-        });
-        const totalAfter = newBalance + (beforeBonus?.limited_balance ?? 0);
-        await addLoyaltyTransaction(c.env.DB, {
-          friendId: friend.id,
-          type: 'adjust',
-          points: bonusPoints,
-          balanceAfter: totalAfter,
-          reason: 'LINE連携ボーナス',
-        });
-        bonusAwarded = bonusPoints;
+        if (rewardType === 'free_shipping') {
+          // 送料無料クーポンを発行（ポイント残高は変えない）
+          const { issueFreeShippingCoupon } = await import('../services/link-reward-coupon.js');
+          const issued = await issueFreeShippingCoupon(c.env, shopifyCustomerId, couponExpiryDays);
+          if (issued.ok) {
+            couponCode = issued.code;
+            couponExpiresAt = issued.endsAt;
+            // 受領記録（points=0）。再連携時の重複防止ガード（上の existingBonus 判定）に使う。
+            const cur = await getLoyaltyPoint(c.env.DB, friend.id);
+            await addLoyaltyTransaction(c.env.DB, {
+              friendId: friend.id,
+              type: 'adjust',
+              points: 0,
+              balanceAfter: (cur?.balance ?? 0) + (cur?.limited_balance ?? 0),
+              reason: `LINE連携特典クーポン: ${couponCode}`,
+            });
+          } else {
+            // クーポン発行失敗は連携自体を失敗にしない（連携体験優先）。ログで追跡。
+            console.error('[link-shopify] 送料無料クーポン発行失敗:', issued.error);
+          }
+        } else {
+          // LINE連携ボーナスは通常ポイント（balance、無期限）として付与
+          // limited_balance / limited_expires_at は触らない（PR #112 で未指定なら既存値保持）
+          const beforeBonus = await getLoyaltyPoint(c.env.DB, friend.id);
+          const newBalance = (beforeBonus?.balance ?? 0) + bonusPoints;
+          await upsertLoyaltyPoint(c.env.DB, friend.id, {
+            balance: newBalance,
+            totalSpent: beforeBonus?.total_spent ?? 0,
+            rank: beforeBonus?.rank ?? 'レギュラー',
+            shopifyCustomerId,
+          });
+          const totalAfter = newBalance + (beforeBonus?.limited_balance ?? 0);
+          await addLoyaltyTransaction(c.env.DB, {
+            friendId: friend.id,
+            type: 'adjust',
+            points: bonusPoints,
+            balanceAfter: totalAfter,
+            reason: 'LINE連携ボーナス',
+          });
+          bonusAwarded = bonusPoints;
+        }
       }
     }
 
@@ -1173,34 +1206,52 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
     // 保留注文バックフィル
     const backfill = await backfillPendingOrders(c.env.DB, friend.id, shopifyCustomerId);
 
-    // LINEプッシュ通知（連携完了＋ポイント付与、ノンブロッキング）
+    // LINEプッシュ通知（連携完了＋ポイント付与orクーポン、ノンブロッキング）
     try {
       const totalAwarded = bonusAwarded + promoPointsAwarded + backfill.totalPointsAwarded;
-      if (totalAwarded > 0) {
+      if (totalAwarded > 0 || couponCode) {
         const { LineClient } = await import('@line-crm/line-sdk');
         const accountRow = await c.env.DB
           .prepare('SELECT channel_access_token FROM line_accounts WHERE is_active = 1 LIMIT 1')
           .first<{ channel_access_token: string }>();
         const accessToken = accountRow?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
         if (accessToken && lineUserId) {
-          const after = await getLoyaltyPoint(c.env.DB, friend.id);
-          // 過去にクーポンへ変換済みの累計ポイント（type='redeem' の絶対値合計）
-          // 「現在の残高」だけ見せると変換後の残高が表示されて減ったように見えるため
-          // 併記して誤解を防止する。
-          const redeemedRow = await c.env.DB
-            .prepare(`SELECT COALESCE(ABS(SUM(points)), 0) AS used FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem'`)
-            .bind(friend.id)
-            .first<{ used: number }>();
-          const couponConverted = redeemedRow?.used ?? 0;
-
           const lineClient = new LineClient(accessToken);
-          const lines: string[] = ['🎉 ポイントを受け取りました！', ''];
-          if (bonusAwarded > 0) lines.push(`連携ボーナス：+${bonusAwarded}pt`);
-          if (promoPointsAwarded > 0) lines.push(`カードボーナス：+${promoPointsAwarded}pt`);
-          if (backfill.totalPointsAwarded > 0) lines.push(`過去購入ボーナス：+${backfill.totalPointsAwarded}pt`);
-          lines.push('', `現在の残高：${after?.balance ?? 0}pt`);
-          if (couponConverted > 0) lines.push(`クーポン変換済み：${couponConverted}pt`);
-          lines.push('', 'ポイントは次回のお買い物でご利用いただけます。');
+          const lines: string[] = [];
+
+          // ── 送料無料クーポン（link_reward_type='free_shipping' のとき）──
+          if (couponCode) {
+            const expDisp = couponExpiresAt
+              ? new Date(couponExpiresAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'long', day: 'numeric' })
+              : null;
+            lines.push('🎁 LINE連携ありがとうございます！', '');
+            lines.push(`送料無料クーポン：${couponCode}`);
+            if (expDisp) lines.push(`有効期限：${expDisp}`);
+            lines.push('', 'お会計画面のクーポンコード欄に入力すると送料が無料になります（1回限り）。');
+          }
+
+          // ── ポイント付与があった場合（従来どおりの内訳表示）──
+          if (totalAwarded > 0) {
+            const after = await getLoyaltyPoint(c.env.DB, friend.id);
+            // 過去にクーポンへ変換済みの累計ポイント（type='redeem' の絶対値合計）
+            // 「現在の残高」だけ見せると変換後の残高が表示されて減ったように見えるため
+            // 併記して誤解を防止する。
+            const redeemedRow = await c.env.DB
+              .prepare(`SELECT COALESCE(ABS(SUM(points)), 0) AS used FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem'`)
+              .bind(friend.id)
+              .first<{ used: number }>();
+            const couponConverted = redeemedRow?.used ?? 0;
+
+            if (lines.length > 0) lines.push('');
+            lines.push('🎉 ポイントを受け取りました！', '');
+            if (bonusAwarded > 0) lines.push(`連携ボーナス：+${bonusAwarded}pt`);
+            if (promoPointsAwarded > 0) lines.push(`カードボーナス：+${promoPointsAwarded}pt`);
+            if (backfill.totalPointsAwarded > 0) lines.push(`過去購入ボーナス：+${backfill.totalPointsAwarded}pt`);
+            lines.push('', `現在の残高：${after?.balance ?? 0}pt`);
+            if (couponConverted > 0) lines.push(`クーポン変換済み：${couponConverted}pt`);
+            lines.push('', 'ポイントは次回のお買い物でご利用いただけます。');
+          }
+
           await lineClient.pushMessage(lineUserId, [{ type: 'text', text: lines.join('\n') }]);
         }
       }
@@ -1215,8 +1266,12 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
         promoPointsAwarded,
         backfilledOrders: backfill.processed,
         backfilledPoints: backfill.totalPointsAwarded,
+        // 送料無料クーポン（link_reward_type='free_shipping' のときのみ値が入る）
+        couponCode,
+        couponExpiresAt,
         // クライアントUIで「すでに連携済みです」を出すための判定材料。
-        // alreadyLinked が true で bonusAwarded === 0 のとき「既に連携済み」表示にする。
+        // alreadyLinked が true で特典なし（bonusAwarded===0 かつ couponCode なし）のとき
+        // 「既に連携済み」表示にする。
         alreadyLinked: alreadyLinkedSelf || alreadyLinkedViaSocialPlus,
         alreadyLinkedSource: alreadyLinkedViaSocialPlus ? 'crm_plus' : (alreadyLinkedSelf ? 'self' : null),
       },
