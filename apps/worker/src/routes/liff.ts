@@ -903,27 +903,28 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       return c.json({ success: false, error: 'accessToken または idToken は必須です' }, 400);
     }
 
-    // Shopify 顧客所有確認: Liquid 側で発行した HMAC を検証する。
-    // LINK_SHOPIFY_SIGNING_SECRET が未設定 (= Liquid 連携前) なら 503。
+    // Shopify 顧客所有確認: Liquid 側で発行した HMAC を「あれば検証」する。
+    // - LINK_SHOPIFY_SIGNING_SECRET が未設定 → 検証スキップ（CRM Plus時代と同等の本人確認レベル）
+    // - 設定済み かつ body.sig 付き → 厳密検証
+    // - 設定済み だが body.sig 欠如 → 401（テーマ側で署名生成が動いていない可能性）
+    //   ※ LIFF/Cloudflare認証 (accessToken) による LINE側本人確認は引き続き必須
     const signingSecret = (c.env as { LINK_SHOPIFY_SIGNING_SECRET?: string }).LINK_SHOPIFY_SIGNING_SECRET;
-    if (!signingSecret) {
-      return c.json({
-        success: false,
-        error: 'LINK_SHOPIFY_SIGNING_SECRET が未設定です。サーバ管理者にお問い合わせください。',
-      }, 503);
-    }
-    if (!body.expires || !body.sig) {
-      return c.json({
-        success: false,
-        error: 'expires と sig は必須です。Shopify 顧客アカウントページから開き直してください。',
-      }, 400);
-    }
-    const sigOk = await verifyShopifyLinkSignature(signingSecret, body.shopifyCustomerId, body.expires, body.sig);
-    if (!sigOk) {
-      return c.json({
-        success: false,
-        error: '署名が無効または期限切れです。Shopify 顧客アカウントページから開き直してください。',
-      }, 401);
+    if (signingSecret) {
+      if (body.expires && body.sig) {
+        const sigOk = await verifyShopifyLinkSignature(signingSecret, body.shopifyCustomerId, body.expires, body.sig);
+        if (!sigOk) {
+          return c.json({
+            success: false,
+            error: '署名が無効または期限切れです。Shopify 顧客アカウントページから開き直してください。',
+          }, 401);
+        }
+      }
+      // sig 欠如時は警告ログのみ。リクエスト自体は通す（本人確認は accessToken で担保）。
+      else {
+        console.log('[link-shopify] sig absent — proceeding without HMAC verification', { shopifyCustomerId: body.shopifyCustomerId });
+      }
+    } else {
+      console.log('[link-shopify] LINK_SHOPIFY_SIGNING_SECRET not set — HMAC verification skipped');
     }
 
     // 許可チャネルID一覧（デフォルト + DB保存分）

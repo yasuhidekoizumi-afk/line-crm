@@ -163,13 +163,8 @@ export async function initLinkShopify(): Promise<void> {
       });
       return;
     }
-    if (!expires || !sig) {
-      showError('リンクが正しく生成されていません。Shopifyのマイページから開き直してください。', {
-        stage: 'missingSignature',
-      });
-      return;
-    }
-
+    // 署名(expires/sig)はサーバ側で「設定されていれば検証」のモードに切替済み。
+    // テーマがまだ署名生成を入れていない期間は sig 無しで処理を続行する。
     showLoading('LINE連携を処理しています...');
 
     // アクセストークンを取得（LIFFチャネルのopenidスコープ非依存）
