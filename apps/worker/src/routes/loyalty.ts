@@ -26,7 +26,6 @@ import {
   RANK_THRESHOLDS,
   RANK_MULTIPLIERS,
   getFriendByLineUserId,
-  upsertFriend,
   type LoyaltyRank,
   type CampaignCondition,
   type CampaignActionType,
@@ -38,6 +37,7 @@ import { refundUnusedPointCode } from '../services/loyalty-code-refund.js';
 import { runPurchaseBackfill } from '../services/loyalty-backfill-purchases.js';
 import { previewUnusedCodeRefunds } from '../services/loyalty-code-refund-preview.js';
 import { sweepUnusedPointCodes } from '../services/loyalty-unused-code-sweep.js';
+import { rescueSocialplusCustomer, sweepSocialplusUnlinked } from '../services/loyalty-socialplus-rescue.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
@@ -1516,7 +1516,6 @@ loyalty.post('/api/loyalty/admin/refund-specific-codes', async (c) => {
 //   認証必須(authMiddleware: Bearer API_KEY)。
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
-  let step = 'init';
   try {
     const scid = (c.req.query('scid') ?? '').trim();
     if (!scid) return c.json({ success: false, error: 'scid は必須です' }, 400);
@@ -1524,107 +1523,36 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
     if (bonusSince && !/^\d{4}-\d{2}-\d{2}$/.test(bonusSince)) {
       return c.json({ success: false, error: 'bonusSince は YYYY-MM-DD 形式で指定してください' }, 400);
     }
-
-    // 冪等①: 既に自社連携済みなら何もしない（二重付与防止）
-    const existing = await getLoyaltyPointByShopifyCustomerId(c.env.DB, scid);
-    if (existing) {
-      return c.json({ success: true, data: { scid, action: 'already_linked', friendId: existing.friend_id, balance: existing.balance } });
-    }
-
-    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
-    const adminToken = await getShopifyAdminToken(c.env);
-    if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
-
-    // Shopify顧客の socialplus.line(LINE UID) と facts.birth_date(誕生日) を取得
-    const gqlRes = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
-      method: 'POST',
-      headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: `query($id:ID!){ customer(id:$id){ displayName createdAt line: metafield(namespace:"socialplus", key:"line"){ value } bday: metafield(namespace:"facts", key:"birth_date"){ value } } }`,
-        variables: { id: `gid://shopify/Customer/${scid}` },
-      }),
-    });
-    if (!gqlRes.ok) return c.json({ success: false, error: `Shopify ${gqlRes.status}` }, 500);
-    const gj = (await gqlRes.json()) as {
-      data?: { customer?: { displayName?: string | null; createdAt?: string | null; line?: { value?: string } | null; bday?: { value?: string } | null } | null };
-      errors?: unknown;
-    };
-    if (gj.errors) return c.json({ success: false, error: 'Shopify GraphQL error' }, 500);
-    const lineUid = (gj.data?.customer?.line?.value ?? '').trim();
-    const birthDate = (gj.data?.customer?.bday?.value ?? '').trim();
-    const displayName = (gj.data?.customer?.displayName ?? '').trim() || null;
-    if (!lineUid) {
-      // SocialPLUSのLINE UIDが無い＝LINE連携痕跡なし。救済対象外。
-      return c.json({ success: true, data: { scid, action: 'no_socialplus_line' } });
-    }
-
-    // friends 行を取得/作成する。loyalty_points.friend_id は friends.id(UUID) を参照するため、
-    // LINE UID をそのまま friend_id にすると FOREIGN KEY 制約に失敗する。upsertFriend は
-    // line_user_id で既存を探し、無ければ作成して Friend(.id=UUID) を返す。
-    step = 'upsertFriend';
-    const friend = await upsertFriend(c.env.DB, { lineUserId: lineUid, displayName });
-    const friendId = friend.id;
-
-    // 冪等②: この friend に既に loyalty 行がある場合は「紐付けのみ」（ボーナス付与なし＝二重防止）
-    const byFriend = await getLoyaltyPoint(c.env.DB, friendId);
-    if (byFriend) {
-      await upsertLoyaltyPoint(c.env.DB, friendId, {
-        balance: byFriend.balance,
-        totalSpent: byFriend.total_spent ?? 0,
-        rank: (byFriend.rank as LoyaltyRank) ?? determineRank(byFriend.total_spent ?? 0),
-        shopifyCustomerId: scid,
-      });
-      return c.json({ success: true, data: { scid, friendId, action: 'linked_only_existing_row' } });
-    }
-
-    // 新規: 自社連携＋未付与ボーナスを付与。
-    // bonusSince 指定時は「顧客作成日がそれ以降」の人だけボーナス（ISO同士の文字列比較でOK）。
-    const createdAt = (gj.data?.customer?.createdAt ?? '').trim();
-    const bonusEligible = !bonusSince || (!!createdAt && createdAt >= `${bonusSince}T00:00:00Z`);
-    const lineBonus = bonusEligible ? 300 : 0;
-    const birthdayBonus = bonusEligible && birthDate ? 100 : 0;
-
-    if (lineBonus === 0) {
-      // 紐付けのみ（移管前から連携していたと推定。今後の購入ポイントはこれで貯まるようになる）
-      step = 'upsertLoyaltyPoint(linkOnly)';
-      await upsertLoyaltyPoint(c.env.DB, friendId, {
-        balance: 0, totalSpent: 0, rank: determineRank(0), shopifyCustomerId: scid,
-      });
-      return c.json({
-        success: true,
-        data: { scid, friendId, lineUid, action: 'linked_no_bonus', createdAt: createdAt || null },
-      });
-    }
-
-    // ① LINE連携ボーナス
-    step = 'upsertLoyaltyPoint(line)';
-    await upsertLoyaltyPoint(c.env.DB, friendId, {
-      balance: lineBonus, totalSpent: 0, rank: determineRank(0), shopifyCustomerId: scid,
-    });
-    step = 'addLoyaltyTransaction(line)';
-    await addLoyaltyTransaction(c.env.DB, {
-      friendId, type: 'award', points: lineBonus, balanceAfter: lineBonus,
-      reason: 'LINE連携ボーナス: +300pt', expiryDays: 0,
-    });
-
-    // ② 誕生日登録ボーナス（誕生日が登録済みのときのみ）
-    if (birthdayBonus > 0) {
-      const newBalance = lineBonus + birthdayBonus;
-      await upsertLoyaltyPoint(c.env.DB, friendId, {
-        balance: newBalance, totalSpent: 0, rank: determineRank(0), shopifyCustomerId: scid,
-      });
-      await addLoyaltyTransaction(c.env.DB, {
-        friendId, type: 'award', points: birthdayBonus, balanceAfter: newBalance,
-        reason: '誕生日登録ボーナス: +100pt', expiryDays: 0,
-      });
-    }
-
-    return c.json({
-      success: true,
-      data: { scid, friendId, lineUid, action: 'rescued', lineBonus, birthdayBonus, awarded: lineBonus + birthdayBonus, birthDate: birthDate || null, createdAt: createdAt || null },
-    });
+    // 実体は services/loyalty-socialplus-rescue.ts（日次cronと同じロジック）
+    const r = await rescueSocialplusCustomer(c.env, scid, { bonusSince: bonusSince || undefined });
+    if (r.action === 'error') return c.json({ success: false, step: r.step, error: r.error }, 500);
+    return c.json({ success: true, data: r });
   } catch (e) {
-    return c.json({ success: false, step, error: e instanceof Error ? e.message : 'rescue-socialplus-link failed' }, 500);
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'rescue-socialplus-link failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/rescue-socialplus-sweep?sinceHours=48&limit=30
+//   日次cron(自動救済)と同じスイープを手動実行する（設定フラグ無視=force）。動作テスト用。
+//   「最近更新された顧客」だけ走査して新規被害を回収する軽量版。
+//   認証必須(authMiddleware: Bearer API_KEY)。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/rescue-socialplus-sweep', async (c) => {
+  try {
+    const toIntQ = (v: string | undefined): number | undefined => {
+      if (v === undefined) return undefined;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const r = await sweepSocialplusUnlinked(c.env, {
+      force: true,
+      sinceHours: toIntQ(c.req.query('sinceHours')),
+      limit: toIntQ(c.req.query('limit')),
+    });
+    return c.json({ success: true, data: r });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'rescue-socialplus-sweep failed' }, 500);
   }
 });
 
