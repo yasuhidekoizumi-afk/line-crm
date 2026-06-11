@@ -632,6 +632,8 @@ export default function RichMenusPage() {
   const [formError, setFormError] = useState('')
   const [busyMenuId, setBusyMenuId] = useState<string | null>(null)
   const [duplicating, setDuplicating] = useState<string | null>(null)
+  // editingId が入っていれば「編集モード」（保存時に旧メニューを置き換え）。null なら新規。
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const [showAliasForm, setShowAliasForm] = useState(false)
   const [aliasForm, setAliasForm] = useState<{ richMenuAliasId: string; richMenuId: string }>({
@@ -796,7 +798,41 @@ export default function RichMenusPage() {
     setForm(initialForm)
     setSelectedAreaIndex(null)
     setFormError('')
+    setEditingId(null)
     setShowCreate(true)
+  }
+
+  // 既存リッチメニューを「そのまま編集」する。
+  // LINE仕様上は richMenu は不変なので、保存時に内部で「新規作成→紐付け切替→旧削除」を行う。
+  const handleEdit = async (menu: RichMenuPayload) => {
+    const id = menu.richMenuId
+    if (!id) return
+    setDuplicating(id) // 同じローディング表示を再利用
+    setError('')
+    try {
+      const { base64, contentType } = await api.richMenus.imageBase64(id)
+      const layoutKey = inferLayoutFromAreas(menu)
+      setForm({
+        name: menu.name,
+        chatBarText: menu.chatBarText,
+        layout: layoutKey,
+        selected: defaultId === id, // 元がデフォルトなら維持
+        areas: menu.areas.map((a) => ({ ...a, action: { ...a.action } })),
+        imageBase64: base64,
+        imageContentType: contentType,
+        imageWidth: menu.size.width,
+        imageHeight: menu.size.height,
+        imageWarning: null,
+      })
+      setSelectedAreaIndex(null)
+      setFormError('')
+      setEditingId(id) // ← 編集モード
+      setShowCreate(true)
+    } catch (err) {
+      setError(`編集の読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setDuplicating(null)
+    }
   }
 
   const handleDuplicate = async (menu: RichMenuPayload) => {
@@ -821,6 +857,7 @@ export default function RichMenusPage() {
       })
       setSelectedAreaIndex(null)
       setFormError('')
+      setEditingId(null) // ← 複製は新規扱い
       setShowCreate(true)
     } catch (err) {
       setError(`複製に失敗しました: ${err instanceof Error ? err.message : String(err)}`)
@@ -862,7 +899,34 @@ export default function RichMenusPage() {
         setFormError(`作成は成功しましたが画像アップロードに失敗: ${upload.error}`)
         return
       }
-      if (form.selected) {
+      // 編集モード時: 旧メニューに紐付いていた alias を新IDへ付け替え + デフォルトの引継ぎ + 旧削除
+      if (editingId) {
+        // 1. alias の付け替え（旧IDを指していたエイリアスを全部新IDに更新）
+        const targetAliases = aliases.filter((a) => a.richMenuId === editingId)
+        for (const a of targetAliases) {
+          const upd = await api.richMenuAliases.update(a.richMenuAliasId, richMenuId)
+          if (!upd.success) {
+            setFormError(`タブ切替先「${a.richMenuAliasId}」の付け替えに失敗: ${upd.error}`)
+            return
+          }
+        }
+        // 2. デフォルト切替（元がデフォルトで、フォームでもselected=true なら新IDをデフォルトに）
+        const wasDefault = defaultId === editingId
+        if (form.selected || wasDefault) {
+          const setDef = await api.richMenus.setDefault(richMenuId)
+          if (!setDef.success) {
+            setFormError(`画像登録は成功しましたが既定設定に失敗: ${setDef.error}`)
+            return
+          }
+        }
+        // 3. 旧メニュー削除（失敗してもUIは進める：エラーは表示のみ）
+        try {
+          await api.richMenus.delete(editingId)
+        } catch (e) {
+          setError(`旧メニューの削除に失敗（手動で削除してください）: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      } else if (form.selected) {
+        // 新規モードかつ selected=true
         const setDef = await api.richMenus.setDefault(richMenuId)
         if (!setDef.success) {
           setFormError(`画像登録は成功しましたが既定設定に失敗: ${setDef.error}`)
@@ -871,9 +935,10 @@ export default function RichMenusPage() {
       }
       setShowCreate(false)
       setForm(initialForm)
+      setEditingId(null)
       await load()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : '作成に失敗しました')
+      setFormError(err instanceof Error ? err.message : (editingId ? '更新に失敗しました' : '作成に失敗しました'))
     } finally {
       setSaving(false)
     }
@@ -1244,12 +1309,15 @@ export default function RichMenusPage() {
                     className="flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
                     style={{ backgroundColor: '#06C755' }}
                   >
-                    {saving ? '作成中...' : '作成して反映'}
+                    {saving
+                      ? (editingId ? '保存中...' : '作成中...')
+                      : (editingId ? '保存して反映' : '作成して反映')}
                   </button>
                   <button
                     onClick={() => {
                       setShowCreate(false)
                       setFormError('')
+                      setEditingId(null)
                     }}
                     className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                   >
@@ -1318,11 +1386,19 @@ export default function RichMenusPage() {
                       </button>
                     )}
                     <button
+                      onClick={() => handleEdit(menu)}
+                      disabled={isBusy || isDuplicating}
+                      className="px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
+                      style={{ backgroundColor: '#06C755' }}
+                    >
+                      {isDuplicating ? '読み込み中...' : '編集'}
+                    </button>
+                    <button
                       onClick={() => handleDuplicate(menu)}
                       disabled={isBusy || isDuplicating}
                       className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50"
                     >
-                      {isDuplicating ? '複製中...' : '複製して編集'}
+                      複製
                     </button>
                     <button
                       onClick={() => handleDelete(id)}
