@@ -1184,12 +1184,23 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
         const accessToken = accountRow?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
         if (accessToken && lineUserId) {
           const after = await getLoyaltyPoint(c.env.DB, friend.id);
+          // 過去にクーポンへ変換済みの累計ポイント（type='redeem' の絶対値合計）
+          // 「現在の残高」だけ見せると変換後の残高が表示されて減ったように見えるため
+          // 併記して誤解を防止する。
+          const redeemedRow = await c.env.DB
+            .prepare(`SELECT COALESCE(ABS(SUM(points)), 0) AS used FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem'`)
+            .bind(friend.id)
+            .first<{ used: number }>();
+          const couponConverted = redeemedRow?.used ?? 0;
+
           const lineClient = new LineClient(accessToken);
           const lines: string[] = ['🎉 ポイントを受け取りました！', ''];
           if (bonusAwarded > 0) lines.push(`連携ボーナス：+${bonusAwarded}pt`);
           if (promoPointsAwarded > 0) lines.push(`カードボーナス：+${promoPointsAwarded}pt`);
           if (backfill.totalPointsAwarded > 0) lines.push(`過去購入ボーナス：+${backfill.totalPointsAwarded}pt`);
-          lines.push('', `現在の残高：${after?.balance ?? 0}pt`, '', 'ポイントは次回のお買い物でご利用いただけます。');
+          lines.push('', `現在の残高：${after?.balance ?? 0}pt`);
+          if (couponConverted > 0) lines.push(`クーポン変換済み：${couponConverted}pt`);
+          lines.push('', 'ポイントは次回のお買い物でご利用いただけます。');
           await lineClient.pushMessage(lineUserId, [{ type: 'text', text: lines.join('\n') }]);
         }
       }
