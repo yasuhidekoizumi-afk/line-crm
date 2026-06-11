@@ -1502,6 +1502,100 @@ loyalty.post('/api/loyalty/admin/refund-specific-codes', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/rescue-socialplus-link?scid=<ShopifyCustomerId>
+//   旧CRM PLUS(SocialPLUS)の id-connect-line ページでLINE連携したが、自社ポイントに
+//   未登録の顧客を救済する。Shopify顧客の `socialplus.line`(LINE UID) で自社に紐付け、
+//   未付与の **LINE連携ボーナス+300pt** と(誕生日登録済なら) **誕生日登録ボーナス+100pt** を付与。
+//   - 冪等: 既に自社連携(loyalty_points に shopify_customer_id 行あり)なら何もしない。
+//     LINE UID 側に既存行がある場合は「紐付けのみ(ボーナス付与なし=二重防止)」。
+//   - 通知なし(addLoyaltyTransaction 直書き)。購入ポイントは別途 backfill-purchases で。
+//   認証必須(authMiddleware: Bearer API_KEY)。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/rescue-socialplus-link', async (c) => {
+  try {
+    const scid = (c.req.query('scid') ?? '').trim();
+    if (!scid) return c.json({ success: false, error: 'scid は必須です' }, 400);
+
+    // 冪等①: 既に自社連携済みなら何もしない（二重付与防止）
+    const existing = await getLoyaltyPointByShopifyCustomerId(c.env.DB, scid);
+    if (existing) {
+      return c.json({ success: true, data: { scid, action: 'already_linked', friendId: existing.friend_id, balance: existing.balance } });
+    }
+
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = await getShopifyAdminToken(c.env);
+    if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+
+    // Shopify顧客の socialplus.line(LINE UID) と facts.birth_date(誕生日) を取得
+    const gqlRes = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query($id:ID!){ customer(id:$id){ line: metafield(namespace:"socialplus", key:"line"){ value } bday: metafield(namespace:"facts", key:"birth_date"){ value } } }`,
+        variables: { id: `gid://shopify/Customer/${scid}` },
+      }),
+    });
+    if (!gqlRes.ok) return c.json({ success: false, error: `Shopify ${gqlRes.status}` }, 500);
+    const gj = (await gqlRes.json()) as {
+      data?: { customer?: { line?: { value?: string } | null; bday?: { value?: string } | null } | null };
+      errors?: unknown;
+    };
+    if (gj.errors) return c.json({ success: false, error: 'Shopify GraphQL error' }, 500);
+    const lineUid = (gj.data?.customer?.line?.value ?? '').trim();
+    const birthDate = (gj.data?.customer?.bday?.value ?? '').trim();
+    if (!lineUid) {
+      // SocialPLUSのLINE UIDが無い＝LINE連携痕跡なし。救済対象外。
+      return c.json({ success: true, data: { scid, action: 'no_socialplus_line' } });
+    }
+
+    const friendId = lineUid;
+    // 冪等②: LINE UID 側に既存行がある場合は「紐付けのみ」（ボーナスは付与しない＝二重防止）
+    const byFriend = await getLoyaltyPoint(c.env.DB, friendId);
+    if (byFriend) {
+      await upsertLoyaltyPoint(c.env.DB, friendId, {
+        balance: byFriend.balance,
+        totalSpent: byFriend.total_spent ?? 0,
+        rank: (byFriend.rank as LoyaltyRank) ?? determineRank(byFriend.total_spent ?? 0),
+        shopifyCustomerId: scid,
+      });
+      return c.json({ success: true, data: { scid, friendId, action: 'linked_only_existing_row' } });
+    }
+
+    // 新規: 自社連携＋未付与ボーナスを付与
+    const lineBonus = 300;
+    const birthdayBonus = birthDate ? 100 : 0;
+
+    // ① LINE連携ボーナス
+    await upsertLoyaltyPoint(c.env.DB, friendId, {
+      balance: lineBonus, totalSpent: 0, rank: determineRank(0), shopifyCustomerId: scid,
+    });
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId, type: 'award', points: lineBonus, balanceAfter: lineBonus,
+      reason: 'LINE連携ボーナス: +300pt', expiryDays: 0,
+    });
+
+    // ② 誕生日登録ボーナス（誕生日が登録済みのときのみ）
+    if (birthdayBonus > 0) {
+      const newBalance = lineBonus + birthdayBonus;
+      await upsertLoyaltyPoint(c.env.DB, friendId, {
+        balance: newBalance, totalSpent: 0, rank: determineRank(0), shopifyCustomerId: scid,
+      });
+      await addLoyaltyTransaction(c.env.DB, {
+        friendId, type: 'award', points: birthdayBonus, balanceAfter: newBalance,
+        reason: '誕生日登録ボーナス: +100pt', expiryDays: 0,
+      });
+    }
+
+    return c.json({
+      success: true,
+      data: { scid, friendId, action: 'rescued', lineBonus, birthdayBonus, awarded: lineBonus + birthdayBonus, birthDate: birthDate || null },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'rescue-socialplus-link failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
 // POST /api/loyalty/campaign-award — キャンペーンポイント付与（LP 等から呼ぶ）
 //
 // 8周年 LINE 連携特典など、定義済みキャンペーン (campaign_key) に対して
