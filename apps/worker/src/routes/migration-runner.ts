@@ -131,4 +131,52 @@ migrationRunner.post('/api/admin/run-migration-multi-message', async (c) => {
   return c.json({ success: errors.length === 0, results, errors });
 });
 
+// LINEテンプレートの複数メッセージ対応（migration 041）。
+// templates.message_type CHECK に 'multi' を追加。冪等：既に 'multi' があれば SKIP。
+migrationRunner.post('/api/admin/run-migration-template-multi', async (c) => {
+  const results: string[] = [];
+  const errors: string[] = [];
+
+  // 現在の CHECK 制約に 'multi' があるか確認
+  let alreadyApplied = false;
+  try {
+    const row = await c.env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='templates'").first<{ sql: string }>();
+    if (row?.sql?.includes("'multi'")) {
+      alreadyApplied = true;
+      results.push('SKIP: already applied (CHECK contains multi)');
+    }
+  } catch (e: unknown) {
+    errors.push('FAIL: schema check: ' + (e instanceof Error ? e.message : String(e)));
+  }
+
+  if (!alreadyApplied && errors.length === 0) {
+    try {
+      await c.env.DB.prepare("ALTER TABLE templates RENAME TO templates_old").run();
+      results.push('OK: renamed to templates_old');
+
+      await c.env.DB.prepare(`CREATE TABLE templates (
+        id              TEXT PRIMARY KEY,
+        name            TEXT NOT NULL,
+        category        TEXT NOT NULL DEFAULT 'general',
+        message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'carousel', 'multi')),
+        message_content TEXT NOT NULL,
+        created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+        updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+      )`).run();
+      results.push('OK: new templates created');
+
+      await c.env.DB.prepare(`INSERT INTO templates (id, name, category, message_type, message_content, created_at, updated_at)
+        SELECT id, name, category, message_type, message_content, created_at, updated_at FROM templates_old`).run();
+      results.push('OK: data migrated');
+
+      await c.env.DB.prepare("DROP TABLE templates_old").run();
+      results.push('OK: templates_old dropped');
+    } catch (e: unknown) {
+      errors.push('FAIL: recreation: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
+  return c.json({ success: errors.length === 0, results, errors });
+});
+
 export { migrationRunner };

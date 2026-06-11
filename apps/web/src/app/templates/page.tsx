@@ -4,6 +4,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import MessageBlocksEditor, {
+  type Block,
+  blocksToPayload,
+  payloadToBlocks,
+} from '@/components/messages/message-blocks-editor'
+import MessageBlocksPreview from '@/components/messages/message-blocks-preview'
 
 interface Template {
   id: string
@@ -24,8 +30,15 @@ const messageTypeLabels: Record<string, string> = {
 interface CreateFormState {
   name: string
   category: string
+  // 互換用に messageType/messageContent も保持（DBに保存する最終形）
+  // 編集状態は blocks（複数メッセージ）で管理し、保存時に変換する
   messageType: string
   messageContent: string
+  blocks: Block[]
+}
+
+function emptyTextBlock(): Block {
+  return { id: 'b_init', type: 'text', text: '' }
 }
 
 function formatDate(iso: string): string {
@@ -70,6 +83,7 @@ export default function TemplatesPage() {
     category: '',
     messageType: 'text',
     messageContent: '',
+    blocks: [emptyTextBlock()],
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -101,16 +115,20 @@ export default function TemplatesPage() {
     new Set(templates.map((t) => t.category).filter(Boolean))
   )
 
-  // 編集開始（既存テンプレートをフォームに流し込み）
+  // 編集開始（既存テンプレートをフォームに流し込み・blocks に展開）
   const handleStartEdit = (t: Template) => {
     setEditingId(t.id)
     setShowCreate(true)
     setFormError('')
+    const blocks = t.messageContent.trim()
+      ? payloadToBlocks(t.messageType, t.messageContent)
+      : []
     setForm({
       name: t.name,
       category: t.category,
       messageType: t.messageType,
       messageContent: t.messageContent,
+      blocks: blocks.length > 0 ? blocks : [emptyTextBlock()],
     })
   }
 
@@ -119,7 +137,7 @@ export default function TemplatesPage() {
     setShowCreate(false)
     setEditingId(null)
     setFormError('')
-    setForm({ name: '', category: '', messageType: 'text', messageContent: '' })
+    setForm({ name: '', category: '', messageType: 'text', messageContent: '', blocks: [emptyTextBlock()] })
   }
 
   // 保存（編集中なら更新、それ以外は新規作成）
@@ -132,18 +150,34 @@ export default function TemplatesPage() {
       setFormError('カテゴリを入力してください')
       return
     }
-    if (!form.messageContent.trim()) {
-      setFormError('メッセージ内容を入力してください')
+    if (form.blocks.length === 0) {
+      setFormError('メッセージブロックを1件以上追加してください')
       return
+    }
+    if (form.blocks.length > 5) {
+      setFormError('1テンプレートあたりのメッセージは最大5件です')
+      return
+    }
+    for (let i = 0; i < form.blocks.length; i++) {
+      const b = form.blocks[i]
+      const n = `#${i + 1}`
+      if (b.type === 'text' && !b.text.trim()) { setFormError(`${n} テキストを入力してください`); return }
+      if (b.type === 'image' && !b.originalContentUrl.trim()) { setFormError(`${n} 画像URLを入力してください`); return }
+      if (b.type === 'flex') {
+        if (!b.contents.trim()) { setFormError(`${n} Flexの内容を入力してください`); return }
+        try { JSON.parse(b.contents) } catch { setFormError(`${n} FlexメッセージのJSONが無効です`); return }
+      }
     }
     setSaving(true)
     setFormError('')
     try {
+      // blocks → 保存形式（1件なら従来形式・複数なら 'multi'）
+      const msg = blocksToPayload(form.blocks)
       const payload = {
         name: form.name,
         category: form.category,
-        messageType: form.messageType,
-        messageContent: form.messageContent,
+        messageType: msg.messageType,
+        messageContent: msg.messageContent,
       }
       const res = editingId
         ? await api.templates.update(editingId, payload)
@@ -177,7 +211,7 @@ export default function TemplatesPage() {
         title="LINEテンプレート"
         action={
           <button
-            onClick={() => { setEditingId(null); setForm({ name: '', category: '', messageType: 'text', messageContent: '' }); setFormError(''); setShowCreate(true) }}
+            onClick={() => { setEditingId(null); setForm({ name: '', category: '', messageType: 'text', messageContent: '', blocks: [emptyTextBlock()] }); setFormError(''); setShowCreate(true) }}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
             style={{ backgroundColor: '#06C755' }}
           >
@@ -230,8 +264,8 @@ export default function TemplatesPage() {
           <h2 className="text-sm font-semibold text-gray-800 mb-4">
             {editingId ? 'テンプレートを編集' : '新規テンプレートを作成'}
           </h2>
-          <div className="space-y-4 max-w-lg">
-            <div>
+          <div className="space-y-4 max-w-5xl">
+            <div className="max-w-lg">
               <label className="block text-xs font-medium text-gray-600 mb-1">テンプレート名 <span className="text-red-500">*</span></label>
               <input
                 type="text"
@@ -241,7 +275,7 @@ export default function TemplatesPage() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </div>
-            <div>
+            <div className="max-w-lg">
               <label className="block text-xs font-medium text-gray-600 mb-1">カテゴリ <span className="text-red-500">*</span></label>
               <input
                 type="text"
@@ -251,27 +285,21 @@ export default function TemplatesPage() {
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
               />
             </div>
+            {/* メッセージ：ブロックを縦に積む（最大5件・一斉配信と同じUI）＋右にスマホ風プレビュー */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">メッセージタイプ</label>
-              <select
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
-                value={form.messageType}
-                onChange={(e) => setForm({ ...form, messageType: e.target.value })}
-              >
-                <option value="text">テキスト</option>
-                <option value="image">画像</option>
-                <option value="flex">Flex</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">メッセージ内容 <span className="text-red-500">*</span></label>
-              <textarea
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
-                rows={4}
-                placeholder="メッセージ内容を入力してください"
-                value={form.messageContent}
-                onChange={(e) => setForm({ ...form, messageContent: e.target.value })}
-              />
+              <label className="block text-xs font-medium text-gray-600 mb-2">
+                メッセージ <span className="text-red-500">*</span>
+                <span className="text-xs text-gray-400 ml-2">テキスト・画像・Flexを縦に追加できます（最大5件）</span>
+              </label>
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+                <MessageBlocksEditor
+                  value={form.blocks}
+                  onChange={(blocks) => setForm({ ...form, blocks })}
+                />
+                <div className="lg:sticky lg:top-4 lg:self-start">
+                  <MessageBlocksPreview blocks={form.blocks} />
+                </div>
+              </div>
             </div>
 
             {formError && <p className="text-xs text-red-600">{formError}</p>}
