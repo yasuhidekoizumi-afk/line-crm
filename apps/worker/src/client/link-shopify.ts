@@ -51,11 +51,28 @@ function showLoading(message: string): void {
   `);
 }
 
-function showSuccess(data: { bonusAwarded: number; backfilledOrders: number; backfilledPoints: number }): void {
-  const { bonusAwarded, backfilledOrders, backfilledPoints } = data;
+function showSuccess(data: {
+  bonusAwarded: number;
+  backfilledOrders: number;
+  backfilledPoints: number;
+  alreadyLinked?: boolean;
+  alreadyLinkedSource?: 'crm_plus' | 'self' | null;
+}): void {
+  const { bonusAwarded, backfilledOrders, backfilledPoints, alreadyLinked, alreadyLinkedSource } = data;
   const totalPoints = bonusAwarded + backfilledPoints;
   const lines: string[] = [];
-  if (bonusAwarded > 0) {
+
+  // ① 既連携で新規ボーナスが付かなかった場合は「すでに連携済み」を明示
+  //    （CRM Plus 経由 / 自社版での過去連携の両方が該当）
+  if (alreadyLinked && bonusAwarded === 0) {
+    const source = alreadyLinkedSource === 'crm_plus'
+      ? '以前ご利用いただいたLINE連携サービス'
+      : '当店のポイントシステム';
+    lines.push(
+      `<strong>すでに連携済みのアカウントです</strong>`,
+      `${source}で<br>LINE連携ボーナスは過去に受け取り済みです。`,
+    );
+  } else if (bonusAwarded > 0) {
     lines.push(`🎁 LINE連携ボーナス <strong>+${bonusAwarded}pt</strong>`);
   } else {
     lines.push('連携が完了しました！');
@@ -67,10 +84,13 @@ function showSuccess(data: { bonusAwarded: number; backfilledOrders: number; bac
     ? `<p class="message" style="margin-top:16px;font-size:15px;color:#06C755;font-weight:700;">合計 +${totalPoints}pt を付与しました</p>`
     : '';
 
+  // 既連携時の見出しは「LINE連携完了！」ではなく「連携済みです」に
+  const heading = (alreadyLinked && bonusAwarded === 0) ? '連携済みです' : 'LINE連携完了！';
+
   render(`
     <div class="card">
       <div class="check-icon">✓</div>
-      <h2>LINE連携完了！</h2>
+      <h2>${heading}</h2>
       <p class="message">${lines.join('<br>')}</p>
       ${totalLine}
       <button id="closeBtn" class="close-btn" style="margin-top:24px;">閉じる</button>
@@ -198,7 +218,7 @@ export async function initLinkShopify(): Promise<void> {
       return;
     }
 
-    let json: { success: boolean; data?: { bonusAwarded: number; backfilledOrders: number; backfilledPoints: number }; error?: string } | null = null;
+    let json: { success: boolean; data?: { bonusAwarded: number; backfilledOrders: number; backfilledPoints: number; alreadyLinked?: boolean; alreadyLinkedSource?: 'crm_plus' | 'self' | null }; error?: string } | null = null;
     try {
       json = JSON.parse(rawBody);
     } catch {
@@ -219,7 +239,7 @@ export async function initLinkShopify(): Promise<void> {
       return;
     }
 
-    showSuccess(json.data ?? { bonusAwarded: 0, backfilledOrders: 0, backfilledPoints: 0 });
+    showSuccess(json.data ?? { bonusAwarded: 0, backfilledOrders: 0, backfilledPoints: 0, alreadyLinked: false, alreadyLinkedSource: null });
   } catch (err) {
     showError(err instanceof Error ? err.message : '連携処理中にエラーが発生しました。', {
       stage: 'unhandled',
