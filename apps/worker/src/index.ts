@@ -293,6 +293,15 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
         .then((r) => { if (r.enabled && (r.refunded > 0 || r.errors > 0)) console.log(`[unused-code-sweep] refunded=${r.refunded}(+${r.refundedPoints}pt) errors=${r.errors}`); })
         .catch((e) => console.error('[unused-code-sweep] error:', e)),
     );
+    // SocialPLUS(旧CRM PLUS)連携の自動救済（設定 socialplus_auto_rescue_enabled='1' のときのみ動作）。
+    // 旧 id-connect-line ページ経由で連携した新規顧客を毎日回収し、自社ポイントへ紐付け＋
+    // 未付与ボーナス(連携300/誕生日100)を補填する（ページを自社版へ切り替えるまでの暫定運用）。
+    jobs.push(
+      import('./services/loyalty-socialplus-rescue.js')
+        .then(({ sweepSocialplusUnlinked }) => sweepSocialplusUnlinked(env))
+        .then((r) => { if (r.enabled && (r.affected > 0 || r.errors > 0)) console.log(`[socialplus-rescue] affected=${r.affected} rescued=${r.rescued}(+${r.awardedPoints}pt) linkedOnly=${r.linkedOnly} errors=${r.errors}`); })
+        .catch((e) => console.error('[socialplus-rescue] error:', e)),
+    );
   } else {
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
