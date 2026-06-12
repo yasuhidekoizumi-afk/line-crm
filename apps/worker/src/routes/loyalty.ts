@@ -968,6 +968,10 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
       expiryDays: 0, // 通常ポイント (balance) として無期限付与のため
     });
 
+    // 誕生日クーポン自動配信用に、誕生日を自社D1にも保存（毎日Shopify全件走査を避けるため）
+    await c.env.DB.prepare(`UPDATE loyalty_points SET birthday = ? WHERE friend_id = ?`)
+      .bind(birthday, friendId).run().catch(() => {});
+
     // 4. LINE or メール通知（非同期・失敗しても付与には影響させない）
     c.executionCtx?.waitUntil(
       (async () => {
@@ -1624,6 +1628,74 @@ loyalty.post('/api/loyalty/admin/scan-socialplus-unlinked', async (c) => {
     return c.json({ success: true, data: { scanned, withSocialplus, linked, affected, affectedSample, nextCursor, hasMore } });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'scan-socialplus-unlinked failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/birthday-coupon-run?mode=dryrun|test|live&force=1&today=MM-DD
+//   誕生日クーポン処理を手動実行。mode/force で上書き（未指定は設定値）。
+//   dryrun=対象を数えるだけ(発行も送信もしない) / test=テスト送り先(河原さん)だけに発行＋送信 /
+//   live=当日誕生日の全対象へ発行＋送信。today=MM-DD で「今日」を上書き(動作確認用)。認証必須。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/birthday-coupon-run', async (c) => {
+  try {
+    const modeQ = c.req.query('mode');
+    const mode = modeQ === 'dryrun' || modeQ === 'test' || modeQ === 'live' ? modeQ : undefined;
+    const force = c.req.query('force') === '1';
+    const todayQ = c.req.query('today') ?? '';
+    const todayMMDD = /^\d{2}-\d{2}$/.test(todayQ) ? todayQ : undefined;
+    const { processBirthdayCoupons } = await import('../services/birthday-coupon.js');
+    const r = await processBirthdayCoupons(c.env, { mode, force, todayMMDD });
+    return c.json({ success: true, data: r });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'birthday-coupon-run failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/birthday-backfill
+//   既に誕生日登録済み(誕生日登録ボーナス履歴あり)で D1 birthday 未設定の連携顧客について、
+//   Shopify の facts.birth_date を読んで loyalty_points.birthday に書き写す（一度だけ実行）。
+//   登録者は少数なので対象を絞って取得（全件走査しない）。認証必須・読み込みのみ→自社DB更新。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/birthday-backfill', async (c) => {
+  try {
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = await getShopifyAdminToken(c.env);
+    if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+
+    const rows = await c.env.DB
+      .prepare(
+        `SELECT lp.shopify_customer_id AS scid, lp.friend_id AS fid
+         FROM loyalty_points lp
+         WHERE lp.shopify_customer_id IS NOT NULL AND lp.birthday IS NULL
+           AND EXISTS (SELECT 1 FROM loyalty_transactions t WHERE t.friend_id = lp.friend_id AND t.reason LIKE '誕生日登録ボーナス%')
+         LIMIT 500`,
+      )
+      .all<{ scid: string; fid: string }>();
+    const candidates = rows.results ?? [];
+
+    let updated = 0, noBirthday = 0, errors = 0;
+    const errorSamples: string[] = [];
+    for (const row of candidates) {
+      try {
+        const res = await fetch(
+          `https://${shopDomain}/admin/api/2024-10/customers/${row.scid}/metafields.json?namespace=facts&key=birth_date`,
+          { headers: { 'X-Shopify-Access-Token': adminToken } },
+        );
+        if (!res.ok) { errors++; if (errorSamples.length < 5) errorSamples.push(`${row.scid}: ${res.status}`); continue; }
+        const j = (await res.json()) as { metafields?: Array<{ value?: string }> };
+        const bday = ((j.metafields ?? [])[0]?.value ?? '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(bday)) { noBirthday++; continue; }
+        await c.env.DB.prepare(`UPDATE loyalty_points SET birthday = ? WHERE friend_id = ?`).bind(bday, row.fid).run();
+        updated++;
+      } catch (e) {
+        errors++; if (errorSamples.length < 5) errorSamples.push(`${row.scid}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    return c.json({ success: true, data: { candidates: candidates.length, updated, noBirthday, errors, errorSamples } });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'birthday-backfill failed' }, 500);
   }
 });
 
