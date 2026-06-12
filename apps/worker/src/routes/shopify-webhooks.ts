@@ -251,4 +251,34 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-cancelled', async (c) => {
   return c.json({ success: true, data: { refundedPoints: awardTx.points, balance: newBalance } });
 });
 
+// POST /api/shopify/webhooks/orders-fulfilled — Shopify 注文発送(履行)Webhook
+//   発送されたら、LINE連携済みの顧客へ追跡リンク付きで「発送しました🚚」を送る。
+//   送信処理は waitUntil で非同期実行（Shopifyへは即200を返す）。機能フラグで既定OFF。
+shopifyWebhooks.post('/api/shopify/webhooks/orders-fulfilled', async (c) => {
+  const rawBody = await c.req.text();
+  const secret = (c.env as unknown as Record<string, string | undefined>).SHOPIFY_WEBHOOK_SECRET;
+  if (!secret) return c.json({ success: false, error: 'Webhook secret not configured' }, 500);
+  if (!verifyTokenParam(c.req.url, secret)) return c.json({ success: false, error: 'Invalid token' }, 401);
+
+  let order: import('../services/shipping-line-notify.js').ShipOrderLite;
+  try {
+    order = JSON.parse(rawBody);
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON' }, 400);
+  }
+
+  // 発送LINE通知（非同期・失敗してもwebhook応答に影響させない）
+  c.executionCtx?.waitUntil(
+    import('../services/shipping-line-notify.js')
+      .then(({ notifyOrderShipped }) => notifyOrderShipped(c.env, order))
+      .then((r) => {
+        if (r.sent) console.log(`[ship-notify] sent order=${order.id} friend=${r.friendId}`);
+        else if (r.reason === 'push_error') console.error(`[ship-notify] push_error order=${order.id}: ${r.error}`);
+      })
+      .catch((err) => console.error('[ship-notify] error:', err)),
+  );
+
+  return c.json({ success: true });
+});
+
 export { shopifyWebhooks };
