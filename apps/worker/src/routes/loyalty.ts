@@ -772,6 +772,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
       return c.json({
         success: true,
         data: {
+          linked: false,
           balance: 0,
           paid_balance: 0,
           bonus_balance: 0,
@@ -829,6 +830,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
     return c.json({
       success: true,
       data: {
+        linked: true,
         friend_id: point.friend_id,
         balance: point.balance,
         paid_balance: 0,
@@ -883,6 +885,18 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
       return c.json({ success: false, error: '誕生日は YYYY-MM-DD 形式で指定してください' }, 400);
     }
 
+    // 0. 先にLINE連携を確認する。未連携のまま誕生日メタフィールドを保存すると、
+    //    100pt付与は弾かれるのに「既に登録済み」状態になり二度と受け取れない罠があった。
+    //    そのため保存より前にチェックし、未連携なら何も保存せず code:'not_linked' を返す
+    //    （フロントはこれを見てLINE連携へ誘導。連携後に登録すれば100ptを受け取れる）。
+    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (!point) {
+      return c.json(
+        { success: false, code: 'not_linked', error: '先にLINE連携が必要です。LINE連携してから誕生日を登録すると100ptを受け取れます。' },
+        400,
+      );
+    }
+
     // 1. Shopify Customer メタフィールドに誕生日を保存
     const adminToken = await getShopifyAdminToken(c.env);
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
@@ -923,12 +937,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
       return c.json({ success: false, error: '誕生日の保存に失敗しました' }, 500);
     }
 
-    // 2. friend_id を取得（shopify_customer_id から）
-    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
-    if (!point) {
-      return c.json({ success: false, error: 'このアカウントはポイントシステムに連携されていません' }, 400);
-    }
-
+    // 2. friend_id（上の連携チェックで取得済みの point から）
     const friendId = point.friend_id;
     const current = await getLoyaltyPoint(c.env.DB, friendId);
     const currentBalance = current?.balance ?? 0;
