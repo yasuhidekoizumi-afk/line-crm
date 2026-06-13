@@ -137,24 +137,21 @@ function buildBirthdayFlex(type: CouponType, name: string, code: string, expire:
           paddingAll: '14px', backgroundColor: '#FBF6EC', cornerRadius: '10px',
           contents: [
             { type: 'text', text: couponLabel, weight: 'bold', size: 'md', color: '#5c4a2e' },
-            { type: 'box', layout: 'baseline', contents: [
-              { type: 'text', text: 'コード', size: 'sm', color: '#8a7a5c', flex: 2 },
-              { type: 'text', text: code, size: 'sm', weight: 'bold', color: '#5c4a2e', flex: 5, align: 'end' },
-            ] },
-            { type: 'box', layout: 'baseline', contents: [
-              { type: 'text', text: '有効期限', size: 'sm', color: '#8a7a5c', flex: 2 },
-              { type: 'text', text: `${expire}まで`, size: 'sm', weight: 'bold', color: '#5c4a2e', flex: 5, align: 'end' },
-            ] },
+            { type: 'text', text: 'クーポンコード', size: 'xs', color: '#8a7a5c', margin: 'sm' },
+            { type: 'text', text: code, size: 'sm', weight: 'bold', color: '#5c4a2e', wrap: true },
+            { type: 'text', text: `有効期限：${expire}まで`, size: 'xs', color: '#8a7a5c', margin: 'sm' },
           ],
         },
         { type: 'text', text: '発酵のようにゆっくり豊かに育ちますように🌾', size: 'xs', color: '#8a7a5c', wrap: true, margin: 'md' },
       ],
     },
     footer: {
-      type: 'box', layout: 'vertical', paddingAll: '14px',
+      type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '14px',
       contents: [
+        // 飛び先を /discount/<code> にすることでクーポンが自動適用される（コピー不要・チェックアウトで反映）
         { type: 'button', style: 'primary', color: '#C9A86A',
-          action: { type: 'uri', label: 'お買い物はこちら', uri: SHOP_URL } },
+          action: { type: 'uri', label: 'クーポンを使ってお買い物', uri: `${SHOP_URL}/discount/${code}` } },
+        { type: 'text', text: 'ボタンを押すとクーポンが自動で適用されます🎁', size: 'xxs', color: '#8a7a5c', wrap: true, align: 'center' },
       ],
     },
   };
