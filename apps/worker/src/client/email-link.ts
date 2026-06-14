@@ -40,6 +40,25 @@ const PRIMARY_BTN_STYLE =
 const LINK_BTN_STYLE =
   'background:none;border:none;color:#06C755;font-size:13px;text-decoration:underline;cursor:pointer;margin-top:12px;';
 
+// ブランド表示（フードコスメ ORYZAE）— メール入力という不安が出やすい画面で
+// 「誰が運営しているか」を明示して安心して使ってもらうため。
+const BRAND_GOLD = '#b8860b';
+function brandHeader(): string {
+  return `
+    <div style="text-align:center;margin-bottom:14px;">
+      <div style="font-size:14px;font-weight:700;letter-spacing:4px;color:${BRAND_GOLD};">ORYZAE</div>
+      <div style="font-size:10px;color:#b0b0b0;letter-spacing:2px;margin-top:2px;">フードコスメ オリゼ</div>
+    </div>`;
+}
+function trustFooter(): string {
+  return `
+    <p style="font-size:11px;color:#aaa;margin-top:18px;line-height:1.7;">
+      運営：株式会社オリゼ（フードコスメ ORYZAE）<br>
+      ご入力のメールは連携の確認のみに使用します。<br>
+      <a href="https://oryzae.shop/policies/privacy-policy" target="_blank" rel="noopener" style="color:#06C755;">プライバシーポリシー</a>
+    </p>`;
+}
+
 /** アクセストークン取得（未ログインなら login にフォールバック） */
 function getAccessTokenOrLogin(): string | null {
   const token = liff.getAccessToken();
@@ -56,12 +75,14 @@ function getAccessTokenOrLogin(): string | null {
 function renderEmailStep(prefillEmail = '', errorMsg = ''): void {
   render(`
     <div class="card">
+      ${brandHeader()}
       <h2 style="color:#333;">LINEと連携する</h2>
       <p class="message">ご注文時にお使いのメールアドレスを入力してください。<br>確認コードをメールでお送りします。</p>
       ${errorMsg ? `<p class="error">${escapeHtml(errorMsg)}</p>` : ''}
       <input id="emailInput" type="email" inputmode="email" autocomplete="email"
         placeholder="example@email.com" value="${escapeHtml(prefillEmail)}" style="${INPUT_STYLE}" />
       <button id="sendBtn" style="${PRIMARY_BTN_STYLE}">確認コードを送る</button>
+      ${trustFooter()}
     </div>
   `);
   const input = document.getElementById('emailInput') as HTMLInputElement | null;
@@ -83,6 +104,7 @@ function renderEmailStep(prefillEmail = '', errorMsg = ''): void {
 function renderCodeStep(email: string, errorMsg = ''): void {
   render(`
     <div class="card">
+      ${brandHeader()}
       <h2 style="color:#333;">確認コードを入力</h2>
       <p class="message"><strong>${escapeHtml(email)}</strong> に送った<br>6桁のコードを入力してください。</p>
       ${errorMsg ? `<p class="error">${escapeHtml(errorMsg)}</p>` : ''}
