@@ -17,6 +17,7 @@
 import { initBooking } from './booking.js';
 import { initForm } from './form.js';
 import { initLinkShopify } from './link-shopify.js';
+import { initEmailLink } from './email-link.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -302,6 +303,8 @@ async function main() {
       await initForm(formId);
     } else if (page === 'link-shopify') {
       await initLinkShopify();
+    } else if (page === 'email-link') {
+      await initEmailLink();
     } else {
       await linkAndAddFlow();
     }
