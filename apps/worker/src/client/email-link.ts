@@ -42,12 +42,14 @@ const LINK_BTN_STYLE =
 
 // ブランド表示（フードコスメ ORYZAE）— メール入力という不安が出やすい画面で
 // 「誰が運営しているか」を明示して安心して使ってもらうため。
-const BRAND_GOLD = '#b8860b';
+// ストアのヘッダーロゴ（oryzae.shop）。差し替えはこのURLのみ変更すればOK。
+const BRAND_LOGO_URL =
+  'https://oryzae.shop/cdn/shop/files/1_1_19d61d3d-1236-457c-9c63-0c1dd4afa187.png?v=1748963505&width=420';
 function brandHeader(): string {
   return `
     <div style="text-align:center;margin-bottom:14px;">
-      <div style="font-size:14px;font-weight:700;letter-spacing:4px;color:${BRAND_GOLD};">ORYZAE</div>
-      <div style="font-size:10px;color:#b0b0b0;letter-spacing:2px;margin-top:2px;">フードコスメ オリゼ</div>
+      <img src="${BRAND_LOGO_URL}" alt="フードコスメ ORYZAE"
+        style="height:34px;width:auto;max-width:200px;object-fit:contain;" />
     </div>`;
 }
 function trustFooter(): string {
