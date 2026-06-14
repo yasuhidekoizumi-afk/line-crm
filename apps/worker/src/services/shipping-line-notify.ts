@@ -50,6 +50,7 @@ export interface ShipNotifyResult {
     | 'not_linked'      // 自社ポイント未連携（=LINE連携なし）
     | 'no_line_user'    // 実LINEユーザーIDがない（合成sp_友だち等）
     | 'not_following'   // ブロック中（pushできない）
+    | 'test_skip'       // テストモード中で対象外（指定LINE以外）
     | 'already_sent'    // この注文は通知済み
     | 'push_error';     // LINE送信エラー
   friendId?: string;
@@ -144,6 +145,19 @@ export async function notifyOrderShipped(
   }
   if (friend.is_following !== 1) {
     return { sent: false, reason: 'not_following', friendId: lp.friend_id };
+  }
+
+  // テストモード: shipping_line_notify_mode='live' になるまでは、指定したLINE
+  //（河原さん）にだけ送る。本番webhook登録後も、ここで全顧客への自動配信を止められる。
+  // ※ test-shipping-notify（force:true）からの手動テストはこのゲートを通さない。
+  if (!opts.force) {
+    const mode = (await getLoyaltySetting(db, 'shipping_line_notify_mode').catch(() => null)) ?? 'test';
+    if (mode !== 'live') {
+      const testUser = await getLoyaltySetting(db, 'shipping_line_notify_test_line_user').catch(() => null);
+      if (!testUser || lineUserId !== testUser) {
+        return { sent: false, reason: 'test_skip', friendId: lp.friend_id };
+      }
+    }
   }
 
   // 追跡情報（キャンセル以外で、追跡番号/URLを持つ履行を優先。なければ最後の履行）
