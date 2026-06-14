@@ -1588,13 +1588,14 @@ loyalty.post('/api/loyalty/admin/test-shipping-notify', async (c) => {
       method: 'POST',
       headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query: `query($id:ID!){ order(id:$id){ name customer{ legacyResourceId } fulfillments(first:5){ status trackingInfo{ number url company } } } }`,
+        query: `query($id:ID!){ order(id:$id){ name customer{ legacyResourceId } lineItems(first:20){ nodes{ title quantity } } fulfillments(first:5){ status trackingInfo{ number url company } } } }`,
         variables: { id: `gid://shopify/Order/${orderId}` },
       }),
     });
     if (!res.ok) return c.json({ success: false, error: `Shopify ${res.status}` }, 500);
     const j = (await res.json()) as {
       data?: { order?: { name?: string; customer?: { legacyResourceId?: string } | null;
+        lineItems?: { nodes?: Array<{ title?: string; quantity?: number }> };
         fulfillments?: Array<{ status?: string; trackingInfo?: Array<{ number?: string; url?: string; company?: string }> }> } | null };
       errors?: unknown;
     };
@@ -1606,6 +1607,7 @@ loyalty.post('/api/loyalty/admin/test-shipping-notify', async (c) => {
       id: orderId,
       name: o.name ?? null,
       customer: o.customer?.legacyResourceId ? { id: o.customer.legacyResourceId } : null,
+      line_items: (o.lineItems?.nodes ?? []).map((li) => ({ title: li.title ?? null, quantity: li.quantity ?? 1 })),
       fulfillments: (o.fulfillments ?? []).map((f) => {
         const t = (f.trackingInfo ?? [])[0] ?? {};
         return {

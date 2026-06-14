@@ -39,6 +39,9 @@ export interface ShipOrderLite {
   name?: string | null;
   customer?: { id?: number | string } | null;
   fulfillments?: FulfillmentLite[] | null;
+  // 購入商品。orders/fulfilled webhookの生ペイロードに含まれる（title/name/quantity）。
+  // テスト経路は GraphQL の lineItems から同形に詰め直す。
+  line_items?: Array<{ title?: string | null; name?: string | null; quantity?: number | null }> | null;
 }
 
 export interface ShipNotifyResult {
@@ -73,10 +76,17 @@ function safeTrackingUri(url: string): string | null {
   }
 }
 
-/** 発送Flexメッセージ（追跡URLがあればボタン付き、なければ番号のみ表示） */
-function buildShipFlex(orderName: string, trackingNumber: string, trackingUrl: string, trackingCompany: string) {
+/** 発送Flexメッセージ（感謝＋購入商品＋追跡。追跡URLがあればボタン付き） */
+function buildShipFlex(
+  orderName: string,
+  trackingNumber: string,
+  trackingUrl: string,
+  trackingCompany: string,
+  lineItems: { title: string; quantity: number }[] = [],
+) {
   const bodyContents: Record<string, unknown>[] = [
-    { type: 'text', text: 'ご注文の商品を発送しました。', size: 'sm', color: '#3c2f1e', wrap: true },
+    { type: 'text', text: 'この度はフードコスメ ORYZAE 公式オンラインショップをご利用いただき、誠にありがとうございます🌾', size: 'sm', color: '#3c2f1e', wrap: true },
+    { type: 'text', text: 'ご注文の商品を発送しました。', size: 'sm', color: '#3c2f1e', wrap: true, margin: 'md' },
   ];
   if (orderName) {
     bodyContents.push({
@@ -86,6 +96,18 @@ function buildShipFlex(orderName: string, trackingNumber: string, trackingUrl: s
         { type: 'text', text: orderName, size: 'sm', color: '#3c2f1e', weight: 'bold', flex: 5 },
       ],
     });
+  }
+  // 購入商品（最大6点。超過分は「ほかN点」とまとめる）
+  if (lineItems.length > 0) {
+    bodyContents.push({ type: 'text', text: 'ご注文商品', size: 'xs', color: '#a68b5b', margin: 'lg' });
+    const shown = lineItems.slice(0, 6);
+    for (const li of shown) {
+      const q = li.quantity > 1 ? ` ×${li.quantity}` : '';
+      bodyContents.push({ type: 'text', text: `・${li.title}${q}`, size: 'sm', color: '#3c2f1e', wrap: true, margin: 'sm' });
+    }
+    if (lineItems.length > shown.length) {
+      bodyContents.push({ type: 'text', text: `ほか ${lineItems.length - shown.length} 点`, size: 'xs', color: '#a68b5b', margin: 'sm' });
+    }
   }
   if (trackingNumber) {
     bodyContents.push({
@@ -204,7 +226,13 @@ export async function notifyOrderShipped(
   }
   const client = new LineClient(accessToken);
 
-  const flex = buildShipFlex(order.name ?? '', trackingNumber, trackingUrl, trackingCompany);
+  const lineItems = (order.line_items ?? [])
+    .map((li) => ({
+      title: (li.title ?? li.name ?? '').trim(),
+      quantity: typeof li.quantity === 'number' && li.quantity > 0 ? li.quantity : 1,
+    }))
+    .filter((li) => li.title);
+  const flex = buildShipFlex(order.name ?? '', trackingNumber, trackingUrl, trackingCompany, lineItems);
   try {
     await client.pushMessage(lineUserId, [buildMessage('flex', JSON.stringify(flex), '商品を発送しました')]);
   } catch (e) {
