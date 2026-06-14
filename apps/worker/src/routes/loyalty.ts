@@ -1570,6 +1570,107 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-sweep', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/test-shipping-notify?orderId=<注文の数値ID>
+//   発送LINE通知の動作テスト。指定注文をShopifyから取得し、force=trueで通知を送る
+//   （機能フラグOFF・重複ログを無視して送るので、自分の注文で見た目を確認できる）。
+//   注文は発送済み(追跡情報あり)を推奨。認証必須。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/test-shipping-notify', async (c) => {
+  try {
+    const orderId = (c.req.query('orderId') ?? '').trim();
+    if (!orderId) return c.json({ success: false, error: 'orderId は必須です（注文の数値ID）' }, 400);
+
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = await getShopifyAdminToken(c.env);
+    if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+
+    const res = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query($id:ID!){ order(id:$id){ name customer{ legacyResourceId } fulfillments(first:5){ status trackingInfo{ number url company } } } }`,
+        variables: { id: `gid://shopify/Order/${orderId}` },
+      }),
+    });
+    if (!res.ok) return c.json({ success: false, error: `Shopify ${res.status}` }, 500);
+    const j = (await res.json()) as {
+      data?: { order?: { name?: string; customer?: { legacyResourceId?: string } | null;
+        fulfillments?: Array<{ status?: string; trackingInfo?: Array<{ number?: string; url?: string; company?: string }> }> } | null };
+      errors?: unknown;
+    };
+    if (j.errors || !j.data?.order) return c.json({ success: false, error: '注文が見つかりません', detail: JSON.stringify(j.errors ?? {}).slice(0, 200) }, 404);
+    const o = j.data.order;
+
+    // GraphQL の形を ShipOrderLite に変換（fulfillment.status は大文字enum → 小文字化）
+    const order = {
+      id: orderId,
+      name: o.name ?? null,
+      customer: o.customer?.legacyResourceId ? { id: o.customer.legacyResourceId } : null,
+      fulfillments: (o.fulfillments ?? []).map((f) => {
+        const t = (f.trackingInfo ?? [])[0] ?? {};
+        return {
+          status: (f.status ?? 'success').toLowerCase(),
+          tracking_number: t.number ?? null,
+          tracking_url: t.url ?? null,
+          tracking_company: t.company ?? null,
+        };
+      }),
+    };
+
+    const { notifyOrderShipped } = await import('../services/shipping-line-notify.js');
+    const r = await notifyOrderShipped(c.env, order, { force: true });
+    return c.json({ success: true, data: r });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'test-shipping-notify failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/register-fulfillment-webhook
+//   orders/fulfilled の Shopify Webhook を自社ワーカーに登録する（自己登録）。
+//   コールバックURLに ?token=SHOPIFY_WEBHOOK_SECRET を付けるため、河原さんが
+//   シークレット値を知らなくても1コマンドで安全に登録できる。冪等（重複時はその旨返す）。
+//   認証必須。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/register-fulfillment-webhook', async (c) => {
+  try {
+    const env = c.env as unknown as Record<string, string | undefined>;
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = await getShopifyAdminToken(c.env);
+    const secret = env.SHOPIFY_WEBHOOK_SECRET;
+    const workerUrl = (env.WORKER_URL || 'https://oryzae-line-crm.oryzae.workers.dev').replace(/\/$/, '');
+    if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+    if (!secret) return c.json({ success: false, error: 'SHOPIFY_WEBHOOK_SECRET が未設定です' }, 500);
+
+    const callbackUrl = `${workerUrl}/api/shopify/webhooks/orders-fulfilled?token=${secret}`;
+    const res = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `mutation($url:URL!){ webhookSubscriptionCreate(topic: ORDERS_FULFILLED, webhookSubscription:{ callbackUrl:$url, format: JSON }){ webhookSubscription{ id } userErrors{ field message } } }`,
+        variables: { url: callbackUrl },
+      }),
+    });
+    if (!res.ok) return c.json({ success: false, error: `Shopify ${res.status}` }, 500);
+    const j = (await res.json()) as {
+      data?: { webhookSubscriptionCreate?: { webhookSubscription?: { id?: string } | null; userErrors?: { message: string }[] } };
+      errors?: unknown;
+    };
+    const userErrors = j.data?.webhookSubscriptionCreate?.userErrors ?? [];
+    const id = j.data?.webhookSubscriptionCreate?.webhookSubscription?.id;
+    if (id) {
+      // コールバックURLにはシークレットが含まれるため、応答ではマスクして返す
+      return c.json({ success: true, data: { action: 'registered', id, callbackUrl: `${workerUrl}/api/shopify/webhooks/orders-fulfilled?token=***` } });
+    }
+    const already = userErrors.some((e) => /already|taken|exist/i.test(e.message));
+    if (already) return c.json({ success: true, data: { action: 'already_registered', userErrors } });
+    return c.json({ success: false, error: 'registration failed', detail: JSON.stringify(j.errors ?? userErrors).slice(0, 300) }, 500);
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'register-fulfillment-webhook failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
 // POST /api/loyalty/admin/scan-socialplus-unlinked?limit=500&cursor=<endCursor>
 //   Shopify顧客を走査し「socialplus.line(旧CRM PLUS連携) がある × 自社loyalty未登録」=
 //   小川様と同じ被害の人数を数える。affectedSample に対象 scid を最大30件返す。
