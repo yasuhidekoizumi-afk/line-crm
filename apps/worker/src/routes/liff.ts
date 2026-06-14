@@ -1008,6 +1008,41 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
   }
 });
 
+// ─── メール起点のLINE↔Shopify連携（LIFF一気通貫 Phase 1）───────────────
+//   Shopifyログイン不要。LINE本人確認済みユーザーがメール1つ＋6桁コードで連携。
+//   実体は services/email-link.ts。連携の中核は共有部品 linkShopifyAndReward()。
+//   既定OFF（loyalty_settings.email_link_enabled=0）・本番ONは小泉さんOK後。
+
+// POST /api/liff/email-link/request-code — メール→Shopify顧客特定→6桁コードをメール送信
+liffRoutes.post('/api/liff/email-link/request-code', async (c) => {
+  try {
+    const body = await c.req.json<{ accessToken?: string; idToken?: string; email?: string }>();
+    const { verifyLineUserFromToken, requestEmailLinkCode } = await import('../services/email-link.js');
+    const auth = await verifyLineUserFromToken(c.env, body);
+    if (!auth.ok) return c.json({ success: false, error: auth.error }, auth.status);
+    const r = await requestEmailLinkCode(c.env, auth.lineUserId, body.email ?? '');
+    return c.json(r.body, r.status);
+  } catch (err) {
+    console.error('POST /api/liff/email-link/request-code error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/liff/email-link/verify-code — 6桁コード照合→共有部品で連携＋特典
+liffRoutes.post('/api/liff/email-link/verify-code', async (c) => {
+  try {
+    const body = await c.req.json<{ accessToken?: string; idToken?: string; email?: string; code?: string }>();
+    const { verifyLineUserFromToken, verifyEmailLinkCode } = await import('../services/email-link.js');
+    const auth = await verifyLineUserFromToken(c.env, body);
+    if (!auth.ok) return c.json({ success: false, error: auth.error }, auth.status);
+    const r = await verifyEmailLinkCode(c.env, auth.lineUserId, body.email ?? '', body.code ?? '');
+    return c.json(r.body, r.status);
+  } catch (err) {
+    console.error('POST /api/liff/email-link/verify-code error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // POST /api/liff/promo-grant — プロモコードによるポイント付与（紐付け済みユーザー向け）
 liffRoutes.post('/api/liff/promo-grant', async (c) => {
   try {
