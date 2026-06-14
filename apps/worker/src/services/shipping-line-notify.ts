@@ -57,6 +57,22 @@ export interface ShipNotifyResult {
   error?: string;
 }
 
+/**
+ * LINEのaction URIは非ASCII（生の日本語等）を含むと弾く（"Invalid action URI"）。
+ * 日本郵便等の追跡URLは `search=追跡スタート` のように日本語が生で入ることがあるため、
+ * 非ASCII文字だけをパーセントエンコードする（既に%エンコード済みのASCII部分は触らない）。
+ * http(s) でなければ null（ボタンを出さない）。
+ */
+function safeTrackingUri(url: string): string | null {
+  const u = (url ?? '').trim();
+  if (!/^https?:\/\//i.test(u)) return null;
+  try {
+    return u.replace(/[^\x00-\x7F]/g, (ch) => encodeURIComponent(ch));
+  } catch {
+    return null;
+  }
+}
+
 /** 発送Flexメッセージ（追跡URLがあればボタン付き、なければ番号のみ表示） */
 function buildShipFlex(orderName: string, trackingNumber: string, trackingUrl: string, trackingCompany: string) {
   const bodyContents: Record<string, unknown>[] = [
@@ -90,12 +106,13 @@ function buildShipFlex(orderName: string, trackingNumber: string, trackingUrl: s
     });
   }
 
-  const footer = trackingUrl
+  const safeUrl = safeTrackingUri(trackingUrl);
+  const footer = safeUrl
     ? {
         type: 'box', layout: 'vertical', paddingAll: '16px',
         contents: [
           { type: 'button', style: 'primary', color: '#a68b5b', height: 'sm',
-            action: { type: 'uri', label: '配送状況を見る', uri: trackingUrl } },
+            action: { type: 'uri', label: '配送状況を見る', uri: safeUrl } },
         ],
       }
     : undefined;
