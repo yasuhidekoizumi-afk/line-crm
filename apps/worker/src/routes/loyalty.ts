@@ -1653,6 +1653,30 @@ loyalty.post('/api/loyalty/admin/birthday-coupon-run', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/email-link-lookup?email=foo@example.com
+//   メール起点LINE連携(email-link)のスモークテスト。メールは送らず、連携もしない。
+//   「入力メール → Shopify顧客ID」の特定だけを確認する（認証必須・読み取りのみ）。
+//   ※本番有効化前の動作確認用。GraphQL email検索の挙動を実データで検証できる。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/email-link-lookup', async (c) => {
+  try {
+    const email = (c.req.query('email') ?? '').trim().toLowerCase();
+    if (!email) return c.json({ success: false, error: 'email クエリは必須です' }, 400);
+    const { findShopifyCustomerByEmail } = await import('../services/email-link.js');
+    const result = await findShopifyCustomerByEmail(c.env, email);
+    return c.json({
+      success: true,
+      email,
+      found: typeof result === 'string',
+      shopifyCustomerId: typeof result === 'string' ? result : null,
+      ambiguous: result === 'ambiguous',
+    });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'email-link-lookup failed' }, 500);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
 // POST /api/loyalty/admin/birthday-backfill
 //   既に誕生日登録済み(誕生日登録ボーナス履歴あり)で D1 birthday 未設定の連携顧客について、
 //   Shopify の facts.birth_date を読んで loyalty_points.birthday に書き写す（一度だけ実行）。
