@@ -83,11 +83,17 @@ function buildShipFlex(
   trackingUrl: string,
   trackingCompany: string,
   lineItems: { title: string; quantity: number }[] = [],
+  isFirstTime = false,
 ) {
-  const bodyContents: Record<string, unknown>[] = [
-    { type: 'text', text: 'この度はフードコスメ ORYZAE 公式オンラインショップをご利用いただき、誠にありがとうございます🌾', size: 'sm', color: '#3c2f1e', wrap: true },
+  const bodyContents: Record<string, unknown>[] = [];
+  // 初回だけ「LINEで受け取れるようになりました」の案内を添える（2回目以降は出さない）
+  if (isFirstTime) {
+    bodyContents.push({ type: 'text', text: '📣 LINEで発送のお知らせを受け取れるようになりました！', size: 'sm', color: '#a68b5b', weight: 'bold', wrap: true });
+  }
+  bodyContents.push(
+    { type: 'text', text: 'この度はフードコスメ ORYZAE 公式オンラインショップをご利用いただき、誠にありがとうございます🌾', size: 'sm', color: '#3c2f1e', wrap: true, margin: isFirstTime ? 'md' : 'none' },
     { type: 'text', text: 'ご注文の商品を発送しました。', size: 'sm', color: '#3c2f1e', wrap: true, margin: 'md' },
-  ];
+  );
   if (orderName) {
     bodyContents.push({
       type: 'box', layout: 'baseline', margin: 'lg',
@@ -160,7 +166,7 @@ function buildShipFlex(
 export async function notifyOrderShipped(
   env: ShipNotifyEnv,
   order: ShipOrderLite,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; forceFirstTime?: boolean } = {},
 ): Promise<ShipNotifyResult> {
   const db = env.DB;
 
@@ -206,6 +212,17 @@ export async function notifyOrderShipped(
   const trackingUrl = (f?.tracking_url ?? '').trim();
   const trackingCompany = (f?.tracking_company ?? '').trim();
 
+  // 初回判定: このfriendへ過去に発送通知を送ったことがあるか（このorderの枠確保より前に判定）。
+  // 初回だけ「LINEで受け取れるようになりました」の一言を添える。
+  let isFirstTime = opts.forceFirstTime === true;
+  if (!isFirstTime) {
+    const prior = await db
+      .prepare(`SELECT 1 FROM shipping_notify_log WHERE friend_id = ? LIMIT 1`)
+      .bind(lp.friend_id)
+      .first();
+    isFirstTime = !prior;
+  }
+
   // 重複防止: 先に枠を確保（INSERT OR IGNORE）。既存=送信済み → スキップ。
   const claim = await db
     .prepare(
@@ -232,7 +249,7 @@ export async function notifyOrderShipped(
       quantity: typeof li.quantity === 'number' && li.quantity > 0 ? li.quantity : 1,
     }))
     .filter((li) => li.title);
-  const flex = buildShipFlex(order.name ?? '', trackingNumber, trackingUrl, trackingCompany, lineItems);
+  const flex = buildShipFlex(order.name ?? '', trackingNumber, trackingUrl, trackingCompany, lineItems, isFirstTime);
   try {
     await client.pushMessage(lineUserId, [buildMessage('flex', JSON.stringify(flex), '商品を発送しました')]);
   } catch (e) {
