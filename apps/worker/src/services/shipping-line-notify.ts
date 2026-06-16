@@ -166,9 +166,26 @@ function buildShipFlex(
 export async function notifyOrderShipped(
   env: ShipNotifyEnv,
   order: ShipOrderLite,
-  opts: { force?: boolean; forceFirstTime?: boolean } = {},
+  opts: { force?: boolean; forceFirstTime?: boolean; overrideLineUserId?: string } = {},
 ): Promise<ShipNotifyResult> {
   const db = env.DB;
+
+  // テスト用: 宛先LINE UIDを明示指定した場合は、連携・ゲート・重複判定を飛ばし、
+  // 注文の表示データから組んだカードを指定LINEへ直接送る（チーム内レビュー用）。
+  if (opts.overrideLineUserId) {
+    const fls0 = (order.fulfillments ?? []).filter((x) => (x.status ?? 'success') !== 'cancelled');
+    const f0 = fls0.find((x) => x.tracking_number || x.tracking_url) ?? fls0[fls0.length - 1];
+    const items0 = (order.line_items ?? [])
+      .map((li) => ({ title: (li.title ?? li.name ?? '').trim(), quantity: typeof li.quantity === 'number' && li.quantity > 0 ? li.quantity : 1 }))
+      .filter((li) => li.title);
+    const flex0 = buildShipFlex(order.name ?? '', (f0?.tracking_number ?? '').trim(), (f0?.tracking_url ?? '').trim(), (f0?.tracking_company ?? '').trim(), items0, opts.forceFirstTime === true);
+    try {
+      await new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN).pushMessage(opts.overrideLineUserId, [buildMessage('flex', JSON.stringify(flex0), '商品を発送しました')]);
+      return { sent: true, reason: 'ok' };
+    } catch (e) {
+      return { sent: false, reason: 'push_error', error: e instanceof Error ? e.message : String(e) };
+    }
+  }
 
   if (!opts.force) {
     const enabled = await getLoyaltySetting(db, 'shipping_line_notify_enabled').catch(() => null);
