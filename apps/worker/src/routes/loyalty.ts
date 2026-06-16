@@ -1570,43 +1570,42 @@ loyalty.post('/api/loyalty/admin/rescue-socialplus-sweep', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// POST /api/loyalty/admin/test-shipping-notify?orderId=<注文の数値ID>
-//   発送LINE通知の動作テスト。指定注文をShopifyから取得し、force=trueで通知を送る
-//   （機能フラグOFF・重複ログを無視して送るので、自分の注文で見た目を確認できる）。
-//   注文は発送済み(追跡情報あり)を推奨。認証必須。
+// POST /api/loyalty/admin/test-shipping-notify?orderId=<注文の数値ID>[&first=1][&toLineUserId=U...]
+//   発送LINE通知の動作テスト（force=true・機能フラグOFFでも送る・重複ログ無視）。認証必須。
+//   - orderId 指定: その注文の内容を、その購入者のLINEへ。
+//   - toLineUserId 指定: その「本人の最新注文」の内容を、その指定LINEへ（チーム内レビュー用）。
+//   - first=1: 初回案内（📣）付きの見た目をプレビュー。
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/test-shipping-notify', async (c) => {
   try {
-    const orderId = (c.req.query('orderId') ?? '').trim();
-    if (!orderId) return c.json({ success: false, error: 'orderId は必須です（注文の数値ID）' }, 400);
-
     const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
     const adminToken = await getShopifyAdminToken(c.env);
     if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
 
-    const res = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
-      method: 'POST',
-      headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: `query($id:ID!){ order(id:$id){ name customer{ legacyResourceId } lineItems(first:20){ nodes{ title quantity } } fulfillments(first:5){ status trackingInfo{ number url company } } } }`,
-        variables: { id: `gid://shopify/Order/${orderId}` },
-      }),
-    });
-    if (!res.ok) return c.json({ success: false, error: `Shopify ${res.status}` }, 500);
-    const j = (await res.json()) as {
-      data?: { order?: { name?: string; customer?: { legacyResourceId?: string } | null;
-        lineItems?: { nodes?: Array<{ title?: string; quantity?: number }> };
-        fulfillments?: Array<{ status?: string; trackingInfo?: Array<{ number?: string; url?: string; company?: string }> }> } | null };
-      errors?: unknown;
-    };
-    if (j.errors || !j.data?.order) return c.json({ success: false, error: '注文が見つかりません', detail: JSON.stringify(j.errors ?? {}).slice(0, 200) }, 404);
-    const o = j.data.order;
+    const forceFirstTime = c.req.query('first') === '1';
+    // ?toLineUserId=U... 指定時は、その「本人の最新注文」をその指定LINEへ送る（チーム内レビュー用）。
+    // 未指定時は ?orderId の注文＝その購入者へ送る。
+    const toLineUserId = (c.req.query('toLineUserId') ?? '').trim();
+    const overrideLineUserId = toLineUserId.startsWith('U') ? toLineUserId : undefined;
 
-    // GraphQL の形を ShipOrderLite に変換（fulfillment.status は大文字enum → 小文字化）
-    const order = {
-      id: orderId,
+    type OrderGql = {
+      legacyResourceId?: string;
+      name?: string | null;
+      customer?: { legacyResourceId?: string } | null;
+      lineItems?: { nodes?: Array<{ title?: string; quantity?: number }> };
+      fulfillments?: Array<{ status?: string; trackingInfo?: Array<{ number?: string; url?: string; company?: string }> }>;
+    };
+    const gqlFetch = (query: string, variables: Record<string, unknown>) =>
+      fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+        method: 'POST',
+        headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables }),
+      });
+    // GraphQL注文 → ShipOrderLite（fulfillment.status は大文字enum → 小文字化）
+    const toShipOrder = (o: OrderGql, scid: string | null) => ({
+      id: o.legacyResourceId ?? '',
       name: o.name ?? null,
-      customer: o.customer?.legacyResourceId ? { id: o.customer.legacyResourceId } : null,
+      customer: scid ? { id: scid } : o.customer?.legacyResourceId ? { id: o.customer.legacyResourceId } : null,
       line_items: (o.lineItems?.nodes ?? []).map((li) => ({ title: li.title ?? null, quantity: li.quantity ?? 1 })),
       fulfillments: (o.fulfillments ?? []).map((f) => {
         const t = (f.trackingInfo ?? [])[0] ?? {};
@@ -1617,13 +1616,38 @@ loyalty.post('/api/loyalty/admin/test-shipping-notify', async (c) => {
           tracking_company: t.company ?? null,
         };
       }),
-    };
+    });
+    const ORDER_FIELDS = `legacyResourceId name customer{ legacyResourceId } lineItems(first:20){ nodes{ title quantity } } fulfillments(first:5){ status trackingInfo{ number url company } }`;
 
-    // ?first=1 で「初回案内（📣）」付きの見た目をプレビューできる（テスト用）
-    const forceFirstTime = c.req.query('first') === '1';
-    // ?toLineUserId=U... で、注文の購入者ではなく指定したLINEへ直接送る（チーム内レビュー用）
-    const toLineUserId = (c.req.query('toLineUserId') ?? '').trim();
-    const overrideLineUserId = toLineUserId.startsWith('U') ? toLineUserId : undefined;
+    let order: ReturnType<typeof toShipOrder>;
+    if (overrideLineUserId) {
+      // 宛先LINEに紐づく本人の最新注文を使う
+      const friend = await getFriendByLineUserId(c.env.DB, overrideLineUserId);
+      if (!friend) return c.json({ success: false, error: 'そのLINE userId の友だちが見つかりません' }, 404);
+      const lp = await getLoyaltyPoint(c.env.DB, friend.id);
+      const scid = lp?.shopify_customer_id ?? null;
+      if (!scid) return c.json({ success: false, error: 'そのLINEはShopify未連携のため、本人の購入内容を表示できません', friendId: friend.id }, 400);
+      const cres = await gqlFetch(
+        `query($cid:ID!){ customer(id:$cid){ orders(first:5, sortKey:CREATED_AT, reverse:true){ nodes{ ${ORDER_FIELDS} } } } }`,
+        { cid: `gid://shopify/Customer/${scid}` },
+      );
+      if (!cres.ok) return c.json({ success: false, error: `Shopify ${cres.status}` }, 500);
+      const cj = (await cres.json()) as { data?: { customer?: { orders?: { nodes?: OrderGql[] } } | null }; errors?: unknown };
+      const nodes = cj.data?.customer?.orders?.nodes ?? [];
+      if (nodes.length === 0) return c.json({ success: false, error: 'その顧客の注文が見つかりません', shopifyCustomerId: scid }, 404);
+      // 追跡情報を持つ最新注文を優先（無ければ最新）
+      const picked = nodes.find((n) => (n.fulfillments ?? []).some((f) => (f.trackingInfo ?? []).some((t) => t.number || t.url))) ?? nodes[0];
+      order = toShipOrder(picked, scid);
+    } else {
+      const orderId = (c.req.query('orderId') ?? '').trim();
+      if (!orderId) return c.json({ success: false, error: 'orderId または toLineUserId が必要です' }, 400);
+      const res = await gqlFetch(`query($id:ID!){ order(id:$id){ ${ORDER_FIELDS} } }`, { id: `gid://shopify/Order/${orderId}` });
+      if (!res.ok) return c.json({ success: false, error: `Shopify ${res.status}` }, 500);
+      const j = (await res.json()) as { data?: { order?: OrderGql | null }; errors?: unknown };
+      if (j.errors || !j.data?.order) return c.json({ success: false, error: '注文が見つかりません', detail: JSON.stringify(j.errors ?? {}).slice(0, 200) }, 404);
+      order = toShipOrder(j.data.order, null);
+    }
+
     const { notifyOrderShipped } = await import('../services/shipping-line-notify.js');
     const r = await notifyOrderShipped(c.env, order, { force: true, forceFirstTime, overrideLineUserId });
     return c.json({ success: true, data: r });
