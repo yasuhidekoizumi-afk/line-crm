@@ -277,6 +277,14 @@ backfillRoutes.post('/shopify-customers', async (c) => {
     }
   }
 
+  // since_id ベースの再開用に、このバッチの最大顧客ID を返す。
+  // page_info(cursor) は数時間〜で失効しうるため日跨ぎの再開には不向き。
+  // since_id は顧客ID（不変・単調増加）なので、クライアントが last_id を保存しておけば
+  // 翌日でも確実に「続きから」再開できる（毎回ページ1から舐め直す取りこぼしを防止）。
+  const lastId = json.customers.length > 0
+    ? json.customers.reduce((mx, sc) => (sc.id > mx ? sc.id : mx), 0)
+    : null
+
   return c.json({
     success: true,
     data: {
@@ -284,6 +292,10 @@ backfillRoutes.post('/shopify-customers', async (c) => {
       synced,
       skipped,
       next_page_info: nextPageInfo,
+      last_id: lastId,
+      // page_info モードの完了判定（後方互換）。
+      // since_id モードでは next_page_info が無いことがあるため、
+      // クライアント側で processed<250 でも完了判定すること。
       done: !nextPageInfo,
     },
   })
