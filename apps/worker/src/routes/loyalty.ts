@@ -1619,8 +1619,10 @@ loyalty.post('/api/loyalty/admin/test-shipping-notify', async (c) => {
       }),
     };
 
+    // ?first=1 で「初回案内（📣）」付きの見た目をプレビューできる（テスト用）
+    const forceFirstTime = c.req.query('first') === '1';
     const { notifyOrderShipped } = await import('../services/shipping-line-notify.js');
-    const r = await notifyOrderShipped(c.env, order, { force: true });
+    const r = await notifyOrderShipped(c.env, order, { force: true, forceFirstTime });
     return c.json({ success: true, data: r });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'test-shipping-notify failed' }, 500);
