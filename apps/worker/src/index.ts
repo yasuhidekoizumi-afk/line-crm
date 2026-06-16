@@ -302,6 +302,15 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
         .then((r) => { if (r.enabled && (r.affected > 0 || r.errors > 0)) console.log(`[socialplus-rescue] affected=${r.affected} rescued=${r.rescued}(+${r.awardedPoints}pt) linkedOnly=${r.linkedOnly} errors=${r.errors}`); })
         .catch((e) => console.error('[socialplus-rescue] error:', e)),
     );
+    // 誕生日クーポン自動配信（設定 birthday_coupon_enabled='1' のときのみ動作 / mode: dryrun / test / live）。
+    // 毎日 JST 9:00 に「今日が誕生日」の顧客（LINE連携済み）へ Flex push でクーポン配信。
+    // 詳細: docs/BIRTHDAY_TRIGGER_DESIGN.md / 実装: services/birthday-coupon.ts
+    jobs.push(
+      import('./services/birthday-coupon.js')
+        .then(({ processBirthdayCoupons }) => processBirthdayCoupons(env))
+        .then((r) => { if (r.enabled && (r.targets > 0 || r.errors > 0)) console.log(`[birthday-coupon] mode=${r.mode} today=${r.todayMMDD} targets=${r.targets} issued=${r.issued} sent=${r.sent} already=${r.alreadyDone} errors=${r.errors}`); })
+        .catch((e) => console.error('[birthday-coupon] error:', e)),
+    );
   } else {
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
