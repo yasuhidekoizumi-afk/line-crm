@@ -172,4 +172,46 @@ lineAccounts.delete('/api/line-accounts/:id', requireRole('owner', 'admin'), asy
   }
 });
 
+// GET /api/line/quota - 当月の配信数/上限（LINE公式ダッシュボードと同じ数字）
+// totalUsage = 上限にカウントされた送信通数（公式の分子・例 41,717通）
+// limit      = 当月のメッセージ配信上限（公式の分母・例 110,000通。type='none'なら無制限）
+// 任意で ?accountId= 指定。未指定なら is_active なアカウントを使用。
+lineAccounts.get('/api/line/quota', async (c) => {
+  try {
+    const accountId = c.req.query('accountId');
+    const row = accountId
+      ? await c.env.DB.prepare('SELECT channel_access_token FROM line_accounts WHERE id = ? LIMIT 1').bind(accountId).first<{ channel_access_token: string }>()
+      : await c.env.DB.prepare('SELECT channel_access_token FROM line_accounts WHERE is_active = 1 ORDER BY created_at ASC LIMIT 1').first<{ channel_access_token: string }>();
+
+    const token = row?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!token) {
+      return c.json({ success: false, error: 'LINEアカウントが見つかりません' }, 404);
+    }
+
+    const { LineClient } = await import('@line-crm/line-sdk');
+    const client = new LineClient(token);
+    const [quota, consumption] = await Promise.all([
+      client.getMessageQuota(),
+      client.getMessageQuotaConsumption(),
+    ]);
+
+    const totalUsage = consumption.totalUsage ?? 0;
+    const limit = quota.type === 'limited' ? (quota.value ?? null) : null;
+
+    return c.json({
+      success: true,
+      data: {
+        totalUsage,                 // 当月の送信通数（分子）
+        limit,                      // 当月の上限（分母・無制限ならnull）
+        type: quota.type,           // 'limited' | 'none'
+        remaining: limit !== null ? Math.max(0, limit - totalUsage) : null,
+        usagePct: limit ? Math.round((totalUsage / limit) * 100) : null,
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/line/quota error:', err);
+    return c.json({ success: false, error: '配信数の取得に失敗しました' }, 500);
+  }
+});
+
 export { lineAccounts };

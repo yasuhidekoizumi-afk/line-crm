@@ -306,6 +306,11 @@ export const api = {
       }),
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/line-accounts/${id}`, { method: 'DELETE' }),
+    // 当月の配信数/上限（LINE公式ダッシュボードと同じ数字）
+    quota: (accountId?: string) =>
+      fetchApi<ApiResponse<{ totalUsage: number; limit: number | null; type: 'limited' | 'none'; remaining: number | null; usagePct: number | null }>>(
+        `/api/line/quota${accountId ? `?accountId=${accountId}` : ''}`,
+      ),
   },
   conversions: {
     points: () =>
