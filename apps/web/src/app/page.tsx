@@ -271,7 +271,9 @@ export default function DashboardPage() {
         </div>
       </CollapsibleSection>
 
-      <AiCockpit />
+      {/* AIコックピット（非表示: 河原さん要望でUIから外す。今日やるべきアクション/週次振り返り/AI相談を含む丸ごと。
+          コンポーネントは残し、この行を有効化すれば復活） */}
+      {false && <AiCockpit />}
 
       {/* クイックアクション（非表示: 河原さん要望でUIから外す。コードは残し、false を true に戻せば復活） */}
       {false && (
