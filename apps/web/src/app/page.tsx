@@ -273,6 +273,8 @@ export default function DashboardPage() {
 
       <AiCockpit />
 
+      {/* クイックアクション（非表示: 河原さん要望でUIから外す。コードは残し、false を true に戻せば復活） */}
+      {false && (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h2 className="text-sm font-semibold text-gray-800 mb-4">クイックアクション</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -286,6 +288,7 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+      )}
       <CcPromptButton prompts={ccPrompts} />
     </div>
   )
