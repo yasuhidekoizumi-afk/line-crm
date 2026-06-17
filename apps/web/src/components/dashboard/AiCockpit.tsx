@@ -290,7 +290,8 @@ export default function AiCockpit() {
         )}
       </div>
 
-      {/* 週次振り返り */}
+      {/* 週次振り返り（非表示: 河原さん要望でUIから外す。コードは残し、false を true に戻せば復活） */}
+      {false && (
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-800">📊 週次振り返り</h3>
@@ -311,6 +312,7 @@ export default function AiCockpit() {
           <p className="text-sm text-gray-400 text-center py-4">「✨ 生成」で先週の振り返りを AI が作成</p>
         )}
       </div>
+      )}
 
       {/* AI チャット */}
       <div className="bg-white border border-gray-200 rounded-xl p-5">
