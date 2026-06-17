@@ -69,6 +69,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(true)
+  // 当月のLINE配信数/上限（LINE公式ダッシュボードと同じ数字）
+  const [quota, setQuota] = useState<{ totalUsage: number; limit: number | null; usagePct: number | null } | null>(null)
 
   const loadStats = useCallback(async () => {
     try {
@@ -76,14 +78,19 @@ export default function DashboardPage() {
       // 配信数は「今月実際に送信したLINE配信件数」を出す（合計ではなく月次）。
       const accountId = selectedAccountId ?? undefined
       const monthPrefix = thisMonthJst()
-      const [friendCountRes, scenariosRes, broadcastsRes, templatesRes, automationsRes, scoringRes] = await Promise.allSettled([
+      const [friendCountRes, scenariosRes, broadcastsRes, templatesRes, automationsRes, scoringRes, quotaRes] = await Promise.allSettled([
         api.friends.count({ accountId }),
         api.scenarios.list({ accountId }),
         api.broadcasts.list({ accountId }),
         api.templates.list(),
         api.automations.list(),
         api.scoring.rules(),
+        api.lineAccounts.quota(accountId),
       ])
+      // 当月のLINE配信数（LINE公式と同じ数字）。取得失敗時は非表示。
+      if (quotaRes.status === 'fulfilled' && quotaRes.value.success) {
+        setQuota({ totalUsage: quotaRes.value.data.totalUsage, limit: quotaRes.value.data.limit, usagePct: quotaRes.value.data.usagePct })
+      }
       setStats({
         friendCount: friendCountRes.status === 'fulfilled' && friendCountRes.value.success ? friendCountRes.value.data.count : null,
         activeScenarioCount: scenariosRes.status === 'fulfilled' && scenariosRes.value.success ? scenariosRes.value.data.filter((s) => s.isActive).length : null,
@@ -177,6 +184,30 @@ export default function DashboardPage() {
         <StatCard title="アクティブシナリオ数" value={stats.activeScenarioCount} loading={loading} href="/scenarios" accentColor="#3B82F6" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>} />
         <StatCard title="今月の配信数" value={stats.broadcastCount} loading={loading} href="/broadcasts" accentColor="#8B5CF6" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>} />
       </div>
+
+      {/* 当月のLINEメッセージ配信数（LINE公式アカウントと同じ数字。message/quota API） */}
+      {quota && (
+        <div className="mb-8 bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg" style={{ backgroundColor: '#06C755' }}>
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+              </span>
+              <p className="text-sm font-semibold text-gray-800">今月のLINEメッセージ配信数</p>
+            </div>
+            <p className="text-sm text-gray-700">
+              <span className="text-xl font-bold text-gray-900">{quota.totalUsage.toLocaleString()}</span>
+              <span className="text-gray-400"> / {quota.limit !== null ? `${quota.limit.toLocaleString()}通` : '無制限'}</span>
+            </p>
+          </div>
+          {quota.limit !== null && (
+            <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+              <div className="h-2.5 rounded-full transition-all" style={{ width: `${Math.min(100, quota.usagePct ?? 0)}%`, backgroundColor: (quota.usagePct ?? 0) >= 90 ? '#EF4444' : (quota.usagePct ?? 0) >= 70 ? '#F59E0B' : '#06C755' }} />
+            </div>
+          )}
+          <p className="text-xs text-gray-400 mt-2">LINE公式アカウントの「総配信メッセージ数」と同じ数字です（通常は毎日午前中に更新）。</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
         <StatCard title="テンプレート数" value={stats.templateCount} loading={loading} href="/templates" accentColor="#F59E0B" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" /></svg>} />

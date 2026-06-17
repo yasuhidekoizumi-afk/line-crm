@@ -63,6 +63,34 @@ export class LineClient {
     );
   }
 
+  // ─── Message Quota（今月の配信数・上限） ───────────────────────────────────
+
+  /**
+   * 当月のメッセージ配信上限を取得。
+   * type='limited' のとき value に上限通数（例: 無料枠+追加分の合計プラン上限）。
+   * type='none' なら無制限。
+   * LINE公式ダッシュボードの「○○通 / △△通」の分母に相当。
+   */
+  async getMessageQuota(): Promise<{ type: 'none' | 'limited'; value?: number }> {
+    return this.request<{ type: 'none' | 'limited'; value?: number }>(
+      '/message/quota',
+      {},
+      'GET',
+    );
+  }
+
+  /**
+   * 当月の「上限にカウントされた送信メッセージ数」を取得。
+   * LINE公式ダッシュボードの分子（例: 41,717通）に相当。
+   */
+  async getMessageQuotaConsumption(): Promise<{ totalUsage: number }> {
+    return this.request<{ totalUsage: number }>(
+      '/message/quota/consumption',
+      {},
+      'GET',
+    );
+  }
+
   // ─── Messaging ───────────────────────────────────────────────────────────
 
   async pushMessage(to: string, messages: Message[]): Promise<void> {
