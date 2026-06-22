@@ -360,4 +360,214 @@ crmWeekly.get('/api/crm-weekly/email-campaigns', async (c) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// 手動入力配信 (LINE公式Manager / CRM PLUS 経由) の CRUD
+//
+// 自社LINEハーネス経由でない配信は broadcasts テーブルに記録できないため、
+// 河原さんが画面で手動入力して残せるようにする。
+// テーブル: crm_manual_broadcasts (migrations/045_crm_manual_broadcasts.sql)
+// ---------------------------------------------------------------------------
+
+interface ManualBroadcastInput {
+  source?: string;
+  title: string;
+  sentAt: string;
+  deliveredCount?: number;
+  openCount?: number | null;
+  openRate?: number | null;
+  clickCount?: number | null;
+  clickRate?: number | null;
+  richViewCount?: number | null;
+  note?: string | null;
+}
+
+function rowToManualBroadcast(r: any) {
+  return {
+    id: r.id,
+    source: r.source,
+    title: r.title,
+    sentAt: r.sent_at,
+    deliveredCount: Number(r.delivered_count ?? 0),
+    openCount: r.open_count == null ? null : Number(r.open_count),
+    openRate: r.open_rate == null ? null : Number(r.open_rate),
+    clickCount: r.click_count == null ? null : Number(r.click_count),
+    clickRate: r.click_rate == null ? null : Number(r.click_rate),
+    richViewCount: r.rich_view_count == null ? null : Number(r.rich_view_count),
+    note: r.note ?? null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+// GET /api/crm-weekly/manual-broadcasts?start=...&end=...
+crmWeekly.get('/api/crm-weekly/manual-broadcasts', async (c) => {
+  const p = parsePeriod(c);
+  if ('error' in p) return c.json({ success: false, error: p.error }, 400);
+  try {
+    const res = await c.env.DB.prepare(
+      `SELECT * FROM crm_manual_broadcasts
+       WHERE DATE(sent_at) >= ? AND DATE(sent_at) <= ?
+       ORDER BY sent_at ASC`
+    )
+      .bind(p.start, p.end)
+      .all<any>();
+    return c.json({
+      success: true,
+      data: {
+        period: { start: p.start, end: p.end },
+        manualBroadcasts: res.results.map(rowToManualBroadcast),
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/crm-weekly/manual-broadcasts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/crm-weekly/manual-broadcasts
+crmWeekly.post('/api/crm-weekly/manual-broadcasts', async (c) => {
+  try {
+    const body = (await c.req.json()) as ManualBroadcastInput;
+    if (!body.title || !body.sentAt) {
+      return c.json({ success: false, error: 'title, sentAt は必須です' }, 400);
+    }
+    const id = `mb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    await c.env.DB.prepare(
+      `INSERT INTO crm_manual_broadcasts
+        (id, source, title, sent_at, delivered_count, open_count, open_rate,
+         click_count, click_rate, rich_view_count, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        id,
+        body.source ?? 'line_official',
+        body.title,
+        body.sentAt,
+        body.deliveredCount ?? 0,
+        body.openCount ?? null,
+        body.openRate ?? null,
+        body.clickCount ?? null,
+        body.clickRate ?? null,
+        body.richViewCount ?? null,
+        body.note ?? null
+      )
+      .run();
+    const row = await c.env.DB.prepare(`SELECT * FROM crm_manual_broadcasts WHERE id = ?`)
+      .bind(id)
+      .first<any>();
+    return c.json({ success: true, data: rowToManualBroadcast(row) }, 201);
+  } catch (err) {
+    console.error('POST /api/crm-weekly/manual-broadcasts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// PUT /api/crm-weekly/manual-broadcasts/:id
+crmWeekly.put('/api/crm-weekly/manual-broadcasts/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const body = (await c.req.json()) as ManualBroadcastInput;
+    const existing = await c.env.DB.prepare(
+      `SELECT * FROM crm_manual_broadcasts WHERE id = ?`
+    )
+      .bind(id)
+      .first<any>();
+    if (!existing) return c.json({ success: false, error: 'Not found' }, 404);
+
+    await c.env.DB.prepare(
+      `UPDATE crm_manual_broadcasts
+       SET source = COALESCE(?, source),
+           title = COALESCE(?, title),
+           sent_at = COALESCE(?, sent_at),
+           delivered_count = COALESCE(?, delivered_count),
+           open_count = ?,
+           open_rate = ?,
+           click_count = ?,
+           click_rate = ?,
+           rich_view_count = ?,
+           note = ?,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+       WHERE id = ?`
+    )
+      .bind(
+        body.source ?? null,
+        body.title ?? null,
+        body.sentAt ?? null,
+        body.deliveredCount ?? null,
+        body.openCount ?? null,
+        body.openRate ?? null,
+        body.clickCount ?? null,
+        body.clickRate ?? null,
+        body.richViewCount ?? null,
+        body.note ?? null,
+        id
+      )
+      .run();
+    const row = await c.env.DB.prepare(`SELECT * FROM crm_manual_broadcasts WHERE id = ?`)
+      .bind(id)
+      .first<any>();
+    return c.json({ success: true, data: rowToManualBroadcast(row) });
+  } catch (err) {
+    console.error('PUT /api/crm-weekly/manual-broadcasts/:id error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// DELETE /api/crm-weekly/manual-broadcasts/:id
+crmWeekly.delete('/api/crm-weekly/manual-broadcasts/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const res = await c.env.DB.prepare(`DELETE FROM crm_manual_broadcasts WHERE id = ?`)
+      .bind(id)
+      .run();
+    if (res.meta && (res.meta.changes ?? 0) === 0) {
+      return c.json({ success: false, error: 'Not found' }, 404);
+    }
+    return c.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/crm-weekly/manual-broadcasts/:id error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/crm-weekly/migrate-manual-broadcasts
+//   045_crm_manual_broadcasts.sql を本番に流す手間を画面から実行できるようにする
+//   (河原さんが wrangler を叩けない運用への配慮)
+//
+//   注意: 冪等 (CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS) なので
+//         複数回叩いても安全。
+// ---------------------------------------------------------------------------
+crmWeekly.post('/api/crm-weekly/migrate-manual-broadcasts', async (c) => {
+  try {
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS crm_manual_broadcasts (
+         id              TEXT PRIMARY KEY,
+         source          TEXT NOT NULL DEFAULT 'line_official',
+         title           TEXT NOT NULL,
+         sent_at         TEXT NOT NULL,
+         delivered_count INTEGER NOT NULL DEFAULT 0,
+         open_count      INTEGER,
+         open_rate       REAL,
+         click_count     INTEGER,
+         click_rate      REAL,
+         rich_view_count INTEGER,
+         note            TEXT,
+         created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+         updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
+       )`
+    ).run();
+    await c.env.DB.prepare(
+      `CREATE INDEX IF NOT EXISTS idx_crm_manual_broadcasts_sent_at ON crm_manual_broadcasts(sent_at)`
+    ).run();
+    await c.env.DB.prepare(
+      `CREATE INDEX IF NOT EXISTS idx_crm_manual_broadcasts_source ON crm_manual_broadcasts(source)`
+    ).run();
+    return c.json({ success: true, message: 'crm_manual_broadcasts テーブル作成済み (冪等)' });
+  } catch (err) {
+    console.error('POST /api/crm-weekly/migrate-manual-broadcasts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 export { crmWeekly };

@@ -60,6 +60,28 @@ interface Broadcast {
   successRate: number
 }
 
+interface ManualBroadcast {
+  id: string
+  source: 'line_official' | 'crm_plus' | 'other' | string
+  title: string
+  sentAt: string
+  deliveredCount: number
+  openCount: number | null
+  openRate: number | null
+  clickCount: number | null
+  clickRate: number | null
+  richViewCount: number | null
+  note: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  line_official: 'LINE公式Manager',
+  crm_plus: 'CRM PLUS',
+  other: 'その他',
+}
+
 interface EmailCampaign {
   id: string
   title: string
@@ -124,6 +146,36 @@ export default function CrmWeeklyPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([])
   const [emailCampaigns, setEmailCampaigns] = useState<EmailCampaign[]>([])
   const [emailError, setEmailError] = useState<string | null>(null)
+  const [manualBroadcasts, setManualBroadcasts] = useState<ManualBroadcast[]>([])
+  const [manualBroadcastError, setManualBroadcastError] = useState<string | null>(null)
+
+  // 手動入力フォーム表示制御
+  const [showManualForm, setShowManualForm] = useState(false)
+  const [editingManualId, setEditingManualId] = useState<string | null>(null)
+  const [manualForm, setManualForm] = useState<{
+    source: string
+    title: string
+    sentAt: string
+    deliveredCount: string
+    openCount: string
+    openRate: string
+    clickCount: string
+    clickRate: string
+    richViewCount: string
+    note: string
+  }>({
+    source: 'line_official',
+    title: '',
+    sentAt: '',
+    deliveredCount: '',
+    openCount: '',
+    openRate: '',
+    clickCount: '',
+    clickRate: '',
+    richViewCount: '',
+    note: '',
+  })
+  const [manualSubmitting, setManualSubmitting] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -137,7 +189,7 @@ export default function CrmWeeklyPage() {
       const qs = `start=${s}&end=${e}`
 
       // 並列取得 (Promise.allSettled で 1つ失敗しても他を表示)
-      const [sumRes, dailyRes, trendRes, brRes, emailRes] = await Promise.allSettled([
+      const [sumRes, dailyRes, trendRes, brRes, emailRes, manualRes] = await Promise.allSettled([
         fetchApi<{ data: Summary }>(`/api/crm-weekly/summary?${qs}`),
         fetchApi<{ data: { rows: DailyRow[] } }>(`/api/crm-weekly/daily?${qs}`),
         fetchApi<{ data: { weeks: TrendRow[] } }>(
@@ -146,6 +198,9 @@ export default function CrmWeeklyPage() {
         fetchApi<{ data: { broadcasts: Broadcast[] } }>(`/api/crm-weekly/broadcasts?${qs}`),
         fetchApi<{ data: { campaigns: EmailCampaign[] } }>(
           `/api/crm-weekly/email-campaigns?${qs}`
+        ),
+        fetchApi<{ data: { manualBroadcasts: ManualBroadcast[] } }>(
+          `/api/crm-weekly/manual-broadcasts?${qs}`
         ),
       ])
 
@@ -161,6 +216,16 @@ export default function CrmWeeklyPage() {
         setEmailError(
           'Shopify Email キャンペーン情報の取得に失敗しました。' +
             'SHOPIFY_ADMIN_TOKEN が未設定か、スコープ不足の可能性があります。'
+        )
+      }
+
+      if (manualRes.status === 'fulfilled') {
+        setManualBroadcasts(manualRes.value.data.manualBroadcasts)
+        setManualBroadcastError(null)
+      } else {
+        setManualBroadcastError(
+          '手動入力配信の取得に失敗しました。テーブル未作成の可能性があります。' +
+            '「初回セットアップ」ボタンを押してテーブルを作成してください。'
         )
       }
     } catch (err: any) {
@@ -199,6 +264,111 @@ export default function CrmWeeklyPage() {
   const handleApply = () => {
     setAppliedStart(start)
     setAppliedEnd(end)
+  }
+
+  // 手動入力フォームを開く (新規 or 編集)
+  const openManualForm = (target?: ManualBroadcast) => {
+    if (target) {
+      setEditingManualId(target.id)
+      setManualForm({
+        source: target.source,
+        title: target.title,
+        sentAt: target.sentAt.slice(0, 16), // datetime-local 用
+        deliveredCount: String(target.deliveredCount ?? ''),
+        openCount: target.openCount == null ? '' : String(target.openCount),
+        openRate: target.openRate == null ? '' : String(target.openRate),
+        clickCount: target.clickCount == null ? '' : String(target.clickCount),
+        clickRate: target.clickRate == null ? '' : String(target.clickRate),
+        richViewCount: target.richViewCount == null ? '' : String(target.richViewCount),
+        note: target.note ?? '',
+      })
+    } else {
+      setEditingManualId(null)
+      // デフォルトの配信日時 = 現在の期間の途中の日 + 12:00
+      const mid = appliedStart
+      setManualForm({
+        source: 'line_official',
+        title: '',
+        sentAt: `${mid}T12:00`,
+        deliveredCount: '',
+        openCount: '',
+        openRate: '',
+        clickCount: '',
+        clickRate: '',
+        richViewCount: '',
+        note: '',
+      })
+    }
+    setShowManualForm(true)
+  }
+
+  const closeManualForm = () => {
+    setShowManualForm(false)
+    setEditingManualId(null)
+  }
+
+  // 手動入力配信を保存
+  const submitManualForm = async () => {
+    if (!manualForm.title.trim() || !manualForm.sentAt) {
+      alert('件名と配信日時は必須です')
+      return
+    }
+    setManualSubmitting(true)
+    try {
+      // datetime-local 形式 (YYYY-MM-DDTHH:mm) → ISO 8601 (JST)
+      const sentAtIso = manualForm.sentAt.length === 16 ? manualForm.sentAt + ':00+09:00' : manualForm.sentAt
+      const payload = {
+        source: manualForm.source,
+        title: manualForm.title.trim(),
+        sentAt: sentAtIso,
+        deliveredCount: manualForm.deliveredCount ? Number(manualForm.deliveredCount) : 0,
+        openCount: manualForm.openCount ? Number(manualForm.openCount) : null,
+        openRate: manualForm.openRate ? Number(manualForm.openRate) : null,
+        clickCount: manualForm.clickCount ? Number(manualForm.clickCount) : null,
+        clickRate: manualForm.clickRate ? Number(manualForm.clickRate) : null,
+        richViewCount: manualForm.richViewCount ? Number(manualForm.richViewCount) : null,
+        note: manualForm.note.trim() || null,
+      }
+      if (editingManualId) {
+        await fetchApi(`/api/crm-weekly/manual-broadcasts/${editingManualId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        })
+      } else {
+        await fetchApi(`/api/crm-weekly/manual-broadcasts`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+      }
+      closeManualForm()
+      await fetchAll(appliedStart, appliedEnd)
+    } catch (err: any) {
+      alert('保存に失敗しました: ' + (err?.message || ''))
+    } finally {
+      setManualSubmitting(false)
+    }
+  }
+
+  const deleteManual = async (id: string) => {
+    if (!confirm('この配信記録を削除しますか?')) return
+    try {
+      await fetchApi(`/api/crm-weekly/manual-broadcasts/${id}`, { method: 'DELETE' })
+      await fetchAll(appliedStart, appliedEnd)
+    } catch (err: any) {
+      alert('削除に失敗しました: ' + (err?.message || ''))
+    }
+  }
+
+  // 初回セットアップ (テーブル作成)
+  const runMigration = async () => {
+    if (!confirm('crm_manual_broadcasts テーブルを作成します。よろしいですか?')) return
+    try {
+      await fetchApi(`/api/crm-weekly/migrate-manual-broadcasts`, { method: 'POST' })
+      alert('テーブル作成完了。再読み込みします。')
+      await fetchAll(appliedStart, appliedEnd)
+    } catch (err: any) {
+      alert('セットアップに失敗しました: ' + (err?.message || ''))
+    }
   }
 
   // 表示用日付ラベル (例: 6/10(水))
@@ -383,12 +553,17 @@ export default function CrmWeeklyPage() {
               </section>
             )}
 
-            {/* LINE配信実績 */}
+            {/* LINE配信実績 (ハーネス経由) */}
             <section className="mb-8">
-              <h2 className="text-lg font-bold text-gray-900 mb-3">LINE配信実績</h2>
+              <h2 className="text-lg font-bold text-gray-900 mb-3">
+                LINE配信実績 (ハーネス経由)
+              </h2>
               {broadcasts.length === 0 ? (
                 <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500 text-sm">
-                  この期間のLINE配信はありません
+                  この期間のLINEハーネス経由配信はありません
+                  <div className="text-xs mt-2 text-gray-400">
+                    ※ LINE公式Manager・CRM PLUS経由の配信は下の「手動入力配信」セクションで管理します
+                  </div>
                 </div>
               ) : (
                 <div className="bg-white rounded-lg shadow overflow-x-auto">
@@ -414,6 +589,99 @@ export default function CrmWeeklyPage() {
                             {num(b.failedCount)}
                           </Td>
                           <Td right>{b.successRate}%</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            {/* 手動入力配信 (LINE公式Manager / CRM PLUS) */}
+            <section className="mb-8">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-bold text-gray-900">
+                  手動入力配信 (LINE公式Manager / CRM PLUS)
+                </h2>
+                <div className="flex gap-2">
+                  {manualBroadcastError && (
+                    <button
+                      onClick={runMigration}
+                      className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-1.5 rounded"
+                    >
+                      初回セットアップ
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openManualForm()}
+                    className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-3 py-1.5 rounded"
+                  >
+                    ＋ 配信を追加
+                  </button>
+                </div>
+              </div>
+
+              {manualBroadcastError ? (
+                <div className="bg-orange-50 border border-orange-200 text-orange-900 p-3 rounded text-sm">
+                  {manualBroadcastError}
+                </div>
+              ) : manualBroadcasts.length === 0 ? (
+                <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500 text-sm">
+                  この期間の手動入力配信はまだありません。「＋ 配信を追加」から登録してください。
+                </div>
+              ) : (
+                <div className="bg-white rounded-lg shadow overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <Th>配信元</Th>
+                        <Th>件名</Th>
+                        <Th>配信日時</Th>
+                        <Th right>配信数</Th>
+                        <Th right>開封</Th>
+                        <Th right>クリック</Th>
+                        <Th right>リッチ表示</Th>
+                        <Th>操作</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {manualBroadcasts.map((m) => (
+                        <tr key={m.id} className="border-t border-gray-200">
+                          <Td>
+                            <span className="inline-block px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">
+                              {SOURCE_LABELS[m.source] ?? m.source}
+                            </span>
+                          </Td>
+                          <Td>{m.title}</Td>
+                          <Td>{m.sentAt?.slice(0, 16).replace('T', ' ')}</Td>
+                          <Td right>{num(m.deliveredCount)}</Td>
+                          <Td right>
+                            {m.openCount != null ? num(m.openCount) : '-'}
+                            {m.openRate != null && (
+                              <span className="text-xs text-gray-500 ml-1">({m.openRate}%)</span>
+                            )}
+                          </Td>
+                          <Td right>
+                            {m.clickCount != null ? num(m.clickCount) : '-'}
+                            {m.clickRate != null && (
+                              <span className="text-xs text-gray-500 ml-1">({m.clickRate}%)</span>
+                            )}
+                          </Td>
+                          <Td right>{m.richViewCount != null ? num(m.richViewCount) : '-'}</Td>
+                          <Td>
+                            <button
+                              onClick={() => openManualForm(m)}
+                              className="text-blue-600 hover:underline text-xs mr-2"
+                            >
+                              編集
+                            </button>
+                            <button
+                              onClick={() => deleteManual(m.id)}
+                              className="text-red-600 hover:underline text-xs"
+                            >
+                              削除
+                            </button>
+                          </Td>
                         </tr>
                       ))}
                     </tbody>
@@ -477,7 +745,165 @@ export default function CrmWeeklyPage() {
             </section>
           </>
         )}
+
+        {/* 手動入力 モーダル */}
+        {showManualForm && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            onClick={closeManualForm}
+          >
+            <div
+              className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">
+                  {editingManualId ? '配信記録を編集' : '配信記録を追加'}
+                </h3>
+
+                <div className="space-y-4">
+                  <Field label="配信元 *">
+                    <select
+                      value={manualForm.source}
+                      onChange={(e) => setManualForm({ ...manualForm, source: e.target.value })}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    >
+                      <option value="line_official">LINE公式Manager</option>
+                      <option value="crm_plus">CRM PLUS on LINE</option>
+                      <option value="other">その他</option>
+                    </select>
+                  </Field>
+
+                  <Field label="件名 *">
+                    <input
+                      type="text"
+                      value={manualForm.title}
+                      onChange={(e) => setManualForm({ ...manualForm, title: e.target.value })}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                      placeholder="例: 米麹甘酒 夏バテ予防のご案内"
+                    />
+                  </Field>
+
+                  <Field label="配信日時 *">
+                    <input
+                      type="datetime-local"
+                      value={manualForm.sentAt}
+                      onChange={(e) => setManualForm({ ...manualForm, sentAt: e.target.value })}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    />
+                  </Field>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="配信数">
+                      <input
+                        type="number"
+                        value={manualForm.deliveredCount}
+                        onChange={(e) =>
+                          setManualForm({ ...manualForm, deliveredCount: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                        placeholder="15154"
+                      />
+                    </Field>
+                    <Field label="開封ユーザー数">
+                      <input
+                        type="number"
+                        value={manualForm.openCount}
+                        onChange={(e) =>
+                          setManualForm({ ...manualForm, openCount: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                        placeholder="7105"
+                      />
+                    </Field>
+                    <Field label="開封率 (%)">
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={manualForm.openRate}
+                        onChange={(e) =>
+                          setManualForm({ ...manualForm, openRate: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                        placeholder="46.8"
+                      />
+                    </Field>
+                    <Field label="クリックユーザー数">
+                      <input
+                        type="number"
+                        value={manualForm.clickCount}
+                        onChange={(e) =>
+                          setManualForm({ ...manualForm, clickCount: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                        placeholder="470"
+                      />
+                    </Field>
+                    <Field label="クリック率 (%)">
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={manualForm.clickRate}
+                        onChange={(e) =>
+                          setManualForm({ ...manualForm, clickRate: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                        placeholder="3.1"
+                      />
+                    </Field>
+                    <Field label="リッチメッセージ表示数">
+                      <input
+                        type="number"
+                        value={manualForm.richViewCount}
+                        onChange={(e) =>
+                          setManualForm({ ...manualForm, richViewCount: e.target.value })
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                        placeholder="7951"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label="メモ">
+                    <textarea
+                      value={manualForm.note}
+                      onChange={(e) => setManualForm({ ...manualForm, note: e.target.value })}
+                      rows={2}
+                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                      placeholder="例: 期間限定商品の訴求、リッチメッセージ強め"
+                    />
+                  </Field>
+                </div>
+
+                <div className="flex justify-end gap-2 mt-6">
+                  <button
+                    onClick={closeManualForm}
+                    className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={submitManualForm}
+                    disabled={manualSubmitting}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium px-4 py-2 rounded"
+                  >
+                    {manualSubmitting ? '保存中...' : editingManualId ? '更新' : '追加'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
+    </div>
+  )
+}
+
+function Field(props: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-700 mb-1">{props.label}</label>
+      {props.children}
     </div>
   )
 }
