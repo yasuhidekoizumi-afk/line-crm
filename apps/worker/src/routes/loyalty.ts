@@ -2137,9 +2137,23 @@ loyalty.post('/api/loyalty/admin/test-link-coupon', async (c) => {
     }
 
     // 2) lineUserId 指定時は、本番と同じ文面でLINE通知を送る
+    // LINE通知の宛先を決める:
+    //  - lineUserId 明示指定があればそれを使う
+    //  - 無ければ shopifyCustomerId から「ハーネスの正しい line_user_id」を逆引き
+    //    （CRM Plus時代のsocialplus.line値とは別。誤送信防止のため必ずハーネス側を使う）
+    let targetLineUserId: string | null = body.lineUserId ?? null;
+    let resolvedFrom = body.lineUserId ? 'param' : null;
+    if (!targetLineUserId) {
+      const row = await c.env.DB
+        .prepare('SELECT f.line_user_id AS uid FROM loyalty_points lp JOIN friends f ON f.id = lp.friend_id WHERE lp.shopify_customer_id = ? AND f.line_user_id IS NOT NULL LIMIT 1')
+        .bind(shopifyCustomerId)
+        .first<{ uid: string }>();
+      if (row?.uid) { targetLineUserId = row.uid; resolvedFrom = 'shopify_customer_id'; }
+    }
+
     let pushed = false;
     let pushError: string | null = null;
-    if (body.lineUserId) {
+    if (targetLineUserId) {
       try {
         const { LineClient } = await import('@line-crm/line-sdk');
         const accountRow = await c.env.DB
@@ -2156,7 +2170,7 @@ loyalty.post('/api/loyalty/admin/test-link-coupon', async (c) => {
           '',
           'お会計画面のクーポンコード欄に入力すると送料が無料になります（1回限り）。',
         ];
-        await new LineClient(accessToken).pushMessage(body.lineUserId, [{ type: 'text', text: lines.join('\n') }]);
+        await new LineClient(accessToken).pushMessage(targetLineUserId, [{ type: 'text', text: lines.join('\n') }]);
         pushed = true;
       } catch (e) {
         pushError = e instanceof Error ? e.message : String(e);
@@ -2170,7 +2184,11 @@ loyalty.post('/api/loyalty/admin/test-link-coupon', async (c) => {
         endsAt: issued.endsAt,
         pushed,
         pushError,
-        note: 'これはテスト発行です。loyalty_transactionsには記録していません。本番の挙動と同じクーポン＋通知です。',
+        lineUserResolvedFrom: resolvedFrom,  // 'param' | 'shopify_customer_id' | null
+        lineUserFound: !!targetLineUserId,   // false の場合この顧客はハーネス未連携（通知できない）
+        note: targetLineUserId
+          ? 'これはテスト発行です。loyalty_transactionsには記録していません。本番と同じクーポン＋通知です。'
+          : 'クーポンは発行しましたが、この顧客のハーネスLINE連携が見つからずLINE通知は送れませんでした（lineUserId を明示指定すれば送れます）。',
       },
     });
   } catch (e) {
