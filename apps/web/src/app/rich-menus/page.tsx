@@ -237,7 +237,9 @@ function checkImageConstraints(width: number, height: number): string | null {
     return `画像の高さは250〜1686pxの範囲が必要です（現在 ${height}px）`
   }
   if (width / height < 1.45) {
-    return `画像の縦横比は 1.45:1 以上が必要です（現在 ${(width / height).toFixed(2)}:1）`
+    // 小数2桁だと 1.449 が「1.45」に丸まって「合ってるのに弾かれる」誤解を生むため3桁表示。
+    // 具体的な推奨サイズ（2500×1686）も併記して直しやすくする。
+    return `画像の縦横比は 1.45:1 以上が必要です（現在 ${(width / height).toFixed(3)}:1）。例: 2500×1686px にすると通ります`
   }
   return null
 }
