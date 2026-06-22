@@ -236,7 +236,12 @@ async function requestCode(email: string): Promise<void> {
     renderEmailStep(email, json.message ?? 'このメールアドレスでのご購入が見つかりませんでした。ご注文時のメールでお試しください。');
     return;
   }
-  // disabled / not_friend / throttled / bad_email / ambiguous / send_failed
+  // 未友だち → 友だち追加ステップへ誘導（一気通貫）。追加後に「次へ」でこのメールで再試行。
+  if (json?.code === 'not_friend') {
+    renderFriendAddStep(email, '友だち追加が完了したら「追加した・次へ進む」を押してください。');
+    return;
+  }
+  // disabled / throttled / bad_email / ambiguous / send_failed
   renderEmailStep(email, json?.message ?? json?.error ?? 'コードを送信できませんでした。');
 }
 
@@ -277,7 +282,7 @@ async function verifyCode(email: string, code: string): Promise<void> {
 // LINE友だちでない人は、まず公式アカウントの友だち追加へ誘導。
 // 追加して戻ってくると、自動で友だち判定し直してメール入力へ進む。
 const FRIEND_ADD_URL = 'https://line.me/R/ti/p/@oryzae_foodcosme';
-function renderFriendAddStep(notice = ''): void {
+function renderFriendAddStep(email = '', notice = ''): void {
   render(`
     <div class="card">
       ${brandHeader()}
@@ -285,47 +290,36 @@ function renderFriendAddStep(notice = ''): void {
       <p class="message">送料無料クーポンを受け取るには、<br>先にLINEで友だち追加をお願いします🌾</p>
       ${notice ? `<p class="error" style="font-size:12px;">${escapeHtml(notice)}</p>` : ''}
       <a href="${FRIEND_ADD_URL}" style="${PRIMARY_BTN_STYLE}display:block;text-align:center;text-decoration:none;box-sizing:border-box;">友だち追加する</a>
-      <p style="font-size:12px;color:#999;margin-top:14px;line-height:1.7;">追加したら、この画面に戻ってきてください。<br>自動で次に進みます。</p>
-      <button id="friendDoneBtn" style="${LINK_BTN_STYLE}">追加した・次へ進む</button>
+      <p style="font-size:12px;color:#999;margin-top:14px;line-height:1.7;">追加したら、この画面に戻って<br>下のボタンを押してください。</p>
+      <button id="friendDoneBtn" style="${PRIMARY_BTN_STYLE}background:#fff;color:#06C755;border:1px solid #06C755;">追加した・次へ進む</button>
       ${trustFooter()}
     </div>
   `);
-  // 友だち追加後に画面へ戻ってきたら、友だち判定を再チェックしてメール入力へ
-  const recheck = async (manual: boolean): Promise<void> => {
-    try {
-      const { friendFlag } = await liff.getFriendship();
-      if (friendFlag) { renderEmailStep(); return; }
-      if (manual) renderFriendAddStep('まだ友だち追加が確認できません。追加してから「次へ進む」を押してください。');
-    } catch {
-      if (manual) renderEmailStep(); // 判定不可な環境では手動で先へ進める
-    }
+  // 「次へ」: emailがあればサーバ側で友だち判定し直す（友だちになっていればコードが飛ぶ。
+  //           まだ未友だちなら not_friend が返り、本ステップに戻る）。emailが無ければメール入力へ。
+  const proceed = (): void => {
+    if (email) { void requestCode(email); return; }
+    renderEmailStep();
   };
+  // bot連携済みの環境では、画面に戻ってきたとき友だち判定で自動で進む（未連携環境はthrow→手動ボタンで進む）
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void recheck(false);
+    if (document.visibilityState !== 'visible') return;
+    liff.getFriendship().then(({ friendFlag }) => { if (friendFlag) proceed(); }).catch(() => { /* 手動ボタンで進む */ });
   });
-  document.getElementById('friendDoneBtn')?.addEventListener('click', () => { void recheck(true); });
+  document.getElementById('friendDoneBtn')?.addEventListener('click', proceed);
 }
 
 export async function initEmailLink(): Promise<void> {
   try {
-    // 診断モード: ?fadebug=1 のとき、友だち判定の生の結果/エラーを画面に出して停止する。
-    if (new URLSearchParams(window.location.search).get('fadebug') === '1') {
-      let result: string;
-      try {
-        const fs = await liff.getFriendship();
-        result = `getFriendship 成功 → friendFlag = ${fs.friendFlag}`;
-      } catch (e) {
-        result = `getFriendship エラー → ${e instanceof Error ? e.message : String(e)}`;
-      }
-      render(`<div class="card">${brandHeader()}<h2 style="color:#333;">友だち判定 診断</h2><p class="message" style="word-break:break-all;font-size:13px;">${escapeHtml(result)}</p></div>`);
-      return;
-    }
-    // 一気通貫: まずLINE友だちか判定。未友だちなら友だち追加へ誘導 → 追加後にメール入力へ。
+    // 一気通貫の友だち判定は「サーバ側（friendレコードの有無）」で行う。
+    // ここで先に getFriendship を試し、bot連携済みなら未友だちを早期に検知して友だち追加へ。
+    // bot未連携の環境では getFriendship が例外になるため、まずメール入力へ進み、
+    // request-code が not_friend を返した時点で友だち追加ステップを出す（= 確実に動く本線）。
     let isFriend = true;
     try {
       isFriend = (await liff.getFriendship()).friendFlag;
     } catch {
-      isFriend = true; // 判定不可なら従来どおりメール入力へ（サーバ側が not_friend で保護）
+      isFriend = true; // 判定不可ならメール入力へ（サーバの not_friend で友だち追加に誘導）
     }
     if (isFriend) renderEmailStep();
     else renderFriendAddStep();
