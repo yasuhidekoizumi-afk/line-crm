@@ -118,34 +118,42 @@ liffRoutes.get('/auth/line', async (c) => {
     return c.redirect(qrUrl);
   }
 
-  // PC: show QR code page
+  // PC: show QR code page（ORYZAEブランド版）
   return c.html(`<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LINE で友だち追加</title>
+  <title>LINEで友だち追加＆連携 — フードコスメ ORYZAE</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Hiragino Sans', system-ui, sans-serif; background: #0d1117; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-    .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 48px; text-align: center; max-width: 480px; width: 90%; }
-    h1 { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
-    .sub { font-size: 14px; color: rgba(255,255,255,0.5); margin-bottom: 32px; }
-    .qr { background: #fff; border-radius: 16px; padding: 24px; display: inline-block; margin-bottom: 24px; }
-    .qr img { display: block; width: 240px; height: 240px; }
-    .hint { font-size: 13px; color: rgba(255,255,255,0.4); line-height: 1.6; }
-    .badge { display: inline-block; margin-top: 24px; padding: 8px 20px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #06C755; background: rgba(6,199,85,0.1); border: 1px solid rgba(6,199,85,0.2); }
+    body { font-family: 'Zen Kaku Gothic New', 'Hiragino Sans', system-ui, sans-serif; background: #f7f1e3; color: #6b4f23; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+    .card { background: #fff; border: 1px solid #e8dcc0; border-radius: 20px; padding: 40px 32px; text-align: center; max-width: 480px; width: 100%; box-shadow: 0 4px 20px rgba(107,79,35,0.06); }
+    .brand { font-size: 13px; font-weight: 700; letter-spacing: 0.18em; color: #c98a2e; margin-bottom: 4px; }
+    .brand-sub { font-size: 11px; color: #9c8456; margin-bottom: 28px; letter-spacing: 0.05em; }
+    h1 { font-size: 20px; font-weight: 800; margin-bottom: 8px; color: #6b4f23; line-height: 1.5; }
+    .sub { font-size: 13px; color: #9c8456; margin-bottom: 28px; line-height: 1.6; }
+    .qr { background: #fff; border: 1px solid #e8dcc0; border-radius: 16px; padding: 20px; display: inline-block; margin-bottom: 24px; }
+    .qr img { display: block; width: 220px; height: 220px; }
+    .perk { background: #fbf8f1; border: 1px solid #e8dcc0; border-radius: 12px; padding: 14px 18px; margin-bottom: 20px; font-size: 13px; color: #6b4f23; line-height: 1.7; }
+    .perk strong { color: #06C755; font-weight: 700; }
+    .hint { font-size: 12px; color: #9c8456; line-height: 1.7; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>全機能を使う（0円）</h1>
-    <p class="sub">スマートフォンで QR コードを読み取ってください</p>
+    <div class="brand">ORYZAE</div>
+    <div class="brand-sub">フードコスメ オリゼ</div>
+    <h1>LINEで友だち追加＆<br>アカウント連携</h1>
+    <p class="sub">スマートフォンでQRコードを<br>読み取ってください</p>
     <div class="qr">
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrUrl)}" alt="QR Code">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrUrl)}" alt="LINE 友だち追加 QRコード">
     </div>
-    <p class="hint">LINE アプリのカメラまたは<br>スマートフォンのカメラで読み取れます</p>
-    <div class="badge">LINE Harness OSS</div>
+    <div class="perk">
+      🎁 友だち追加＋連携で<br>
+      <strong>送料無料クーポン</strong>プレゼント
+    </div>
+    <p class="hint">LINEアプリのカメラ、または<br>スマートフォンのカメラで読み取れます</p>
   </div>
 </body>
 </html>`);
