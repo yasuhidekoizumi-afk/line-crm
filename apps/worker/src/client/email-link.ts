@@ -308,6 +308,18 @@ function renderFriendAddStep(notice = ''): void {
 
 export async function initEmailLink(): Promise<void> {
   try {
+    // 診断モード: ?fadebug=1 のとき、友だち判定の生の結果/エラーを画面に出して停止する。
+    if (new URLSearchParams(window.location.search).get('fadebug') === '1') {
+      let result: string;
+      try {
+        const fs = await liff.getFriendship();
+        result = `getFriendship 成功 → friendFlag = ${fs.friendFlag}`;
+      } catch (e) {
+        result = `getFriendship エラー → ${e instanceof Error ? e.message : String(e)}`;
+      }
+      render(`<div class="card">${brandHeader()}<h2 style="color:#333;">友だち判定 診断</h2><p class="message" style="word-break:break-all;font-size:13px;">${escapeHtml(result)}</p></div>`);
+      return;
+    }
     // 一気通貫: まずLINE友だちか判定。未友だちなら友だち追加へ誘導 → 追加後にメール入力へ。
     let isFriend = true;
     try {
