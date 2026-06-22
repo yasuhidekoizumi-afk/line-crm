@@ -8,7 +8,9 @@
  *   - 期間は ?start=YYYY-MM-DD&end=YYYY-MM-DD で指定（必須）。
  *   - 売上系は packages/db の `shopify_orders` を集計（processed_at 基準・JST）。
  *   - LINE 配信は `broadcasts` を集計。
- *   - メルマガ実績(Shopify Email)は SHOPIFY_ADMIN_TOKEN を使って Admin API から取得。
+ *   - メルマガ実績(Shopify Email)は SHOPIFY_ADMIN_TOKEN_CRM (CRM週次レポート専用トークン)
+ *     を使って Admin API から取得。既存の SHOPIFY_ADMIN_TOKEN とは別管理し、
+ *     既存機能(ポイント補填/誕生日クーポン/SocialPLUS連携/商品同期等)への影響を切り離す。
  *
  * 認証は他ルートと同じく authMiddleware に依存（index.ts 側でラップ済み）。
  */
@@ -253,20 +255,26 @@ crmWeekly.get('/api/crm-weekly/broadcasts', async (c) => {
 // ---------------------------------------------------------------------------
 // GET /api/crm-weekly/email-campaigns
 //   返り値: 期間内の Shopify Email キャンペーン（Admin API 経由）
-//   要: SHOPIFY_ADMIN_TOKEN, SHOPIFY_SHOP_DOMAIN (例: yasuhide-koizumi.myshopify.com)
+//   要: SHOPIFY_ADMIN_TOKEN_CRM (CRM週次レポート専用), SHOPIFY_SHOP_DOMAIN
+//
+//   設計判断:
+//     既存 SHOPIFY_ADMIN_TOKEN は ポイント補填/誕生日クーポン/商品同期等の重要機能で
+//     稼働中のため、上書きでスコープ追加するとそれらが壊れるリスクがある。
+//     よって CRM週次レポート用には別シークレット (SHOPIFY_ADMIN_TOKEN_CRM) を使用する。
 // ---------------------------------------------------------------------------
 crmWeekly.get('/api/crm-weekly/email-campaigns', async (c) => {
   const p = parsePeriod(c);
   if ('error' in p) return c.json({ success: false, error: p.error }, 400);
 
-  const token = c.env.SHOPIFY_ADMIN_TOKEN;
+  const token = c.env.SHOPIFY_ADMIN_TOKEN_CRM;
   const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
   if (!token) {
     return c.json(
       {
         success: false,
         error:
-          'SHOPIFY_ADMIN_TOKEN が未設定です。Cloudflare Workers の Secret に追加してください。',
+          'SHOPIFY_ADMIN_TOKEN_CRM が未設定です。Cloudflare Workers の Secret に追加してください。' +
+          ' (CRM週次レポート専用のShopifyトークン。既存の SHOPIFY_ADMIN_TOKEN とは別管理)',
       },
       503
     );

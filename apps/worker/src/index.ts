@@ -115,6 +115,9 @@ export type Env = {
     WORKER_URL: string;
     X_HARNESS_URL?: string;
     SHOPIFY_ADMIN_TOKEN?: string;
+    // CRM週次レポート専用Shopifyトークン (apps/worker/src/routes/crm-weekly.ts で使用)
+    // 既存の SHOPIFY_ADMIN_TOKEN とは別管理。理由は crm-weekly.ts のヘッダーコメント参照
+    SHOPIFY_ADMIN_TOKEN_CRM?: string;
     SHOPIFY_SHOP_DOMAIN?: string;
     SHOPIFY_CLIENT_ID?: string;
     SHOPIFY_CLIENT_SECRET?: string;
