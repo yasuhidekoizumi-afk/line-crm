@@ -2109,4 +2109,74 @@ loyalty.post('/api/loyalty/admin/link-by-name', async (c) => {
   }
 });
 
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/test-link-coupon — 送料無料クーポン通知の動作テスト
+//
+// link_reward_type を全体ONにする前に、本番の連携クーポン発行＋LINE通知が
+// 正しく動くかを「指定した相手1人だけ」で試す。
+//   body: { shopifyCustomerId: string, lineUserId?: string, expiryDays?: number }
+//   - shopifyCustomerId: クーポンを発行する対象（本人限定クーポンになる）
+//   - lineUserId: 指定すると、その人のLINEへ本番と同じ文面で通知を送る（省略時は発行のみ）
+//   ※ loyalty_transactions には記録しない（テストなので「受領済み」扱いにしない）。
+//   ※ 認証必須（authMiddleware: Bearer API_KEY）。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/test-link-coupon', async (c) => {
+  try {
+    const body = await c.req.json<{ shopifyCustomerId?: string; lineUserId?: string; expiryDays?: number }>().catch(() => ({}));
+    const shopifyCustomerId = (body.shopifyCustomerId ?? '').trim();
+    if (!shopifyCustomerId) {
+      return c.json({ success: false, error: 'shopifyCustomerId は必須です' }, 400);
+    }
+    const expiryDays = body.expiryDays && body.expiryDays > 0 ? body.expiryDays : 30;
+
+    // 1) 本番と同じ発行ロジックでクーポンを作る
+    const { issueFreeShippingCoupon } = await import('../services/link-reward-coupon.js');
+    const issued = await issueFreeShippingCoupon(c.env, shopifyCustomerId, expiryDays);
+    if (!issued.ok) {
+      return c.json({ success: false, error: `クーポン発行失敗: ${issued.error}` }, 500);
+    }
+
+    // 2) lineUserId 指定時は、本番と同じ文面でLINE通知を送る
+    let pushed = false;
+    let pushError: string | null = null;
+    if (body.lineUserId) {
+      try {
+        const { LineClient } = await import('@line-crm/line-sdk');
+        const accountRow = await c.env.DB
+          .prepare('SELECT channel_access_token FROM line_accounts WHERE is_active = 1 LIMIT 1')
+          .first<{ channel_access_token: string }>();
+        const accessToken = accountRow?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
+        const expDisp = new Date(issued.endsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'long', day: 'numeric' });
+        const lines = [
+          '【テスト送信】',
+          '🎁 LINE連携ありがとうございます！',
+          '',
+          `送料無料クーポン：${issued.code}`,
+          `有効期限：${expDisp}`,
+          '',
+          'お会計画面のクーポンコード欄に入力すると送料が無料になります（1回限り）。',
+        ];
+        await new LineClient(accessToken).pushMessage(body.lineUserId, [{ type: 'text', text: lines.join('\n') }]);
+        pushed = true;
+      } catch (e) {
+        pushError = e instanceof Error ? e.message : String(e);
+      }
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        code: issued.code,
+        endsAt: issued.endsAt,
+        pushed,
+        pushError,
+        note: 'これはテスト発行です。loyalty_transactionsには記録していません。本番の挙動と同じクーポン＋通知です。',
+      },
+    });
+  } catch (e) {
+    console.error('POST /api/loyalty/admin/test-link-coupon error:', e);
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'test-link-coupon failed' }, 500);
+  }
+});
+
 export { loyalty };
