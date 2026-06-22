@@ -160,7 +160,8 @@ export default function CrmWeeklyPage() {
         // Email API 失敗時はメッセージだけ表示（他は出す）
         setEmailError(
           'Shopify Email キャンペーン情報の取得に失敗しました。' +
-            'SHOPIFY_ADMIN_TOKEN が未設定か、スコープ不足の可能性があります。'
+            'SHOPIFY_ADMIN_TOKEN_CRM (CRM週次レポート専用Shopifyトークン) ' +
+            'が未設定の可能性があります。Cloudflare Workers の Secret に追加してください。'
         )
       }
     } catch (err: any) {
