@@ -57,15 +57,25 @@ loyalty.get('/api/loyalty/settings', async (c) => {
 loyalty.put('/api/loyalty/settings/:key', async (c) => {
   try {
     const key = c.req.param('key');
-    const NUMERIC_KEYS = ['point_rate', 'point_value', 'registration_bonus', 'expiry_days'];
-    const FLAG_KEYS = ['yen_only', 'order_metafield_enabled', 'customer_metafield_enabled', 'subscription_points_enabled'];
-    const VALID_KEYS = [...NUMERIC_KEYS, ...FLAG_KEYS];
+    const NUMERIC_KEYS = ['point_rate', 'point_value', 'registration_bonus', 'expiry_days', 'link_coupon_expiry_days'];
+    const FLAG_KEYS = ['yen_only', 'order_metafield_enabled', 'customer_metafield_enabled', 'subscription_points_enabled', 'link_bonus_enabled'];
+    // 列挙値キー（許可された値のみ受け付ける）
+    const ENUM_KEYS: Record<string, string[]> = { link_reward_type: ['points', 'free_shipping'] };
+    const VALID_KEYS = [...NUMERIC_KEYS, ...FLAG_KEYS, ...Object.keys(ENUM_KEYS)];
     if (!VALID_KEYS.includes(key)) {
       return c.json({ success: false, error: '無効な設定キーです' }, 400);
     }
     const body = await c.req.json<{ value: string }>();
     if (body.value === undefined || body.value === null) {
       return c.json({ success: false, error: 'value は必須です' }, 400);
+    }
+    // 列挙値系（link_reward_type 等）: 許可リスト内の値のみ
+    if (key in ENUM_KEYS) {
+      if (!ENUM_KEYS[key].includes(body.value)) {
+        return c.json({ success: false, error: `${key} は ${ENUM_KEYS[key].join(' / ')} のいずれかで入力してください` }, 400);
+      }
+      await setLoyaltySetting(c.env.DB, key, body.value);
+      return c.json({ success: true });
     }
     // フラグ系（0/1）バリデーション
     if (FLAG_KEYS.includes(key)) {
