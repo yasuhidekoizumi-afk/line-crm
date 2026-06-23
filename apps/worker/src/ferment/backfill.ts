@@ -165,11 +165,15 @@ backfillRoutes.post('/customers', async (c) => {
  * Response: { processed, synced, skipped, next_page_info, done }
  */
 backfillRoutes.post('/shopify-customers', async (c) => {
-  const body = await c.req.json<{ page_info?: string; since_id?: string; region?: 'JP' | 'US' }>()
-    .catch(() => ({} as { page_info?: string; since_id?: string; region?: 'JP' | 'US' }))
+  const body = await c.req.json<{ page_info?: string; since_id?: string; region?: 'JP' | 'US'; limit?: number }>()
+    .catch(() => ({} as { page_info?: string; since_id?: string; region?: 'JP' | 'US'; limit?: number }))
   const region = body.region ?? 'JP'
   const pageInfo = body.page_info
   const sinceId = body.since_id
+  // 1呼び出しあたりの取得件数。顧客1件につきD1往復が複数あり、250件だと
+  // サブリクエスト上限（約1,000/invocation）に達してWorkerが 1102 で落ちることがある。
+  // クライアントが小さめの値を渡せるよう可変化（既定250・範囲1〜250）。
+  const pageLimit = Math.min(Math.max(Math.trunc(Number(body.limit)) || 250, 1), 250)
 
   const db = c.env.DB
   const shopifyDomain = c.env.SHOPIFY_SHOP_DOMAIN
@@ -180,7 +184,7 @@ backfillRoutes.post('/shopify-customers', async (c) => {
   }
 
   // Shopify Admin API: 250件/req のページング
-  let url = `https://${shopifyDomain}/admin/api/2024-01/customers.json?limit=250`
+  let url = `https://${shopifyDomain}/admin/api/2024-01/customers.json?limit=${pageLimit}`
   if (pageInfo) {
     url += `&page_info=${encodeURIComponent(pageInfo)}`
   } else if (sinceId) {
