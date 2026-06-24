@@ -205,6 +205,40 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
   }
 });
 
+// GET /api/broadcasts/_debug/triggers - DB内のトリガー一覧（broadcasts_old バグ調査用）
+broadcasts.get('/api/broadcasts/_debug/triggers', async (c) => {
+  try {
+    const result = await c.env.DB
+      .prepare(`SELECT name, sql FROM sqlite_master WHERE type='trigger'`)
+      .all<{ name: string; sql: string }>();
+    const stale = result.results.filter((t) => t.sql && t.sql.includes('broadcasts_old'));
+    return c.json({ success: true, data: { all: result.results, staleReferencingBroadcastsOld: stale } });
+  } catch (err) {
+    console.error('GET /api/broadcasts/_debug/triggers error:', err);
+    return c.json({ success: false, error: String(err) }, 500);
+  }
+});
+
+// POST /api/broadcasts/_debug/drop-stale-triggers - broadcasts_old を参照する古いトリガーを全削除
+broadcasts.post('/api/broadcasts/_debug/drop-stale-triggers', async (c) => {
+  try {
+    const result = await c.env.DB
+      .prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND sql LIKE '%broadcasts_old%'`)
+      .all<{ name: string }>();
+    const dropped: string[] = [];
+    for (const row of result.results) {
+      // DROP TRIGGER はパラメータバインドできないので名前を直接埋め込む（識別子検証）
+      if (!/^[A-Za-z0-9_]+$/.test(row.name)) continue;
+      await c.env.DB.prepare(`DROP TRIGGER IF EXISTS ${row.name}`).run();
+      dropped.push(row.name);
+    }
+    return c.json({ success: true, data: { dropped } });
+  } catch (err) {
+    console.error('POST /api/broadcasts/_debug/drop-stale-triggers error:', err);
+    return c.json({ success: false, error: String(err) }, 500);
+  }
+});
+
 // POST /api/broadcasts/:id/reset - 「送信中」で固まった配信をドラフトに強制リセット
 broadcasts.post('/api/broadcasts/:id/reset', async (c) => {
   try {

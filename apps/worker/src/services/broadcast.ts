@@ -90,9 +90,17 @@ export async function processBroadcastSend(
         try {
           await lineClient.multicast(lineUserIds, batchMessages);
           successCount += batch.length;
+        } catch (err) {
+          console.error(`Multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
+          // 失敗バッチの件数と理由を記録（握りつぶさず可視化する）
+          failedCount += batch.length;
+          errorMessages.push(err instanceof Error ? err.message : String(err));
+          continue; // LINE送信が失敗したらログも書かずに次のバッチへ
+        }
 
-          // Log only successfully sent messages
-          for (const friend of batch) {
+        // ログ書き込みエラーは LINE 配信失敗とは別扱い（ログ失敗で「配信失敗」と誤表示しない）
+        for (const friend of batch) {
+          try {
             const logId = crypto.randomUUID();
             await db
               .prepare(
@@ -101,12 +109,9 @@ export async function processBroadcastSend(
               )
               .bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now)
               .run();
+          } catch (logErr) {
+            console.warn(`messages_log INSERT failed (LINE送信は成功済み):`, logErr);
           }
-        } catch (err) {
-          console.error(`Multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
-          // 失敗バッチの件数と理由を記録（握りつぶさず可視化する）
-          failedCount += batch.length;
-          errorMessages.push(err instanceof Error ? err.message : String(err));
         }
       }
     } else if (broadcast.target_type === 'individual') {
@@ -134,7 +139,14 @@ export async function processBroadcastSend(
         try {
           await lineClient.multicast(batchUserIds, messages);
           successCount += batch.length;
-          for (const friend of batch) {
+        } catch (err) {
+          console.error(`Individual multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
+          failedCount += batch.length;
+          errorMessages.push(err instanceof Error ? err.message : String(err));
+          continue;
+        }
+        for (const friend of batch) {
+          try {
             const logId = crypto.randomUUID();
             await db
               .prepare(
@@ -143,11 +155,9 @@ export async function processBroadcastSend(
               )
               .bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now)
               .run();
+          } catch (logErr) {
+            console.warn(`messages_log INSERT failed (LINE送信は成功済み):`, logErr);
           }
-        } catch (err) {
-          console.error(`Individual multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
-          failedCount += batch.length;
-          errorMessages.push(err instanceof Error ? err.message : String(err));
         }
       }
     } else if (broadcast.target_type === 'segment') {
@@ -183,9 +193,15 @@ export async function processBroadcastSend(
         try {
           await lineClient.multicast(batch, batchMessages);
           successCount += batch.length;
-
-          // Log messages (friend_id unknown for segment sends, use placeholder)
-          for (const lineUserId of batch) {
+        } catch (err) {
+          console.error(`Segment multicast batch ${batchIndex} failed:`, err);
+          failedCount += batch.length;
+          errorMessages.push(err instanceof Error ? err.message : String(err));
+          continue;
+        }
+        // ログ書き込みエラーは LINE 配信失敗とは別扱い
+        for (const lineUserId of batch) {
+          try {
             const logId = crypto.randomUUID();
             await db
               .prepare(
@@ -194,11 +210,9 @@ export async function processBroadcastSend(
               )
               .bind(logId, broadcast.message_type, broadcast.message_content, broadcastId, now)
               .run();
+          } catch (logErr) {
+            console.warn(`messages_log INSERT failed (LINE送信は成功済み):`, logErr);
           }
-        } catch (err) {
-          console.error(`Segment multicast batch ${batchIndex} failed:`, err);
-          failedCount += batch.length;
-          errorMessages.push(err instanceof Error ? err.message : String(err));
         }
       }
     }
