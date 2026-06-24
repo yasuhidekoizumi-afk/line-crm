@@ -260,6 +260,18 @@ broadcasts.post('/api/broadcasts/_debug/fix-messages-log-fk', async (c) => {
   }
 });
 
+// GET /api/broadcasts/_debug/messages-log-schema - messages_log の CREATE TABLE 文を返す
+broadcasts.get('/api/broadcasts/_debug/messages-log-schema', async (c) => {
+  try {
+    const row = await c.env.DB
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_log'`)
+      .first<{ sql: string }>();
+    return c.json({ success: true, data: row });
+  } catch (err) {
+    return c.json({ success: false, error: String(err) }, 500);
+  }
+});
+
 // GET /api/broadcasts/_debug/triggers - DB内のトリガー一覧（broadcasts_old バグ調査用）
 broadcasts.get('/api/broadcasts/_debug/triggers', async (c) => {
   try {
