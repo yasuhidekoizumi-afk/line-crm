@@ -78,6 +78,31 @@ export interface Segment {
   last_computed_at: string | null
   created_at: string
   updated_at: string
+  // Shopify ミラー取り込み（migration 046）
+  source?: string
+  shopify_segment_id?: string | null
+  sync_status?: string | null
+  sync_cursor?: string | null
+  sync_error?: string | null
+}
+
+/** Shopify ネイティブの顧客セグメント + ハーネス側の取り込み状況 */
+export interface ShopifySegmentItem {
+  gid: string
+  name: string
+  query: string
+  last_edit_date: string | null
+  mirrored: boolean
+  segment_id: string | null
+  member_count: number | null
+  sync_status: string | null
+  last_synced_at: string | null
+}
+
+export interface ShopifySyncResult {
+  done: boolean
+  processedPages: number
+  totalMembers: number
 }
 
 export interface Customer {
@@ -286,6 +311,27 @@ export const fermentApi = {
       if (opts?.with_email) query.set('with_email', 'true')
       return fetchApi<ApiResult<Customer[]>>(`/api/segments/${id}/members?${query}`)
     },
+  },
+
+  // ---- Shopify セグメント取り込み（ミラー）----
+  shopifySegments: {
+    // Shopify の顧客セグメント一覧 + ハーネス側のミラー状況
+    list: () =>
+      fetchApi<ApiResult<ShopifySegmentItem[]>>('/api/shopify-segments'),
+    // 取り込みON（ミラー作成 + 初回同期1チャンク）
+    mirror: (gid: string, name: string, query?: string) =>
+      fetchApi<ApiResult<{ segment: Segment; sync: ShopifySyncResult }>>('/api/shopify-segments/mirror', {
+        method: 'POST',
+        body: JSON.stringify({ gid, name, query }),
+      }),
+    // 取り込みOFF（ミラー削除）
+    unmirror: (segmentId: string) =>
+      fetchApi<ApiResult<null>>(`/api/shopify-segments/mirror/${segmentId}`, { method: 'DELETE' }),
+    // 手動同期（続き / 再同期）
+    sync: (segmentId: string) =>
+      fetchApi<ApiResult<ShopifySyncResult>>(`/api/shopify-segments/mirror/${segmentId}/sync`, {
+        method: 'POST',
+      }),
   },
 
   // ---- 顧客 ----
