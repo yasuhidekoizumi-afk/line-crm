@@ -227,35 +227,40 @@ broadcasts.get('/api/broadcasts/_debug/schema', async (c) => {
   }
 });
 
-// POST /api/broadcasts/_debug/fix-messages-log-fk - messages_log を再作成して FK 参照先を broadcasts に戻す
-broadcasts.post('/api/broadcasts/_debug/fix-messages-log-fk', async (c) => {
+// POST /api/broadcasts/_debug/fix-broadcasts-old-fk - broadcasts_old を参照する全テーブルを修復
+broadcasts.post('/api/broadcasts/_debug/fix-broadcasts-old-fk', async (c) => {
   try {
-    // 1. 現在のスキーマを取得
-    const schemaRow = await c.env.DB
-      .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_log'`)
-      .first<{ sql: string }>();
-    if (!schemaRow) {
-      return c.json({ success: false, error: 'messages_log not found' }, 404);
-    }
-    const originalSql = schemaRow.sql;
-
-    // 2. broadcasts_old 参照を broadcasts に置換した新スキーマを作る
-    const fixedSql = originalSql.replace(/broadcasts_old/g, 'broadcasts');
-    if (fixedSql === originalSql) {
-      return c.json({ success: true, data: { changed: false, reason: 'broadcasts_old 参照なし' } });
+    // 1. broadcasts_old を参照しているテーブルを全部探す
+    const targets = await c.env.DB
+      .prepare(`SELECT name, sql FROM sqlite_master WHERE type='table' AND sql LIKE '%broadcasts_old%'`)
+      .all<{ name: string; sql: string }>();
+    if (targets.results.length === 0) {
+      return c.json({ success: true, data: { changed: false, reason: 'broadcasts_old 参照テーブルなし' } });
     }
 
-    // 3. テーブル再作成（外部キー一時無効化）
+    // 2. 各テーブルを「リネーム → 新スキーマ作成 → データコピー → 旧削除」で修復
     await c.env.DB.prepare(`PRAGMA foreign_keys=OFF`).run();
-    await c.env.DB.prepare(`ALTER TABLE messages_log RENAME TO messages_log_tmp`).run();
-    await c.env.DB.prepare(fixedSql).run();
-    await c.env.DB.prepare(`INSERT INTO messages_log SELECT * FROM messages_log_tmp`).run();
-    await c.env.DB.prepare(`DROP TABLE messages_log_tmp`).run();
-    await c.env.DB.prepare(`PRAGMA foreign_keys=ON`).run();
+    const fixed: { name: string; originalSql: string; fixedSql: string }[] = [];
+    try {
+      for (const t of targets.results) {
+        if (!/^[A-Za-z0-9_]+$/.test(t.name)) continue;
+        const fixedSql = t.sql.replace(/broadcasts_old/g, 'broadcasts');
+        if (fixedSql === t.sql) continue;
 
-    return c.json({ success: true, data: { changed: true, originalSql, fixedSql } });
+        const tmpName = `${t.name}_fkfix_tmp`;
+        await c.env.DB.prepare(`ALTER TABLE ${t.name} RENAME TO ${tmpName}`).run();
+        await c.env.DB.prepare(fixedSql).run();
+        await c.env.DB.prepare(`INSERT INTO ${t.name} SELECT * FROM ${tmpName}`).run();
+        await c.env.DB.prepare(`DROP TABLE ${tmpName}`).run();
+        fixed.push({ name: t.name, originalSql: t.sql, fixedSql });
+      }
+    } finally {
+      await c.env.DB.prepare(`PRAGMA foreign_keys=ON`).run();
+    }
+
+    return c.json({ success: true, data: { changed: fixed.length > 0, fixed } });
   } catch (err) {
-    console.error('POST /api/broadcasts/_debug/fix-messages-log-fk error:', err);
+    console.error('POST /api/broadcasts/_debug/fix-broadcasts-old-fk error:', err);
     return c.json({ success: false, error: String(err) }, 500);
   }
 });
