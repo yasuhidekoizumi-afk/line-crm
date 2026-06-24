@@ -145,6 +145,12 @@ export interface Segment {
   last_computed_at: string | null;
   created_at: string;
   updated_at: string;
+  // Shopify ミラー取り込み（migration 046）
+  source: string;                    // 'rule'（ハーネス独自ルール） | 'shopify'（Shopifyセグメントの写し）
+  shopify_segment_id: string | null; // gid://shopify/Segment/...（source='shopify' のみ）
+  sync_cursor: string | null;        // 分割同期の再開カーソル
+  sync_status: string | null;        // null（通常/完了） | 'syncing' | 'error'
+  sync_error: string | null;         // 直近の同期エラー文言
 }
 
 export interface EmailLog {
@@ -817,12 +823,23 @@ export async function getSegmentById(db: D1Database, segmentId: string): Promise
 
 export async function createSegment(
   db: D1Database,
-  data: Omit<Segment, 'customer_count' | 'last_computed_at' | 'created_at' | 'updated_at'>,
+  data: Omit<
+    Segment,
+    | 'customer_count'
+    | 'last_computed_at'
+    | 'created_at'
+    | 'updated_at'
+    | 'source'
+    | 'shopify_segment_id'
+    | 'sync_cursor'
+    | 'sync_status'
+    | 'sync_error'
+  > & { source?: string; shopify_segment_id?: string | null },
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO segments (segment_id, name, description, rules, channel_scope)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO segments (segment_id, name, description, rules, channel_scope, source, shopify_segment_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       data.segment_id,
@@ -830,6 +847,8 @@ export async function createSegment(
       data.description ?? null,
       data.rules,
       data.channel_scope,
+      data.source ?? 'rule',
+      data.shopify_segment_id ?? null,
     )
     .run();
 }

@@ -62,6 +62,7 @@ import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
 import {
   emailApiRouter,
   segmentRoutes,
+  shopifySegmentRoutes,
   customerRoutes,
   webhookRoutes as fermentWebhookRoutes,
   publicEmailRoutes,
@@ -214,6 +215,7 @@ app.route('/', aiDraft);
 // FERMENT
 app.route('/api/email', emailApiRouter);
 app.route('/api/segments', segmentRoutes);
+app.route('/api/shopify-segments', shopifySegmentRoutes);
 app.route('/api/customers', customerRoutes);
 app.route('/api/ferment/backfill', backfillRoutes);
 app.route('/api/forms', formAdminRoutes);

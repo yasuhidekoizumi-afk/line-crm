@@ -23,6 +23,7 @@ import {
   generateFermentId,
 } from '@line-crm/db';
 import { computeSegment } from '../segment-engine.js';
+import { syncShopifySegmentChunk } from '../shopify-segments.js';
 import type { FermentEnv } from '../types.js';
 
 export const segmentRoutes = new Hono<FermentEnv>();
@@ -118,6 +119,12 @@ segmentRoutes.post('/:id/recompute', async (c) => {
     const id = c.req.param('id');
     const existing = await getSegmentById(c.env.DB, id);
     if (!existing) return c.json({ success: false, error: 'Not found' }, 404);
+
+    // Shopify ミラーは Shopify から同期（ルール評価ではない）。1チャンク進める。
+    if (existing.source === 'shopify') {
+      const sync = await syncShopifySegmentChunk(c.env, id);
+      return c.json({ success: true, data: { customer_count: sync.totalMembers, sync } });
+    }
 
     const count = await computeSegment(id, c.env.DB);
     return c.json({ success: true, data: { customer_count: count } });

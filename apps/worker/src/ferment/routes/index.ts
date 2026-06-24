@@ -11,6 +11,7 @@ import { emailFlowRoutes } from './flows.js';
 import { emailLogRoutes } from './logs.js';
 import { suppressionRoutes } from './suppressions.js';
 import { segmentRoutes } from './segments.js';
+import { shopifySegmentRoutes } from './shopify-segments.js';
 import { customerRoutes } from './customers.js';
 import { webhookRoutes } from './webhooks.js';
 import { publicEmailRoutes } from './unsubscribe.js';
@@ -46,6 +47,7 @@ emailApiRouter.route('/', suppressionRoutes);
 export {
   emailApiRouter,
   segmentRoutes,
+  shopifySegmentRoutes,
   customerRoutes,
   webhookRoutes,
   publicEmailRoutes,
