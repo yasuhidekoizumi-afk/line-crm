@@ -205,6 +205,61 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
   }
 });
 
+// GET /api/broadcasts/_debug/schema - messages_log テーブルのスキーマ定義（外部キー調査用）
+broadcasts.get('/api/broadcasts/_debug/schema', async (c) => {
+  try {
+    const tables = await c.env.DB
+      .prepare(`SELECT name, sql FROM sqlite_master WHERE type='table' AND sql LIKE '%broadcasts_old%'`)
+      .all<{ name: string; sql: string }>();
+    const fkList = await c.env.DB
+      .prepare(`SELECT * FROM pragma_foreign_key_list('messages_log')`)
+      .all();
+    return c.json({
+      success: true,
+      data: {
+        tablesReferencingBroadcastsOld: tables.results,
+        messagesLogForeignKeys: fkList.results,
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/broadcasts/_debug/schema error:', err);
+    return c.json({ success: false, error: String(err) }, 500);
+  }
+});
+
+// POST /api/broadcasts/_debug/fix-messages-log-fk - messages_log を再作成して FK 参照先を broadcasts に戻す
+broadcasts.post('/api/broadcasts/_debug/fix-messages-log-fk', async (c) => {
+  try {
+    // 1. 現在のスキーマを取得
+    const schemaRow = await c.env.DB
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='messages_log'`)
+      .first<{ sql: string }>();
+    if (!schemaRow) {
+      return c.json({ success: false, error: 'messages_log not found' }, 404);
+    }
+    const originalSql = schemaRow.sql;
+
+    // 2. broadcasts_old 参照を broadcasts に置換した新スキーマを作る
+    const fixedSql = originalSql.replace(/broadcasts_old/g, 'broadcasts');
+    if (fixedSql === originalSql) {
+      return c.json({ success: true, data: { changed: false, reason: 'broadcasts_old 参照なし' } });
+    }
+
+    // 3. テーブル再作成（外部キー一時無効化）
+    await c.env.DB.prepare(`PRAGMA foreign_keys=OFF`).run();
+    await c.env.DB.prepare(`ALTER TABLE messages_log RENAME TO messages_log_tmp`).run();
+    await c.env.DB.prepare(fixedSql).run();
+    await c.env.DB.prepare(`INSERT INTO messages_log SELECT * FROM messages_log_tmp`).run();
+    await c.env.DB.prepare(`DROP TABLE messages_log_tmp`).run();
+    await c.env.DB.prepare(`PRAGMA foreign_keys=ON`).run();
+
+    return c.json({ success: true, data: { changed: true, originalSql, fixedSql } });
+  } catch (err) {
+    console.error('POST /api/broadcasts/_debug/fix-messages-log-fk error:', err);
+    return c.json({ success: false, error: String(err) }, 500);
+  }
+});
+
 // GET /api/broadcasts/_debug/triggers - DB内のトリガー一覧（broadcasts_old バグ調査用）
 broadcasts.get('/api/broadcasts/_debug/triggers', async (c) => {
   try {
