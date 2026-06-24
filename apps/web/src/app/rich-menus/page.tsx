@@ -642,6 +642,9 @@ export default function RichMenusPage() {
   })
   const [aliasError, setAliasError] = useState('')
   const [aliasSaving, setAliasSaving] = useState(false)
+  const [pendingAliases, setPendingAliases] = useState<Record<string, string>>({})
+  const [savingAliasIds, setSavingAliasIds] = useState<Set<string>>(new Set())
+  const [aliasRowErrors, setAliasRowErrors] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -687,15 +690,71 @@ export default function RichMenusPage() {
     }
   }
 
-  const handleUpdateAlias = async (aliasId: string, richMenuId: string) => {
+  const handleAliasDraftChange = (aliasId: string, richMenuId: string, currentSaved: string) => {
+    setAliasRowErrors((prev) => {
+      if (!prev[aliasId]) return prev
+      const next = { ...prev }
+      delete next[aliasId]
+      return next
+    })
+    setPendingAliases((prev) => {
+      const next = { ...prev }
+      if (richMenuId === currentSaved) delete next[aliasId]
+      else next[aliasId] = richMenuId
+      return next
+    })
+  }
+
+  const handleSaveAlias = async (aliasId: string) => {
+    const richMenuId = pendingAliases[aliasId]
     if (!richMenuId) return
+    setSavingAliasIds((prev) => {
+      const next = new Set(prev)
+      next.add(aliasId)
+      return next
+    })
+    setAliasRowErrors((prev) => {
+      if (!prev[aliasId]) return prev
+      const next = { ...prev }
+      delete next[aliasId]
+      return next
+    })
     try {
       const res = await api.richMenuAliases.update(aliasId, richMenuId)
-      if (!res.success) setError(res.error)
-      else await load()
+      if (!res.success) {
+        setAliasRowErrors((prev) => ({ ...prev, [aliasId]: res.error || '保存に失敗しました' }))
+        return
+      }
+      setPendingAliases((prev) => {
+        const next = { ...prev }
+        delete next[aliasId]
+        return next
+      })
+      await load()
     } catch {
-      setError('切替先の更新に失敗しました')
+      setAliasRowErrors((prev) => ({ ...prev, [aliasId]: '切替先の更新に失敗しました' }))
+    } finally {
+      setSavingAliasIds((prev) => {
+        const next = new Set(prev)
+        next.delete(aliasId)
+        return next
+      })
     }
+  }
+
+  const handleResetAliasDraft = (aliasId: string) => {
+    setPendingAliases((prev) => {
+      if (!(aliasId in prev)) return prev
+      const next = { ...prev }
+      delete next[aliasId]
+      return next
+    })
+    setAliasRowErrors((prev) => {
+      if (!prev[aliasId]) return prev
+      const next = { ...prev }
+      delete next[aliasId]
+      return next
+    })
   }
 
   const handleDeleteAlias = async (aliasId: string) => {
@@ -1128,38 +1187,71 @@ export default function RichMenusPage() {
           ) : (
             <div className="space-y-1">
               {aliases.map((a) => {
-                const linkedMenu = menus.find((m) => m.richMenuId === a.richMenuId)
+                const draft = pendingAliases[a.richMenuAliasId]
+                const currentValue = draft ?? a.richMenuId
+                const isDirty = draft !== undefined && draft !== a.richMenuId
+                const isSaving = savingAliasIds.has(a.richMenuAliasId)
+                const rowError = aliasRowErrors[a.richMenuAliasId]
+                const linkedMenu = menus.find((m) => m.richMenuId === currentValue)
                 return (
-                  <div
-                    key={a.richMenuAliasId}
-                    className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded text-xs"
-                  >
-                    <code className="font-mono font-medium text-gray-800 shrink-0">
-                      {a.richMenuAliasId}
-                    </code>
-                    <span className="text-gray-400 shrink-0">→</span>
-                    <select
-                      className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500"
-                      value={a.richMenuId}
-                      onChange={(e) => handleUpdateAlias(a.richMenuAliasId, e.target.value)}
+                  <div key={a.richMenuAliasId} className="space-y-1">
+                    <div
+                      className={`flex items-center gap-3 px-3 py-2 rounded text-xs ${
+                        isDirty ? 'bg-amber-50 ring-1 ring-amber-200' : 'bg-gray-50'
+                      }`}
                     >
-                      {!linkedMenu && (
-                        <option value={a.richMenuId}>
-                          (現在: {a.richMenuId.slice(0, 16)}…・該当メニュー削除済?)
-                        </option>
+                      <code className="font-mono font-medium text-gray-800 shrink-0">
+                        {a.richMenuAliasId}
+                      </code>
+                      <span className="text-gray-400 shrink-0">→</span>
+                      <select
+                        className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100"
+                        value={currentValue}
+                        disabled={isSaving}
+                        onChange={(e) =>
+                          handleAliasDraftChange(a.richMenuAliasId, e.target.value, a.richMenuId)
+                        }
+                      >
+                        {!linkedMenu && (
+                          <option value={currentValue}>
+                            (現在: {currentValue.slice(0, 16)}…・該当メニュー削除済?)
+                          </option>
+                        )}
+                        {menus.map((m) => (
+                          <option key={m.richMenuId} value={m.richMenuId}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                      {isDirty && (
+                        <>
+                          <button
+                            onClick={() => handleSaveAlias(a.richMenuAliasId)}
+                            disabled={isSaving}
+                            className="shrink-0 px-3 py-1 text-[11px] font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 rounded"
+                          >
+                            {isSaving ? '保存中…' : '保存'}
+                          </button>
+                          <button
+                            onClick={() => handleResetAliasDraft(a.richMenuAliasId)}
+                            disabled={isSaving}
+                            className="shrink-0 px-2 py-1 text-[11px] text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded disabled:opacity-50"
+                          >
+                            戻す
+                          </button>
+                        </>
                       )}
-                      {menus.map((m) => (
-                        <option key={m.richMenuId} value={m.richMenuId}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => handleDeleteAlias(a.richMenuAliasId)}
-                      className="shrink-0 px-2 py-1 text-[11px] text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded"
-                    >
-                      削除
-                    </button>
+                      <button
+                        onClick={() => handleDeleteAlias(a.richMenuAliasId)}
+                        disabled={isSaving}
+                        className="shrink-0 px-2 py-1 text-[11px] text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded disabled:opacity-50"
+                      >
+                        削除
+                      </button>
+                    </div>
+                    {rowError && (
+                      <p className="text-[11px] text-red-600 px-3">{rowError}</p>
+                    )}
                   </div>
                 )
               })}
