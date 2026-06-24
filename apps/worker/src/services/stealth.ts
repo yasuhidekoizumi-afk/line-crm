@@ -41,7 +41,8 @@ export function addMessageVariation(text: string, index: number): string {
 
 /**
  * Calculate staggered delay for bulk sending.
- * Spreads messages over time to mimic human-operated account.
+ * Cloudflare Workers の cron は最大 15 分で強制終了される。
+ * バッチ間を 1〜2 秒に抑えることで 10,000 件(20バッチ)でも 40秒以内に完走できる。
  *
  * @param totalMessages Total number of messages to send
  * @param batchIndex Current batch index (0-based)
@@ -49,22 +50,15 @@ export function addMessageVariation(text: string, index: number): string {
  */
 export function calculateStaggerDelay(
   totalMessages: number,
-  batchIndex: number,
+  _batchIndex: number,
 ): number {
   if (totalMessages <= 100) {
     // Small sends: minimal delay with jitter
     return addJitter(100, 500);
   }
 
-  if (totalMessages <= 1000) {
-    // Medium sends: spread over ~2 minutes
-    const baseDelay = (120_000 / Math.ceil(totalMessages / 500)) * batchIndex;
-    return addJitter(baseDelay, 2000);
-  }
-
-  // Large sends: spread over ~5 minutes with more jitter
-  const baseDelay = (300_000 / Math.ceil(totalMessages / 500)) * batchIndex;
-  return addJitter(baseDelay, 5000);
+  // バッチ間は 1〜2 秒で固定（旧実装の 5 分スプレッドは Cloudflare の実行時間制限を超えていた）
+  return addJitter(1000, 1000);
 }
 
 /**

@@ -228,10 +228,17 @@ export async function processScheduledBroadcasts(
   lineClient: LineClient,
   workerUrl?: string,
 ): Promise<void> {
-  const now = jstNow();
   const allBroadcasts = await getBroadcasts(db);
-
   const nowMs = Date.now();
+
+  // cron が起動した時点で "sending" の配信 = 前回の cron が Cloudflare に強制終了された証拠。
+  // ドラフトに戻して再送できる状態にする。
+  const stuck = allBroadcasts.filter((b) => b.status === 'sending');
+  for (const b of stuck) {
+    console.warn(`Auto-recovering stuck broadcast ${b.id} (was sending)`);
+    await updateBroadcastStatus(db, b.id, 'draft');
+  }
+
   const scheduled = allBroadcasts.filter(
     (b) =>
       b.status === 'scheduled' &&

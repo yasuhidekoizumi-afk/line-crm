@@ -4,6 +4,7 @@ import {
   getBroadcastById,
   createBroadcast,
   updateBroadcast,
+  updateBroadcastStatus,
   deleteBroadcast,
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
@@ -200,6 +201,26 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
     return c.json({ success: true, data: updated ? serializeBroadcast(updated) : null });
   } catch (err) {
     console.error('PUT /api/broadcasts/:id error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/broadcasts/:id/reset - 「送信中」で固まった配信をドラフトに強制リセット
+broadcasts.post('/api/broadcasts/:id/reset', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const existing = await getBroadcastById(c.env.DB, id);
+    if (!existing) {
+      return c.json({ success: false, error: 'Broadcast not found' }, 404);
+    }
+    if (existing.status === 'sent') {
+      return c.json({ success: false, error: '送信完了済みの配信はリセットできません' }, 400);
+    }
+    await updateBroadcastStatus(c.env.DB, id, 'draft');
+    const result = await getBroadcastById(c.env.DB, id);
+    return c.json({ success: true, data: result ? serializeBroadcast(result) : null });
+  } catch (err) {
+    console.error('POST /api/broadcasts/:id/reset error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

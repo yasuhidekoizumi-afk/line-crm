@@ -259,6 +259,8 @@ export const api = {
       fetchApi<ApiResponse<null>>(`/api/broadcasts/${id}`, { method: 'DELETE' }),
     send: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/send`, { method: 'POST' }),
+    reset: (id: string) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/reset`, { method: 'POST' }),
   },
 
   // ── Round 2 APIs ─────────────────────────────────────────────────────────

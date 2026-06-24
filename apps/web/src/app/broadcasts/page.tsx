@@ -237,6 +237,16 @@ function BroadcastsPageInner() {
     }
   }
 
+  const handleReset = async (id: string) => {
+    if (!confirm('「送信中」で固まっている配信をドラフトに戻しますか？\n（再送信や削除ができるようになります）')) return
+    try {
+      await api.broadcasts.reset(id)
+      load()
+    } catch {
+      setError('リセットに失敗しました')
+    }
+  }
+
   const getTagName = (tagId: string | null) => {
     if (!tagId) return null
     return tags.find((t) => t.id === tagId)?.name ?? null
@@ -463,7 +473,15 @@ function BroadcastsPageInner() {
                             {isSending ? '送信中...' : '今すぐ送信'}
                           </button>
                         )}
-                        {(broadcast.status === 'draft' || broadcast.status === 'scheduled') && (
+                        {broadcast.status === 'sending' && (
+                          <button
+                            onClick={() => handleReset(broadcast.id)}
+                            className="px-3 py-1 min-h-[44px] text-xs font-medium text-orange-600 hover:text-orange-800 bg-orange-50 hover:bg-orange-100 rounded-md transition-colors"
+                          >
+                            ドラフトに戻す
+                          </button>
+                        )}
+                        {(broadcast.status === 'draft' || broadcast.status === 'scheduled' || broadcast.status === 'sending') && (
                           <button
                             onClick={() => handleDelete(broadcast.id)}
                             className="px-3 py-1 min-h-[44px] text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
