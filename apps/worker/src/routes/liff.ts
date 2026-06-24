@@ -388,9 +388,12 @@ liffRoutes.get('/auth/callback', async (c) => {
 
     // Shopify customer link + LINE連携ボーナス（cid 経由・/auth/line?cid=<shopify_customer_id>）
     // セキュリティ: 紐付け済みShopify顧客IDは上書きしない（friend_id単位で1回のみのボーナス）
+    // 既にLINE連携済みのお客様に「すでに連携済みです」を必ず案内するためのフラグ（安全網）
+    let linkAlreadyLinked = false;
     if (cidParam) {
       try {
-        await linkShopifyCustomerAndAwardBonus(c.env.DB, friend.id, cidParam);
+        const linkResult = await linkShopifyCustomerAndAwardBonus(c.env.DB, friend.id, cidParam);
+        linkAlreadyLinked = linkResult.alreadyLinked;
       } catch (err) {
         console.error('LINE連携ボーナス処理エラー (non-blocking):', err);
       }
@@ -473,6 +476,11 @@ liffRoutes.get('/auth/callback', async (c) => {
 
     // Redirect or show completion
     if (redirect) {
+      // 既連携の人には黙ってリダイレクトせず「すでに連携済みです」を必ず案内する（安全網）。
+      // これで、どのボタン由来でも「連携したのに無反応」を防ぐ。
+      if (linkAlreadyLinked) {
+        return c.html(alreadyLinkedPage(redirect));
+      }
       return c.redirect(redirect);
     }
 
@@ -722,7 +730,7 @@ async function linkShopifyCustomerAndAwardBonus(
   db: D1Database,
   friendId: string,
   shopifyCustomerId: string,
-): Promise<{ linked: boolean; bonusAwarded: number }> {
+): Promise<{ linked: boolean; bonusAwarded: number; alreadyLinked: boolean }> {
   const {
     getLoyaltyPoint,
     getLoyaltyPointByShopifyCustomerId,
@@ -733,6 +741,9 @@ async function linkShopifyCustomerAndAwardBonus(
 
   // 他の友だちが既にこのShopify顧客と紐付いていないかチェック
   const existing = await getLoyaltyPointByShopifyCustomerId(db, shopifyCustomerId);
+  // この friend に既にこの Shopify 顧客が紐付いていたか（=再連携か）を処理前に記録。
+  // 「すでに連携済みです」を案内するための判定材料。
+  const wasAlreadyLinkedToSelf = !!existing && existing.friend_id === friendId;
   if (existing && existing.friend_id !== friendId) {
     // sp_ プレフィックスは Shopify webhook が先行で作成したプレースホルダー友だち → 本 friend に合流
     if (existing.friend_id.startsWith('sp_')) {
@@ -786,7 +797,7 @@ async function linkShopifyCustomerAndAwardBonus(
     } else {
       // 既に別の実 friend に紐付け済み → 紐付けスキップ・ボーナスも付与しない（なりすまし防止）
       console.log(`[auth/callback] Shopify customer ${shopifyCustomerId} already linked to ${existing.friend_id}, skipping`);
-      return { linked: false, bonusAwarded: 0 };
+      return { linked: false, bonusAwarded: 0, alreadyLinked: true };
     }
   }
 
@@ -806,7 +817,7 @@ async function linkShopifyCustomerAndAwardBonus(
   const bonusPoints = parseInt(bonusPointsSetting ?? '300', 10) || 300;
 
   if (!bonusEnabled || bonusPoints <= 0) {
-    return { linked: true, bonusAwarded: 0 };
+    return { linked: true, bonusAwarded: 0, alreadyLinked: wasAlreadyLinkedToSelf };
   }
 
   const existingBonus = await db
@@ -814,7 +825,7 @@ async function linkShopifyCustomerAndAwardBonus(
     .bind(friendId)
     .first();
   if (existingBonus) {
-    return { linked: true, bonusAwarded: 0 };
+    return { linked: true, bonusAwarded: 0, alreadyLinked: true };
   }
 
   const beforeBonus = await getLoyaltyPoint(db, friendId);
@@ -836,7 +847,7 @@ async function linkShopifyCustomerAndAwardBonus(
     expiryDays: 0, // 通常ポイント (balance) として無期限付与のため
   });
 
-  return { linked: true, bonusAwarded: bonusPoints };
+  return { linked: true, bonusAwarded: bonusPoints, alreadyLinked: false };
 }
 
 /**
@@ -1420,6 +1431,37 @@ function errorPage(message: string): string {
   <div class="card">
     <h2>エラー</h2>
     <p>${escapeHtml(message)}</p>
+  </div>
+</body>
+</html>`;
+}
+
+// 既にLINE連携済みのお客様向けの案内ページ。
+// /auth/line 経由でリダイレクトする際、黙って戻さず「すでに連携済みです」を必ず表示する安全網。
+function alreadyLinkedPage(continueUrl: string): string {
+  const safeUrl = escapeHtml(continueUrl);
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>すでに連携済みです</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Hiragino Sans', system-ui, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .card { background: #fff; border-radius: 16px; padding: 40px 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center; max-width: 400px; width: 90%; }
+    .check { width: 64px; height: 64px; border-radius: 50%; background: #06C755; color: #fff; font-size: 32px; line-height: 64px; margin: 0 auto 16px; }
+    h2 { font-size: 20px; color: #06C755; margin-bottom: 12px; }
+    .message { font-size: 14px; color: #666; line-height: 1.7; margin-bottom: 24px; }
+    .btn { display: inline-block; padding: 14px 32px; background: #06C755; color: #fff; border-radius: 10px; font-size: 15px; font-weight: 700; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="check">✓</div>
+    <h2>すでにLINE連携済みです</h2>
+    <p class="message">お客様のアカウントは、すでにLINE連携がお済みです。<br>連携特典は過去にお受け取り済みのため、特典の再付与はありません。</p>
+    <a class="btn" href="${safeUrl}">ページに戻る</a>
   </div>
 </body>
 </html>`;
