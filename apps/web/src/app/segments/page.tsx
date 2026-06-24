@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
 import SegmentRuleBuilder from '@/components/segments/rule-builder'
 import MemberModal from '@/components/segments/member-modal'
+import ShopifyImportModal from '@/components/segments/shopify-import-modal'
 
 const CHANNEL_LABEL: Record<string, string> = {
   all: '全チャネル',
@@ -26,6 +27,7 @@ export default function SegmentsPage() {
   const [editId, setEditId] = useState<string | null>(null)
   const [recomputingId, setRecomputingId] = useState<string | null>(null)
   const [memberModal, setMemberModal] = useState<{ id: string; name: string } | null>(null)
+  const [showShopifyImport, setShowShopifyImport] = useState(false)
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -143,12 +145,20 @@ export default function SegmentsPage() {
           <h1 className="text-2xl font-bold text-gray-900">セグメント</h1>
           <p className="text-sm text-gray-500 mt-1">ルールベースの顧客セグメント管理</p>
         </div>
-        <button
-          onClick={() => { setShowCreate(true); setEditId(null); resetForm() }}
-          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
-        >
-          + 新規作成
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowShopifyImport(true)}
+            className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
+          >
+            Shopifyから取り込み
+          </button>
+          <button
+            onClick={() => { setShowCreate(true); setEditId(null); resetForm() }}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+          >
+            + 新規作成
+          </button>
+        </div>
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
@@ -243,6 +253,11 @@ export default function SegmentsPage() {
                     <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded font-medium">
                       {s.customer_count.toLocaleString()}人
                     </span>
+                    {s.source === 'shopify' && (
+                      <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-medium">
+                        Shopify取込{s.sync_status === 'syncing' ? '（同期中…）' : ''}
+                      </span>
+                    )}
                   </div>
                   {s.description && (
                     <p className="text-sm text-gray-500 mt-0.5">{s.description}</p>
@@ -263,14 +278,18 @@ export default function SegmentsPage() {
                     disabled={recomputingId === s.segment_id}
                     className="px-3 py-1.5 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50"
                   >
-                    {recomputingId === s.segment_id ? '計算中...' : '再計算'}
+                    {recomputingId === s.segment_id
+                      ? (s.source === 'shopify' ? '同期中...' : '計算中...')
+                      : (s.source === 'shopify' ? '同期' : '再計算')}
                   </button>
-                  <button
-                    onClick={() => handleEdit(s)}
-                    className="px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
-                  >
-                    編集
-                  </button>
+                  {s.source !== 'shopify' && (
+                    <button
+                      onClick={() => handleEdit(s)}
+                      className="px-3 py-1.5 text-xs text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
+                    >
+                      編集
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDelete(s.segment_id, s.name)}
                     className="px-3 py-1.5 text-xs text-red-500 border border-red-200 rounded-lg hover:bg-red-50"
@@ -288,6 +307,12 @@ export default function SegmentsPage() {
           segmentId={memberModal.id}
           segmentName={memberModal.name}
           onClose={() => setMemberModal(null)}
+        />
+      )}
+      {showShopifyImport && (
+        <ShopifyImportModal
+          onClose={() => setShowShopifyImport(false)}
+          onChanged={() => { load() }}
         />
       )}
     </div>
