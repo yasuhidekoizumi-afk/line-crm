@@ -634,6 +634,12 @@ export default function RichMenusPage() {
   const [duplicating, setDuplicating] = useState<string | null>(null)
   // editingId が入っていれば「編集モード」（保存時に旧メニューを置き換え）。null なら新規。
   const [editingId, setEditingId] = useState<string | null>(null)
+  // 編集モード時、旧メニューを指していた alias を新メニューに自動で引き継ぐかどうか。
+  // 通常のタブ切替式メニュー編集（画像差し替え等）では true が正しい挙動。
+  // 「タブ切替先の登録」セクションで河原さんが alias の中身を意図的に別メニューへ
+  // 付け替えた直後にこのメニューを編集して保存すると、引き継ぎが付け替え結果を
+  // 上書きしてしまう（巻き戻り）。それを防ぐためにチェックを外せるようにしている。
+  const [inheritAliases, setInheritAliases] = useState(true)
 
   const [showAliasForm, setShowAliasForm] = useState(false)
   const [aliasForm, setAliasForm] = useState<{ richMenuAliasId: string; richMenuId: string }>({
@@ -858,6 +864,7 @@ export default function RichMenusPage() {
     setSelectedAreaIndex(null)
     setFormError('')
     setEditingId(null)
+    setInheritAliases(true)
     setShowCreate(true)
   }
 
@@ -886,6 +893,7 @@ export default function RichMenusPage() {
       setSelectedAreaIndex(null)
       setFormError('')
       setEditingId(id) // ← 編集モード
+      setInheritAliases(true) // 既定ON（普通のタブ付きメニュー編集はこれが正しい）
       setShowCreate(true)
     } catch (err) {
       setError(`編集の読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`)
@@ -917,6 +925,7 @@ export default function RichMenusPage() {
       setSelectedAreaIndex(null)
       setFormError('')
       setEditingId(null) // ← 複製は新規扱い
+      setInheritAliases(true)
       setShowCreate(true)
     } catch (err) {
       setError(`複製に失敗しました: ${err instanceof Error ? err.message : String(err)}`)
@@ -961,12 +970,23 @@ export default function RichMenusPage() {
       // 編集モード時: 旧メニューに紐付いていた alias を新IDへ付け替え + デフォルトの引継ぎ + 旧削除
       if (editingId) {
         // 1. alias の付け替え（旧IDを指していたエイリアスを全部新IDに更新）
-        const targetAliases = aliases.filter((a) => a.richMenuId === editingId)
-        for (const a of targetAliases) {
-          const upd = await api.richMenuAliases.update(a.richMenuAliasId, richMenuId)
-          if (!upd.success) {
-            setFormError(`タブ切替先「${a.richMenuAliasId}」の付け替えに失敗: ${upd.error}`)
+        //    安全策2点：
+        //    (A) 画面のローカル aliases ではなく、保存直前にLINE側の最新を取り直してから判定。
+        //        別タブで「タブ切替先の登録」を変更されていても、その変更を上書きしない。
+        //    (C) inheritAliases=false なら付け替え自体をスキップ（ユーザーが明示的にOFFにした場合）。
+        if (inheritAliases) {
+          const latestAliasList = await api.richMenuAliases.list()
+          if (!latestAliasList.success) {
+            setFormError(`タブ切替先の最新状態を取得できませんでした: ${latestAliasList.error}`)
             return
+          }
+          const targetAliases = latestAliasList.data.filter((a) => a.richMenuId === editingId)
+          for (const a of targetAliases) {
+            const upd = await api.richMenuAliases.update(a.richMenuAliasId, richMenuId)
+            if (!upd.success) {
+              setFormError(`タブ切替先「${a.richMenuAliasId}」の付け替えに失敗: ${upd.error}`)
+              return
+            }
           }
         }
         // 2. デフォルト切替（元がデフォルトで、フォームでもselected=true なら新IDをデフォルトに）
@@ -1391,6 +1411,46 @@ export default function RichMenusPage() {
                     アクションを設定してください
                   </div>
                 )}
+
+                {editingId && (() => {
+                  const linkedAliases = aliases.filter((a) => a.richMenuId === editingId)
+                  if (linkedAliases.length === 0) return null
+                  return (
+                    <div className={`rounded-lg border p-3 space-y-2 ${inheritAliases ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-300'}`}>
+                      <p className="text-xs font-semibold text-gray-800">タブ切替先の引き継ぎ</p>
+                      <p className="text-[11px] text-gray-700 leading-relaxed">
+                        現在このメニューを指している切替先：
+                      </p>
+                      <ul className="text-[11px] font-mono text-gray-800 pl-3 space-y-0.5">
+                        {linkedAliases.map((a) => (
+                          <li key={a.richMenuAliasId}>・{a.richMenuAliasId}</li>
+                        ))}
+                      </ul>
+                      <label className="flex items-start gap-2 text-[11px] text-gray-800 pt-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={inheritAliases}
+                          onChange={(e) => setInheritAliases(e.target.checked)}
+                        />
+                        <span>
+                          <span className="font-semibold">保存時にこれらの切替先を新しいメニューに自動で引き継ぐ</span>
+                          <span className="text-gray-500">（推奨・通常はONのまま）</span>
+                        </span>
+                      </label>
+                      {inheritAliases ? (
+                        <p className="text-[11px] text-blue-800 leading-relaxed">
+                          ✓ 保存時に上記の切替先IDが新メニューに付け替わります。タブ切替式メニューの画像差し替え等はこれでOK。
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-amber-800 leading-relaxed">
+                          ⚠ OFFのまま保存すると、上記の切替先は古いメニュー（保存と同時に削除されます）を指したまま残るため、<strong>タブ切替が動かなくなります</strong>。<br />
+                          「タブ切替先の登録」セクションで切替先を別メニューに付け替えた直後など、<strong>意図的に引き継ぎを止めたい場合のみ</strong>OFFにしてください。
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {formError && <p className="text-xs text-red-600">{formError}</p>}
 
