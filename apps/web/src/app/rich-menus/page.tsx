@@ -764,7 +764,13 @@ export default function RichMenusPage() {
   }
 
   const handleDeleteAlias = async (aliasId: string) => {
-    if (!confirm(`切替先 "${aliasId}" を削除しますか？\n（このIDを使っているタブのアクションは動作しなくなります）`)) return
+    if (!confirm(
+      `切替先「${aliasId}」を本当に削除しますか？\n\n` +
+      `⚠️ 多くの場合これは不要です。\n` +
+      `「飛び先を変えたいだけ」なら、削除せずプルダウンから別メニューを選んで「保存」を押してください。\n\n` +
+      `削除して別IDで作り直すと、メニュー側に仕込まれた呼び名（aliasId）とズレてタブ切替が動かなくなります。\n\n` +
+      `それでも削除しますか？`
+    )) return
     try {
       const res = await api.richMenuAliases.delete(aliasId)
       if (!res.success) setError(res.error)
@@ -1132,7 +1138,10 @@ export default function RichMenusPage() {
             </div>
             <button
               onClick={() => {
-                setAliasForm({ richMenuAliasId: '', richMenuId: menus[0]?.richMenuId ?? '' })
+                // 飛び先は意図的に空にする。menus[0] をデフォルトにすると、呼び名だけ入力して
+                // 飛び先を選び忘れた人が「メニュー一覧の先頭」を勝手に紐付けてしまい、
+                // 「気付かないうちに別メニューに飛ぶ alias を作っていた」事故が起きる。
+                setAliasForm({ richMenuAliasId: '', richMenuId: '' })
                 setAliasError('')
                 setShowAliasForm(true)
               }}
@@ -1145,6 +1154,10 @@ export default function RichMenusPage() {
 
           {showAliasForm && (
             <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded-md space-y-2">
+              <div className="p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-900 leading-relaxed">
+                <strong>⚠ 既存の切替先を変えたいだけなら、ここで新規作成しないでください。</strong><br />
+                下のリストでプルダウンを変えて「保存」を押せば中身だけ差し替えられます。新規作成→旧削除をすると、メニュー側に仕込んだ「呼び名（aliasId）」とズレてタブ切替が動かなくなります。
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] text-gray-600 mb-0.5">呼び名（半角英数字）</label>
