@@ -114,6 +114,47 @@ richMenus.post('/api/rich-menus/:id/default', async (c) => {
   }
 });
 
+// GET /api/rich-menus/users/:uid/link — その友だちに「個別リンク」されているリッチメニューIDを返す。
+// LINE仕様で個別リンクされた人にはデフォルトが効かない（個別優先）ため、
+// 「特定の人だけ古いメニューが見え続ける」事象の診断・原因切り分けに使う。
+richMenus.get('/api/rich-menus/users/:uid/link', async (c) => {
+  try {
+    const uid = c.req.param('uid');
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    try {
+      const result = await lineClient.getRichMenuIdOfUser(uid);
+      return c.json({ success: true, data: result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // 404 = 個別リンクなし（=デフォルトが効く正常状態）
+      if (message.includes('404')) {
+        return c.json({ success: true, data: { richMenuId: null } });
+      }
+      throw err;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('GET /api/rich-menus/users/:uid/link error:', message);
+    return c.json({ success: false, error: `Failed to fetch user rich menu link: ${message}` }, 500);
+  }
+});
+
+// DELETE /api/rich-menus/users/:uid/link — その友だちの個別リンクを解除。
+// 解除後はデフォルトリッチメニューが適用される。
+// CRM PLUS等の旧運用で個別リンクが残っている友だちの救済に使う。
+richMenus.delete('/api/rich-menus/users/:uid/link', async (c) => {
+  try {
+    const uid = c.req.param('uid');
+    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    await lineClient.unlinkRichMenuFromUser(uid);
+    return c.json({ success: true, data: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('DELETE /api/rich-menus/users/:uid/link error:', message);
+    return c.json({ success: false, error: `Failed to unlink user rich menu: ${message}` }, 500);
+  }
+});
+
 // POST /api/rich-menus/:id/image — upload rich menu image (accepts base64 body or binary)
 richMenus.post('/api/rich-menus/:id/image', async (c) => {
   try {
