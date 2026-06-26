@@ -8,7 +8,6 @@ import { useAccount } from '@/contexts/account-context'
 import { ORYZAE_BENCHMARK, compareToBenchmark } from '@/lib/benchmarks'
 import AiCockpit from '@/components/dashboard/AiCockpit'
 import ShopifyKpiBar from '@/components/dashboard/ShopifyKpiBar'
-import TodayTasks from '@/components/dashboard/today-tasks'
 import OnboardingTour from '@/components/onboarding/onboarding-tour'
 import { useToast } from '@/lib/toast'
 import { useInterval } from '@/lib/use-interval'
@@ -168,16 +167,7 @@ export default function DashboardPage() {
 
       {error && <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
 
-      <TodayTasks />
       <div className="mb-6"><ShopifyKpiBar /></div>
-
-      <a href="https://line-crm-worker.line-crm-api.workers.dev/auth/line?ref=dashboard" target="_blank" rel="noopener noreferrer"
-        className="block mb-6 p-4 rounded-xl border border-green-200 bg-gradient-to-r from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 transition-colors">
-        <div className="flex items-center justify-between">
-          <div><p className="text-sm font-bold text-gray-900">LINE で体験する</p><p className="text-xs text-gray-500 mt-0.5">友だち追加でステップ配信・フォーム・自動返信を体験</p></div>
-          <span className="text-xs px-3 py-1.5 rounded-full text-white font-medium" style={{ backgroundColor: '#06C755' }}>友だち追加</span>
-        </div>
-      </a>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
         <StatCard title="友だち数" value={stats.friendCount} loading={loading} href="/customers" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} />
