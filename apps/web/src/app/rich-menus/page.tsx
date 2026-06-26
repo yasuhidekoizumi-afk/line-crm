@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, type DragEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type DragEvent } from 'react'
 import {
   api,
   type RichMenuPayload,
@@ -650,6 +650,9 @@ export default function RichMenusPage() {
   const [aliasSaving, setAliasSaving] = useState(false)
   const [pendingAliases, setPendingAliases] = useState<Record<string, string>>({})
   const [savingAliasIds, setSavingAliasIds] = useState<Set<string>>(new Set())
+  // アーカイブ（=どこからも参照されていない未使用メニュー）セクションの開閉。
+  // 既定で閉じておくことで「使用中のメニュー」だけが上に並び、CRM Plus風のスッキリ表示になる。
+  const [showArchive, setShowArchive] = useState(false)
   const [aliasRowErrors, setAliasRowErrors] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
@@ -1074,6 +1077,28 @@ export default function RichMenusPage() {
     form.imageWidth && form.imageHeight
       ? { width: form.imageWidth, height: form.imageHeight }
       : SIZE_LARGE
+
+  // メニューを「使用中」「アーカイブ」に動的に分類する。
+  // 使用中 = デフォルトメニュー OR aliasから参照されているメニュー。
+  // それ以外 = アーカイブ（=未使用・LINE側に残っているが誰も使っていない）。
+  // LINE Messaging APIには「アーカイブ」概念が無いので、ハーネス側で動的に判定して表示するだけ。
+  // 個別リンク（linkRichMenuToUser）で誰かに貼られているメニューはリストAPIで判別できないため、
+  // この判定はミスサイドではあるが、河原さん運用ではセグメント別出し分けは未使用のため実害なし。
+  const { liveMenus, archivedMenus } = useMemo(() => {
+    const usedIds = new Set<string>()
+    if (defaultId) usedIds.add(defaultId)
+    for (const a of aliases) {
+      if (a.richMenuId) usedIds.add(a.richMenuId)
+    }
+    const live: RichMenuPayload[] = []
+    const archived: RichMenuPayload[] = []
+    for (const m of menus) {
+      const id = m.richMenuId ?? ''
+      if (id && usedIds.has(id)) live.push(m)
+      else archived.push(m)
+    }
+    return { liveMenus: live, archivedMenus: archived }
+  }, [menus, aliases, defaultId])
   const layoutGroups: Array<{ label: string; group: LayoutGroup }> = [
     { label: 'LINE公式・大サイズ（最大6エリア）', group: 'official-large' },
     { label: 'LINE公式・小サイズ（最大3エリア）', group: 'official-compact' },
@@ -1510,75 +1535,122 @@ export default function RichMenusPage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
           <p className="text-gray-500">リッチメニューがまだありません。「新規作成」から追加してください。</p>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {menus.map((menu) => {
-            const id = menu.richMenuId ?? ''
-            const isDefault = id === defaultId
-            const isBusy = busyMenuId === id
-            const isDuplicating = duplicating === id
-            return (
-              <div key={id} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                <div className="p-3">
-                  <RichMenuImage id={id} />
+      ) : (() => {
+        const renderMenuCard = (menu: RichMenuPayload, isArchive: boolean) => {
+          const id = menu.richMenuId ?? ''
+          const isDefault = id === defaultId
+          const isBusy = busyMenuId === id
+          const isDuplicating = duplicating === id
+          return (
+            <div key={id} className={`bg-white rounded-lg shadow-sm border overflow-hidden ${isArchive ? 'border-gray-200 opacity-75' : 'border-gray-200'}`}>
+              <div className="p-3">
+                <RichMenuImage id={id} />
+              </div>
+              <div className="px-4 pb-4 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{menu.name}</p>
+                    <p className="text-xs text-gray-500 truncate">バー: {menu.chatBarText}</p>
+                  </div>
+                  {isDefault ? (
+                    <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-100 text-green-800">
+                      デフォルト
+                    </span>
+                  ) : isArchive ? (
+                    <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600">
+                      未使用
+                    </span>
+                  ) : null}
                 </div>
-                <div className="px-4 pb-4 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{menu.name}</p>
-                      <p className="text-xs text-gray-500 truncate">バー: {menu.chatBarText}</p>
-                    </div>
-                    {isDefault && (
-                      <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-100 text-green-800">
-                        デフォルト
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
-                    <span>サイズ: {menu.size.width}×{menu.size.height}</span>
-                    <span>エリア: {menu.areas.length}</span>
-                    <span className="truncate" title={id}>ID: {id.slice(0, 12)}…</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {!isDefault && (
-                      <button
-                        onClick={() => handleSetDefault(id)}
-                        disabled={isBusy || isDuplicating}
-                        className="flex-1 min-w-[120px] px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
-                        style={{ backgroundColor: '#06C755' }}
-                      >
-                        デフォルトに設定
-                      </button>
-                    )}
+                <div className="text-[11px] text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
+                  <span>サイズ: {menu.size.width}×{menu.size.height}</span>
+                  <span>エリア: {menu.areas.length}</span>
+                  <span className="truncate" title={id}>ID: {id.slice(0, 12)}…</span>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {!isDefault && (
                     <button
-                      onClick={() => handleEdit(menu)}
+                      onClick={() => handleSetDefault(id)}
                       disabled={isBusy || isDuplicating}
-                      className="px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
+                      className="flex-1 min-w-[120px] px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
                       style={{ backgroundColor: '#06C755' }}
                     >
-                      {isDuplicating ? '読み込み中...' : '編集'}
+                      デフォルトに設定
                     </button>
-                    <button
-                      onClick={() => handleDuplicate(menu)}
-                      disabled={isBusy || isDuplicating}
-                      className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50"
-                    >
-                      複製
-                    </button>
-                    <button
-                      onClick={() => handleDelete(id)}
-                      disabled={isBusy || isDuplicating}
-                      className="px-3 py-1.5 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors disabled:opacity-50"
-                    >
-                      削除
-                    </button>
-                  </div>
+                  )}
+                  <button
+                    onClick={() => handleEdit(menu)}
+                    disabled={isBusy || isDuplicating}
+                    className="px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
+                    style={{ backgroundColor: '#06C755' }}
+                  >
+                    {isDuplicating ? '読み込み中...' : '編集'}
+                  </button>
+                  <button
+                    onClick={() => handleDuplicate(menu)}
+                    disabled={isBusy || isDuplicating}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50"
+                  >
+                    複製
+                  </button>
+                  <button
+                    onClick={() => handleDelete(id)}
+                    disabled={isBusy || isDuplicating}
+                    className="px-3 py-1.5 text-xs font-medium text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors disabled:opacity-50"
+                  >
+                    削除
+                  </button>
                 </div>
               </div>
-            )
-          })}
-        </div>
-      )}
+            </div>
+          )
+        }
+        return (
+          <>
+            {liveMenus.length > 0 ? (
+              <div className="mb-6">
+                <h2 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+                  使用中（{liveMenus.length}）
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {liveMenus.map((m) => renderMenuCard(m, false))}
+                </div>
+              </div>
+            ) : (
+              <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+                使用中のメニューがありません。デフォルトメニューを設定するか、タブ切替先（alias）からメニューを参照してください。
+              </div>
+            )}
+
+            {archivedMenus.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowArchive(!showArchive)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors mb-2"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full bg-gray-400" />
+                    アーカイブ（未使用・{archivedMenus.length}件）
+                  </span>
+                  <span className="text-gray-500">{showArchive ? '▲ 閉じる' : '▼ 開く'}</span>
+                </button>
+                {showArchive && (
+                  <>
+                    <p className="text-[11px] text-gray-500 mb-3 px-1 leading-relaxed">
+                      デフォルトでもなく、タブ切替先（alias）からも参照されていないメニューです。LINEには残っていますが配信には使われていません。不要なら「削除」で完全に消せます。
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {archivedMenus.map((m) => renderMenuCard(m, true))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )
+      })()}
     </div>
   )
 }
