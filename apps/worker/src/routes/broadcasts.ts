@@ -17,6 +17,47 @@ import type { Env } from '../index.js';
 
 const broadcasts = new Hono<Env>();
 
+async function countBroadcastTargets(
+  db: D1Database,
+  targetType: BroadcastTargetType,
+  targetTagId?: string | null,
+  targetSegmentId?: string | null,
+  lineAccountId?: string | null,
+): Promise<number> {
+  if (targetType === 'all') {
+    const sql = lineAccountId
+      ? 'SELECT COUNT(*) AS count FROM friends WHERE is_following = 1 AND line_account_id = ?'
+      : 'SELECT COUNT(*) AS count FROM friends WHERE is_following = 1';
+    const row = await (lineAccountId ? db.prepare(sql).bind(lineAccountId) : db.prepare(sql))
+      .first<{ count: number }>();
+    return row?.count ?? 0;
+  }
+
+  if (targetType === 'tag') {
+    if (!targetTagId) return 0;
+    const sql = lineAccountId
+      ? `SELECT COUNT(DISTINCT f.id) AS count
+         FROM friends f
+         INNER JOIN friend_tags ft ON ft.friend_id = f.id
+         WHERE ft.tag_id = ? AND f.is_following = 1 AND f.line_account_id = ?`
+      : `SELECT COUNT(DISTINCT f.id) AS count
+         FROM friends f
+         INNER JOIN friend_tags ft ON ft.friend_id = f.id
+         WHERE ft.tag_id = ? AND f.is_following = 1`;
+    const stmt = db.prepare(sql);
+    const row = await (lineAccountId ? stmt.bind(targetTagId, lineAccountId) : stmt.bind(targetTagId))
+      .first<{ count: number }>();
+    return row?.count ?? 0;
+  }
+
+  if (targetType === 'segment') {
+    if (!targetSegmentId) return 0;
+    return (await getSegmentLineUserIds(db, targetSegmentId)).length;
+  }
+
+  return 0;
+}
+
 function serializeBroadcast(row: DbBroadcast) {
   let targetFriendIds: string[] | null = null;
   if (row.target_friend_ids) {
@@ -60,6 +101,32 @@ broadcasts.get('/api/broadcasts', async (c) => {
     return c.json({ success: true, data: items.map(serializeBroadcast) });
   } catch (err) {
     console.error('GET /api/broadcasts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// GET /api/broadcasts/target-count - 配信前に対象人数を確認する
+broadcasts.get('/api/broadcasts/target-count', async (c) => {
+  try {
+    const targetType = c.req.query('targetType') as BroadcastTargetType | undefined;
+    const targetTagId = c.req.query('targetTagId') ?? null;
+    const targetSegmentId = c.req.query('targetSegmentId') ?? null;
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
+
+    if (!targetType || !['all', 'tag', 'segment', 'individual'].includes(targetType)) {
+      return c.json({ success: false, error: 'targetType is required' }, 400);
+    }
+
+    const count = await countBroadcastTargets(
+      c.env.DB,
+      targetType,
+      targetTagId,
+      targetSegmentId,
+      lineAccountId,
+    );
+    return c.json({ success: true, data: { count } });
+  } catch (err) {
+    console.error('GET /api/broadcasts/target-count error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
