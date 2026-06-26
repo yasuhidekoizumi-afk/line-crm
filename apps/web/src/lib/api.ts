@@ -263,6 +263,18 @@ export const api = {
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/send`, { method: 'POST' }),
     reset: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/reset`, { method: 'POST' }),
+    targetCount: (params: {
+      targetType: ApiBroadcast['targetType']
+      targetTagId?: string | null
+      targetSegmentId?: string | null
+      lineAccountId?: string | null
+    }) => {
+      const query = new URLSearchParams({ targetType: params.targetType })
+      if (params.targetTagId) query.set('targetTagId', params.targetTagId)
+      if (params.targetSegmentId) query.set('targetSegmentId', params.targetSegmentId)
+      if (params.lineAccountId) query.set('lineAccountId', params.lineAccountId)
+      return fetchApi<ApiResponse<{ count: number }>>(`/api/broadcasts/target-count?${query}`)
+    },
   },
 
   // ── Round 2 APIs ─────────────────────────────────────────────────────────

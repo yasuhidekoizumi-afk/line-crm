@@ -63,6 +63,9 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [targetCount, setTargetCount] = useState<number | null>(null)
+  const [targetCountLoading, setTargetCountLoading] = useState(false)
+  const [targetCountError, setTargetCountError] = useState('')
 
   // 個別指定: 友だち検索
   const [friendSearchTag, setFriendSearchTag] = useState('')
@@ -91,6 +94,61 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     loadFriendCandidates()
   }, [form.targetType, loadFriendCandidates])
 
+  useEffect(() => {
+    if (form.targetType === 'individual') {
+      setTargetCount(form.targetFriendIds.length)
+      setTargetCountLoading(false)
+      setTargetCountError('')
+      return
+    }
+
+    if (form.targetType === 'tag' && !form.targetTagId) {
+      setTargetCount(null)
+      setTargetCountLoading(false)
+      setTargetCountError('')
+      return
+    }
+
+    if (form.targetType === 'segment' && !form.targetSegmentId) {
+      setTargetCount(null)
+      setTargetCountLoading(false)
+      setTargetCountError('')
+      return
+    }
+
+    let cancelled = false
+    setTargetCountLoading(true)
+    setTargetCountError('')
+    ;(async () => {
+      try {
+        const res = await api.broadcasts.targetCount({
+          targetType: form.targetType,
+          targetTagId: form.targetType === 'tag' ? form.targetTagId : null,
+          targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId : null,
+          lineAccountId: selectedAccountId || null,
+        })
+        if (cancelled) return
+        if (res.success) {
+          setTargetCount(res.data.count)
+        } else {
+          setTargetCount(null)
+          setTargetCountError(res.error || '対象人数を取得できませんでした')
+        }
+      } catch {
+        if (!cancelled) {
+          setTargetCount(null)
+          setTargetCountError('対象人数を取得できませんでした')
+        }
+      } finally {
+        if (!cancelled) setTargetCountLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [form.targetType, form.targetTagId, form.targetSegmentId, form.targetFriendIds.length, selectedAccountId])
+
   const handleSave = async () => {
     if (!form.title.trim()) { setError('配信タイトルを入力してください'); return }
     // 複数メッセージ：1件以上＋各ブロックの中身検証
@@ -108,6 +166,14 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     }
     if (form.targetType === 'individual' && form.targetFriendIds.length === 0) {
       setError('送信先の友だちを1人以上選択してください')
+      return
+    }
+    if (form.targetType === 'tag' && !form.targetTagId) {
+      setError('配信対象のタグを選択してください')
+      return
+    }
+    if (form.targetType === 'segment' && !form.targetSegmentId) {
+      setError('配信対象のセグメントを選択してください')
       return
     }
     if (form.sendMode === 'scheduled' && !form.scheduledAt) {
@@ -340,6 +406,30 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
               )}
             </div>
           )}
+          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-xs font-medium text-gray-500">配信予定人数</span>
+              {targetCountLoading ? (
+                <span className="text-sm font-semibold text-gray-400">計算中...</span>
+              ) : targetCount === null ? (
+                <span className="text-sm font-semibold text-gray-400">対象を選択してください</span>
+              ) : (
+                <span className="text-lg font-bold tabular-nums text-gray-900">
+                  {targetCount.toLocaleString('ja-JP')} 名
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
+              {form.targetType === 'all' && '現在フォロー中の友だち数です。'}
+              {form.targetType === 'tag' && '選択したタグが付いた、現在フォロー中の友だち数です。'}
+              {form.targetType === 'segment' && '選択したセグメント内で、LINEユーザーIDが紐づいている顧客数です。'}
+              {form.targetType === 'individual' && '個別指定で選択中の友だち数です。'}
+              {selectedAccountId && form.targetType !== 'segment' ? ' 選択中のLINEアカウントで絞り込んでいます。' : ''}
+            </p>
+            {targetCountError && (
+              <p className="mt-1 text-[11px] text-red-600">{targetCountError}</p>
+            )}
+          </div>
         </div>
 
         {/* Schedule */}
