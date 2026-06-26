@@ -1,13 +1,14 @@
-import { extractFlexAltText } from '../utils/flex-alt-text.js';
 import {
   getBroadcastById,
   updateBroadcastStatus,
   jstNow,
 } from '@line-crm/db';
 import type { Broadcast } from '@line-crm/db';
-import type { LineClient, Message } from '@line-crm/line-sdk';
+import type { LineClient } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
 import { buildSegmentQuery } from './segment-query.js';
+// multi タイプを含む全タイプを正しく Message[] に展開するため、broadcast.ts の buildMessages を使う
+import { buildMessages } from './broadcast.js';
 import type { SegmentCondition } from './segment-query.js';
 
 const MULTICAST_BATCH_SIZE = 500;
@@ -31,7 +32,9 @@ export async function processSegmentSend(
     throw new Error(`Broadcast ${broadcastId} not found`);
   }
 
-  const message = buildMessage(broadcast.message_type, broadcast.message_content);
+  // multi タイプも正しく処理するため buildMessages(配列)を使う
+  const altText = (broadcast as unknown as Record<string, unknown>).alt_text as string | undefined;
+  const messages = buildMessages(broadcast.message_type, broadcast.message_content, altText || undefined);
 
   let totalCount = 0;
   let successCount = 0;
@@ -65,14 +68,18 @@ export async function processSegmentSend(
         await sleep(delay);
       }
 
-      // Stealth: add slight variation to text messages
-      let batchMessage = message;
-      if (message.type === 'text' && totalBatches > 1) {
-        batchMessage = { ...message, text: addMessageVariation(message.text, batchIndex) };
+      // Stealth: 先頭がテキストメッセージなら variation を追加（複数メッセージでも先頭だけ揺らす）
+      let batchMessages = messages;
+      if (totalBatches > 1 && messages[0]?.type === 'text') {
+        const head = messages[0] as { type: 'text'; text: string };
+        batchMessages = [
+          { ...head, text: addMessageVariation(head.text, batchIndex) },
+          ...messages.slice(1),
+        ];
       }
 
       try {
-        await lineClient.multicast(lineUserIds, [batchMessage]);
+        await lineClient.multicast(lineUserIds, batchMessages);
         successCount += validFriends.length;
 
         // Log successfully sent messages
@@ -100,37 +107,4 @@ export async function processSegmentSend(
   }
 
   return (await getBroadcastById(db, broadcastId))!;
-}
-
-export function buildMessage(messageType: string, messageContent: string, altText?: string): Message {
-  if (messageType === 'text') {
-    return { type: 'text', text: messageContent };
-  }
-
-  if (messageType === 'image') {
-    try {
-      const parsed = JSON.parse(messageContent) as {
-        originalContentUrl: string;
-        previewImageUrl: string;
-      };
-      return {
-        type: 'image',
-        originalContentUrl: parsed.originalContentUrl,
-        previewImageUrl: parsed.previewImageUrl,
-      };
-    } catch {
-      return { type: 'text', text: messageContent };
-    }
-  }
-
-  if (messageType === 'flex') {
-    try {
-      const contents = JSON.parse(messageContent);
-      return { type: 'flex', altText: altText || extractFlexAltText(contents), contents };
-    } catch {
-      return { type: 'text', text: messageContent };
-    }
-  }
-
-  return { type: 'text', text: messageContent };
 }

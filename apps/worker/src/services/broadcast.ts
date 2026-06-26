@@ -31,9 +31,12 @@ export async function processBroadcastSend(
   // Auto-wrap URLs with tracking links (text with URLs → Flex with button)
   let finalType: string = broadcast.message_type;
   let finalContent = broadcast.message_content;
+  if (finalType !== 'multi' && parseMultiMessageContent(finalContent)) {
+    finalType = 'multi';
+  }
   if (workerUrl) {
     const { autoTrackContent } = await import('./auto-track.js');
-    const tracked = await autoTrackContent(db, broadcast.message_type, broadcast.message_content, workerUrl);
+    const tracked = await autoTrackContent(db, finalType, finalContent, workerUrl);
     finalType = tracked.messageType;
     finalContent = tracked.content;
   }
@@ -359,18 +362,46 @@ function buildMessage(messageType: string, messageContent: string, altText?: str
  * LINE Messaging API は1リクエスト最大5メッセージ。
  */
 export function buildMessages(messageType: string, messageContent: string, altText?: string): Message[] {
-  if (messageType !== 'multi') {
+  const inferredMulti = parseMultiMessageContent(messageContent);
+  if (messageType !== 'multi' && !inferredMulti) {
     return [buildMessage(messageType, messageContent, altText)];
   }
   try {
-    const arr = JSON.parse(messageContent) as Array<{ type: string; content: string; altText?: string }>;
-    if (!Array.isArray(arr) || arr.length === 0) {
-      return [{ type: 'text', text: messageContent }];
-    }
+    const arr = inferredMulti ?? JSON.parse(messageContent) as Array<{ type: string; content: string; altText?: string }>;
+    if (!Array.isArray(arr) || arr.length === 0) return [{ type: 'text', text: messageContent }];
     // LINE仕様: 最大5件
     const safe = arr.slice(0, 5);
     return safe.map((m) => buildMessage(m.type, m.content, m.altText ?? altText));
   } catch {
     return [{ type: 'text', text: messageContent }];
+  }
+}
+
+function parseMultiMessageContent(
+  messageContent: string,
+): Array<{ type: string; content: string; altText?: string }> | null {
+  const trimmed = messageContent.trim();
+  if (!trimmed.startsWith('[')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+
+    const allowed = new Set(['text', 'image', 'flex', 'imagemap']);
+    const isValid = parsed.every((item) => {
+      if (!item || typeof item !== 'object') return false;
+      const record = item as Record<string, unknown>;
+      return (
+        typeof record.type === 'string' &&
+        allowed.has(record.type) &&
+        typeof record.content === 'string' &&
+        (record.altText === undefined || typeof record.altText === 'string')
+      );
+    });
+    if (!isValid) return null;
+
+    return parsed as Array<{ type: string; content: string; altText?: string }>;
+  } catch {
+    return null;
   }
 }

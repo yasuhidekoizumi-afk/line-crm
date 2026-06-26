@@ -182,6 +182,8 @@ export interface Broadcast {
   failedCount: number;
   /** 失敗理由の要約（成功時は null） */
   errorSummary: string | null;
+  /** Flex / リッチメッセージの代替テキスト */
+  altText: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
 }
