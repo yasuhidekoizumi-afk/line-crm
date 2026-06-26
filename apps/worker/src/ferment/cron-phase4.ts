@@ -8,7 +8,7 @@
  * - スケジュール送信実行（best_send_hour 用）
  */
 
-import { generateFermentId } from '@line-crm/db';
+import { generateFermentId, parseCustomerTags } from '@line-crm/db';
 import type { FermentEnv } from './types.js';
 
 // ─── A/B テスト勝者選定 ───────────────────────────
@@ -112,7 +112,7 @@ export async function recomputeProductAffinity(env: FermentEnv): Promise<{ custo
 
   let processed = 0;
   for (const c of customers.results) {
-    const cTags = (c.tags ?? '').split(',').map((t) => t.trim().toLowerCase());
+    const cTags = parseCustomerTags(c.tags).map((t) => t.toLowerCase());
     for (const p of popular.results) {
       // タグカテゴリマッチで軽い affinity スコア
       const cat = (p.category ?? '').toLowerCase();

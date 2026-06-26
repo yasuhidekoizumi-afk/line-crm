@@ -6,6 +6,7 @@ import {
   addTagToFriend,
   removeTagFromFriend,
   getFriendTags,
+  getTagById,
   getScenarios,
   enrollFriendInScenario,
   jstNow,
@@ -112,6 +113,12 @@ friends.post('/api/friends/:id/tags', async (c) => {
     const body = await c.req.json<{ tagId: string }>();
     if (!body.tagId) return c.json({ success: false, error: 'tagId is required' }, 400);
     const db = c.env.DB;
+    const [friend, tag] = await Promise.all([
+      getFriendById(db, friendId),
+      getTagById(db, body.tagId),
+    ]);
+    if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
+    if (!tag) return c.json({ success: false, error: 'Tag not found' }, 404);
     await addTagToFriend(db, friendId, body.tagId);
     const allScenarios = await getScenarios(db);
     for (const scenario of allScenarios) {
@@ -129,6 +136,8 @@ friends.delete('/api/friends/:id/tags/:tagId', async (c) => {
   try {
     const friendId = c.req.param('id');
     const tagId = c.req.param('tagId');
+    const friend = await getFriendById(c.env.DB, friendId);
+    if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
     await removeTagFromFriend(c.env.DB, friendId, tagId);
     await fireEvent(c.env.DB, 'tag_change', { friendId, eventData: { tagId, action: 'remove' } });
     return c.json({ success: true, data: null });

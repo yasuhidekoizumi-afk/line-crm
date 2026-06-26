@@ -39,19 +39,23 @@ tags.get('/api/tags', async (c) => {
 tags.post('/api/tags', async (c) => {
   try {
     const body = await c.req.json<{ name: string; color?: string }>();
+    const name = body.name?.trim();
 
-    if (!body.name) {
+    if (!name) {
       return c.json({ success: false, error: 'name is required' }, 400);
     }
 
     const tag = await createTag(c.env.DB, {
-      name: body.name,
+      name,
       color: body.color,
     });
 
     return c.json({ success: true, data: serializeTag(tag) }, 201);
   } catch (err) {
     console.error('POST /api/tags error:', err);
+    if (err instanceof Error && /UNIQUE|constraint/i.test(err.message)) {
+      return c.json({ success: false, error: '同じ名前のタグが既にあります' }, 409);
+    }
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
@@ -74,6 +78,9 @@ tags.patch('/api/tags/:id', async (c) => {
     return c.json({ success: true, data: serializeTag(updated) });
   } catch (err) {
     console.error('PATCH /api/tags/:id error:', err);
+    if (err instanceof Error && /UNIQUE|constraint/i.test(err.message)) {
+      return c.json({ success: false, error: '同じ名前のタグが既にあります' }, 409);
+    }
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

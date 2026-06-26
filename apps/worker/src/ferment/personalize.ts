@@ -13,7 +13,7 @@
 
 import { generatePersonalizedBody } from '@line-crm/ai-sdk';
 import { generateSubjectVariants } from '@line-crm/ai-sdk';
-import type { EmailTemplate, Customer } from '@line-crm/db';
+import { parseCustomerTags, type EmailTemplate, type Customer } from '@line-crm/db';
 import type { CustomerContext } from '@line-crm/ai-sdk';
 import { renderTemplate } from './template-engine.js';
 
@@ -74,7 +74,7 @@ function getLtvTier(ltv: number, currency: string): CustomerContext['ltv_tier'] 
 
 /** 顧客情報から CustomerContext を作成 */
 function buildCustomerContext(customer: Customer): CustomerContext {
-  const tags = customer.tags ? (JSON.parse(customer.tags) as string[]) : [];
+  const tags = parseCustomerTags(customer.tags);
   const products = customer.preferred_products
     ? (JSON.parse(customer.preferred_products) as string[]).slice(0, 3)
     : [];
@@ -120,7 +120,7 @@ function replacePlaceholders(
 ): string {
   const name = customer.display_name ?? 'お客様';
   const firstName = name.split(/\s+/)[0];
-  const tagsArr = (customer.tags ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+  const tagsArr = parseCustomerTags(customer.tags);
 
   const context = {
     name,

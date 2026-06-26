@@ -30,6 +30,7 @@ export async function createTag(
 ): Promise<Tag> {
   const id = crypto.randomUUID();
   const now = jstNow();
+  const name = input.name.trim();
   const color = input.color ?? '#3B82F6';
 
   await db
@@ -37,13 +38,17 @@ export async function createTag(
       `INSERT INTO tags (id, name, color, created_at)
        VALUES (?, ?, ?, ?)`,
     )
-    .bind(id, input.name, color, now)
+    .bind(id, name, color, now)
     .run();
 
   return (await db
     .prepare(`SELECT * FROM tags WHERE id = ?`)
     .bind(id)
     .first<Tag>())!;
+}
+
+export async function getTagById(db: D1Database, id: string): Promise<Tag | null> {
+  return (await db.prepare(`SELECT * FROM tags WHERE id = ?`).bind(id).first<Tag>()) ?? null;
 }
 
 // タグの名前と色を変更。どちらか一方だけでもOK。
@@ -59,7 +64,7 @@ export async function updateTag(
 ): Promise<Tag | null> {
   const sets: string[] = [];
   const binds: (string | null)[] = [];
-  if (input.name !== undefined) { sets.push('name = ?'); binds.push(input.name); }
+  if (input.name !== undefined) { sets.push('name = ?'); binds.push(input.name.trim()); }
   if (input.color !== undefined) { sets.push('color = ?'); binds.push(input.color); }
   if (sets.length === 0) {
     return (await db.prepare(`SELECT * FROM tags WHERE id = ?`).bind(id).first<Tag>()) ?? null;

@@ -30,7 +30,7 @@ export interface Customer {
   last_order_at: string | null;
   avg_order_value: number;
   preferred_products: string | null; // JSON array
-  tags: string | null;               // JSON array
+  tags: string | null;               // Shopify顧客タグ（カンマ区切り。旧データのJSON配列も読み取り対応）
   subscribed_email: number;
   subscribed_line: number;
   email_bounced: number;
@@ -39,6 +39,26 @@ export interface Customer {
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Shopify由来の顧客タグを安全に配列化する。旧実装のJSON配列と現行のカンマ区切りの両方に対応。 */
+export function parseCustomerTags(value: string | null | undefined): string[] {
+  if (!value) return [];
+  const raw = value.trim();
+  if (!raw) return [];
+
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((tag) => String(tag).trim()).filter(Boolean);
+      }
+    } catch {
+      // Shopify連携の現行データはカンマ区切りなので、JSONとして読めない場合は下の処理に任せる。
+    }
+  }
+
+  return raw.split(',').map((tag) => tag.trim()).filter(Boolean);
 }
 
 export interface Event {
