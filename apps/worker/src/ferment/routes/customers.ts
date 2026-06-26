@@ -19,6 +19,7 @@ import {
   getFriendByLineUserId,
   getLoyaltyPoint,
   getFriendTags,
+  parseCustomerTags,
 } from '@line-crm/db';
 import { getShopifyAdminToken } from '../../utils/shopify-token.js';
 import type { FermentEnv } from '../types.js';
@@ -68,10 +69,7 @@ customerRoutes.get('/shopify-tags', async (c) => {
       .all<{ tags: string }>();
     const set = new Set<string>();
     for (const r of rows.results ?? []) {
-      for (const t of (r.tags ?? '').split(',')) {
-        const v = t.trim();
-        if (v) set.add(v);
-      }
+      for (const t of parseCustomerTags(r.tags)) set.add(t);
     }
     const list = Array.from(set).sort((a, b) => a.localeCompare(b, 'ja'));
     return c.json({ success: true, data: list });
@@ -152,12 +150,7 @@ customerRoutes.get('/:id/profile', async (c) => {
     const shopifyTags: string[] = [];
 
     // customers.tags（カンマ区切り・Shopify由来）は読み取り専用として返す
-    if (customer.tags) {
-      for (const t of customer.tags.split(',')) {
-        const v = t.trim();
-        if (v) shopifyTags.push(v);
-      }
-    }
+    shopifyTags.push(...parseCustomerTags(customer.tags));
 
     if (customer.line_user_id) {
       const f = await getFriendByLineUserId(c.env.DB, customer.line_user_id);
