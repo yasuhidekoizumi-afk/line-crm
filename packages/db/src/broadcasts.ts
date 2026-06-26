@@ -24,6 +24,8 @@ export interface Broadcast {
   failed_count: number;
   /** 失敗理由の要約（LINE APIエラー本文など。成功時は null） */
   error_summary: string | null;
+  line_account_id: string | null;
+  alt_text: string | null;
   created_at: string;
 }
 
@@ -100,6 +102,7 @@ export type UpdateBroadcastInput = Partial<
     | 'target_friend_ids'
     | 'status'
     | 'scheduled_at'
+    | 'alt_text'
   >
 >;
 
@@ -146,6 +149,10 @@ export async function updateBroadcast(
   if (updates.scheduled_at !== undefined) {
     fields.push('scheduled_at = ?');
     values.push(updates.scheduled_at);
+  }
+  if (updates.alt_text !== undefined) {
+    fields.push('alt_text = ?');
+    values.push(updates.alt_text);
   }
 
   if (fields.length > 0) {

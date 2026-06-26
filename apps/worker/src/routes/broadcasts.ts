@@ -38,6 +38,7 @@ function serializeBroadcast(row: DbBroadcast) {
     successCount: row.success_count,
     failedCount: row.failed_count ?? 0,
     errorSummary: row.error_summary ?? null,
+    altText: (row as unknown as { alt_text?: string | null }).alt_text ?? null,
     createdAt: row.created_at,
   };
 }
@@ -176,6 +177,7 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
       targetSegmentId?: string | null;
       targetFriendIds?: string[] | null;
       scheduledAt?: string | null;
+      altText?: string | null;
     }>();
 
     // Keep status in sync with scheduledAt changes
@@ -195,6 +197,9 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
         ? (body.targetFriendIds ? JSON.stringify(body.targetFriendIds) : null)
         : undefined,
       scheduled_at: body.scheduledAt,
+      ...((body as { altText?: string | null }).altText !== undefined
+        ? { alt_text: (body as { altText?: string | null }).altText }
+        : {}),
       ...(statusUpdate !== undefined ? { status: statusUpdate } : {}),
     });
 
