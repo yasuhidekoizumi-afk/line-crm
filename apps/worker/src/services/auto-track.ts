@@ -143,6 +143,10 @@ export async function autoTrackContent(
   content: string,
   workerUrl: string,
 ): Promise<AutoTrackResult> {
+  if (messageType === 'multi') {
+    return autoTrackMultiContent(db, content, workerUrl);
+  }
+
   if (messageType === 'image') return { messageType, content };
 
   const urls = extractUrls(content);
@@ -169,4 +173,69 @@ export async function autoTrackContent(
     result = result.split(original).join(finalUrl);
   }
   return { messageType, content: result };
+}
+
+async function autoTrackMultiContent(
+  db: D1Database,
+  content: string,
+  workerUrl: string,
+): Promise<AutoTrackResult> {
+  try {
+    const blocks = JSON.parse(content) as Array<{ type: string; content: string; altText?: string }>;
+    if (!Array.isArray(blocks)) return { messageType: 'multi', content };
+
+    const trackedBlocks = await Promise.all(
+      blocks.map(async (block) => {
+        if (!block || typeof block !== 'object' || typeof block.content !== 'string') {
+          return block;
+        }
+
+        if (block.type === 'image') {
+          return {
+            ...block,
+            content: await autoTrackImageLinkUrl(db, block.content, workerUrl),
+          };
+        }
+
+        const tracked = await autoTrackContent(db, block.type, block.content, workerUrl);
+        return {
+          ...block,
+          type: tracked.messageType,
+          content: tracked.content,
+        };
+      }),
+    );
+
+    return { messageType: 'multi', content: JSON.stringify(trackedBlocks) };
+  } catch {
+    return { messageType: 'multi', content };
+  }
+}
+
+async function autoTrackImageLinkUrl(
+  db: D1Database,
+  content: string,
+  workerUrl: string,
+): Promise<string> {
+  try {
+    const parsed = JSON.parse(content) as {
+      originalContentUrl?: string;
+      previewImageUrl?: string;
+      linkUrl?: string;
+    };
+    const linkUrl = parsed.linkUrl?.trim();
+    if (!linkUrl || shouldSkip(linkUrl)) return content;
+
+    const urlMap = await createTrackingMap(db, new Set([linkUrl]), workerUrl);
+    const tracked = urlMap.get(linkUrl);
+    if (!tracked) return content;
+
+    const finalUrl = isAppLinkDomain(tracked.originalUrl)
+      ? `${tracked.trackingUrl}${tracked.trackingUrl.includes('?') ? '&' : '?'}openExternalBrowser=1`
+      : tracked.trackingUrl;
+
+    return JSON.stringify({ ...parsed, linkUrl: finalUrl });
+  } catch {
+    return content;
+  }
 }
