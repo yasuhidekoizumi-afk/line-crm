@@ -16,14 +16,14 @@ const ROLE_LABELS: Record<RoleMode, string> = {
 
 // CSモードで表示するメニューのhrefリスト
 const CS_MENU_HREFS = new Set([
-  '/', '/friends', '/chats', '/cs', '/loyalty',
+  '/', '/friends', '/chats', '/cs',
   '/staff', '/accounts', '/emergency',
 ])
 
 // マーケティングモードで表示するメニューのhrefリスト
 const MARKETING_MENU_HREFS = new Set([
   '/', '/scenarios', '/broadcasts', '/templates', '/rich-menus', '/reminders',
-  '/loyalty', '/shopify-bi', '/crm-weekly', '/affiliates', '/conversions', '/scoring',
+  '/shopify-bi', '/crm-weekly', '/affiliates', '/conversions', '/scoring',
   '/automations', '/webhooks',
   '/email/campaigns', '/email/flows', '/email/templates', '/customers', '/segments',
   '/email/forms', '/email/reviews', '/email/sms', '/email/insights', '/email/analytics',
@@ -58,12 +58,6 @@ const menuSections = [
       { href: '/templates', label: 'LINEテンプレート', icon: 'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z' },
       { href: '/rich-menus', label: 'リッチメニュー', icon: 'M4 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM4 14a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 14a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z' },
       { href: '/reminders', label: 'リマインダ', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-    ],
-  },
-  {
-    label: 'ロイヤルティ',
-    items: [
-      { href: '/loyalty', label: 'ポイント管理', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
     ],
   },
   {
