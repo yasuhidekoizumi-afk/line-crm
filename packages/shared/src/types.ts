@@ -88,8 +88,15 @@ export interface Scenario {
 // シナリオステップ (ScenarioStep)
 // -----------------------------------------------------------------------------
 
-/** メッセージ種別 */
-export type MessageType = "text" | "image" | "flex";
+/** メッセージ種別。'imagemap' は公式LINEでいう「リッチメッセージ」(LINE Messaging API の imagemap message)。 */
+export type MessageType = "text" | "image" | "flex" | "imagemap";
+
+/**
+ * ブロードキャスト用メッセージ種別。
+ * 'multi' は複数メッセージブロックを1配信にまとめた統合タイプ
+ * （message_content は [{type,content,altText?},...] の JSON 配列）。
+ */
+export type BroadcastMessageType = MessageType | "multi";
 
 export interface ScenarioStep {
   /** 主キー (UUIDv4) */
@@ -150,7 +157,7 @@ export interface Broadcast {
   /** 配信タイトル (管理用ラベル) */
   title: string;
   /** メッセージ種別 */
-  messageType: MessageType;
+  messageType: BroadcastMessageType;
   /** メッセージ内容 */
   messageContent: string;
   /** 配信対象種別 */

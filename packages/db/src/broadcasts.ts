@@ -2,7 +2,9 @@ import { jstNow } from './utils.js';
 export type BroadcastTargetType = 'all' | 'tag' | 'segment' | 'individual';
 export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent';
 // 'multi' は複数メッセージ統合タイプ（message_content は [{type,content,altText?}, ...] の JSON 配列）
-export type BroadcastMessageType = 'text' | 'image' | 'flex' | 'multi';
+// 'imagemap' は LINE の imagemap message（公式LINEでいう「リッチメッセージ」）。
+//   message_content は { baseUrl, altText, baseSize:{width,height}, actions:[...] } の JSON 文字列。
+export type BroadcastMessageType = 'text' | 'image' | 'flex' | 'multi' | 'imagemap';
 
 export interface Broadcast {
   id: string;

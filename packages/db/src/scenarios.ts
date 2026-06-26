@@ -1,6 +1,8 @@
 import { jstNow } from './utils.js';
 export type ScenarioTriggerType = 'friend_add' | 'tag_added' | 'manual';
-export type MessageType = 'text' | 'image' | 'flex';
+// 'imagemap' は LINE の imagemap message（公式LINEでいう「リッチメッセージ」）。
+//   message_content は { baseUrl, altText, baseSize:{width,height}, actions:[...] } の JSON 文字列。
+export type MessageType = 'text' | 'image' | 'flex' | 'imagemap';
 export type FriendScenarioStatus = 'active' | 'paused' | 'completed';
 
 export interface Scenario {

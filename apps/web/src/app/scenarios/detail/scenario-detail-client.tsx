@@ -20,6 +20,7 @@ const messageTypeOptions: { value: MessageType; label: string }[] = [
   { value: 'text', label: 'テキスト' },
   { value: 'image', label: '画像' },
   { value: 'flex', label: 'Flex' },
+  { value: 'imagemap', label: 'リッチメッセージ' },
 ]
 
 function formatDelay(minutes: number): string {
