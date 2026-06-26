@@ -13,12 +13,27 @@ import { useState } from 'react'
 import ImageUploader from '@/components/messages/image-uploader'
 import FlexTemplates from '@/components/messages/flex-templates'
 import FlexEditor from '@/components/messages/flex-editor'
+import ImageMapEditor, {
+  DEFAULT_IMAGEMAP_VALUE,
+  imageMapValueFromContent,
+  imageMapValueToContent,
+  type ImageMapValue,
+} from '@/components/messages/imagemap-editor'
+import CardMessageEditor, {
+  DEFAULT_CARD,
+  cardsFromFlexContent,
+  cardsToFlexContent,
+  type Card,
+} from '@/components/messages/card-message-editor'
 
 export type Block =
   | { id: string; type: 'text'; text: string }
   // image: linkUrl が入っていれば、送信時に裏でFlexに変換して画像タップで遷移できるようにする
   | { id: string; type: 'image'; originalContentUrl: string; previewImageUrl: string; linkUrl?: string }
   | { id: string; type: 'flex'; contents: string; altText?: string } // contents は JSON 文字列
+  // imagemap: 公式LINE「リッチメッセージ」相当。
+  // 編集中は構造化値を保持し、保存時に LINE API 形式 JSON 文字列へ変換する。
+  | { id: string; type: 'imagemap'; value: ImageMapValue }
 
 const MAX_BLOCKS = 5
 
@@ -34,7 +49,7 @@ function nextId(): string {
  * - 2件以上 → {messageType:'multi', messageContent: JSON.stringify([{type,content,altText?},...])}
  */
 export function blocksToPayload(blocks: Block[]): {
-  messageType: 'text' | 'image' | 'flex' | 'multi'
+  messageType: 'text' | 'image' | 'flex' | 'multi' | 'imagemap'
   messageContent: string
   altText?: string
 } {
@@ -55,6 +70,13 @@ export function blocksToPayload(blocks: Block[]): {
         }),
       }
     }
+    if (b.type === 'imagemap') {
+      return {
+        messageType: 'imagemap',
+        messageContent: imageMapValueToContent(b.value),
+        altText: b.value.altText,
+      }
+    }
     return { messageType: 'flex', messageContent: b.contents, altText: b.altText }
   }
   // 複数: buildMessages() の入力形式に合わせる
@@ -68,6 +90,13 @@ export function blocksToPayload(blocks: Block[]): {
           previewImageUrl: b.previewImageUrl || b.originalContentUrl,
           ...(b.linkUrl?.trim() ? { linkUrl: b.linkUrl.trim() } : {}),
         }),
+      }
+    }
+    if (b.type === 'imagemap') {
+      return {
+        type: 'imagemap',
+        content: imageMapValueToContent(b.value),
+        altText: b.value.altText,
       }
     }
     return { type: 'flex', content: b.contents, altText: b.altText }
@@ -108,13 +137,17 @@ function contentToBlock(type: string, content: string, altText?: string): Block 
       return { id: nextId(), type: 'image', originalContentUrl: '', previewImageUrl: '' }
     }
   }
+  if (type === 'imagemap') {
+    return { id: nextId(), type: 'imagemap', value: imageMapValueFromContent(content) }
+  }
   if (type === 'flex') return { id: nextId(), type: 'flex', contents: content, altText }
   return null
 }
 
-function emptyBlock(type: 'text' | 'image' | 'flex'): Block {
+function emptyBlock(type: 'text' | 'image' | 'flex' | 'imagemap'): Block {
   if (type === 'text') return { id: nextId(), type: 'text', text: '' }
   if (type === 'image') return { id: nextId(), type: 'image', originalContentUrl: '', previewImageUrl: '' }
+  if (type === 'imagemap') return { id: nextId(), type: 'imagemap', value: { ...DEFAULT_IMAGEMAP_VALUE } }
   return { id: nextId(), type: 'flex', contents: '' }
 }
 
@@ -127,9 +160,19 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
   // 編集中のブロックID（折りたたみ表示）。初期は最後に追加されたブロックを開く。
   const [openId, setOpenId] = useState<string | null>(value[0]?.id ?? null)
 
-  const addBlock = (type: 'text' | 'image' | 'flex') => {
+  const addBlock = (type: 'text' | 'image' | 'flex' | 'imagemap') => {
     if (value.length >= MAX_BLOCKS) return
     const b = emptyBlock(type)
+    onChange([...value, b])
+    setOpenId(b.id)
+  }
+
+  // カードタイプメッセージ（Flex Carousel）を新規ブロックとして追加。
+  // 内部的には Flex ブロックとして保存される。
+  const addCardBlock = () => {
+    if (value.length >= MAX_BLOCKS) return
+    const initialContents = cardsToFlexContent([{ ...DEFAULT_CARD }])
+    const b: Block = { id: nextId(), type: 'flex', contents: initialContents, altText: 'カードタイプメッセージ' }
     onChange([...value, b])
     setOpenId(b.id)
   }
@@ -170,8 +213,14 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                 onClick={() => setOpenId(isOpen ? null : b.id)}
                 className="flex-1 text-left text-sm font-medium text-gray-700 hover:text-gray-900"
               >
-                <span className="inline-block w-12 text-xs text-gray-500">
-                  {b.type === 'text' ? 'テキスト' : b.type === 'image' ? '画像' : 'Flex'}
+                <span className="inline-block w-20 text-xs text-gray-500">
+                  {b.type === 'text'
+                    ? 'テキスト'
+                    : b.type === 'image'
+                      ? '画像'
+                      : b.type === 'imagemap'
+                        ? 'リッチ'
+                        : 'Flex'}
                 </span>
                 <span className="ml-2 text-xs text-gray-500 truncate inline-block max-w-[300px] align-middle">
                   {summarize(b)}
@@ -273,12 +322,35 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                 {b.type === 'flex' && (
                   <div className="space-y-3">
                     {!b.contents.trim() && (
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2">テンプレートを選択するか、JSONを直接編集してください</p>
+                      <div className="space-y-3">
+                        <p className="text-xs text-gray-500">テンプレートを選択するか、JSONを直接編集してください</p>
                         <FlexTemplates onSelect={(json) => updateBlock(b.id, { contents: json })} />
+                        <div className="border-t border-gray-200 pt-3">
+                          <p className="text-xs text-gray-500 mb-2">
+                            または、専用エディタで作成：
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateBlock(b.id, {
+                                contents: cardsToFlexContent([{ ...DEFAULT_CARD }]),
+                                altText: 'カードタイプメッセージ',
+                              })
+                            }
+                            className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
+                          >
+                            🎴 カードタイプメッセージを作る
+                          </button>
+                        </div>
                       </div>
                     )}
-                    {b.contents.trim() && (
+                    {b.contents.trim() && isCarouselJson(b.contents) && (
+                      <CardMessageEditor
+                        value={cardsFromFlexContent(b.contents)}
+                        onChange={(cards) => updateBlock(b.id, { contents: cardsToFlexContent(cards) })}
+                      />
+                    )}
+                    {b.contents.trim() && !isCarouselJson(b.contents) && (
                       <FlexEditor value={b.contents} onChange={(json) => updateBlock(b.id, { contents: json })} />
                     )}
                     {b.contents.trim() && (
@@ -291,6 +363,12 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                       </button>
                     )}
                   </div>
+                )}
+                {b.type === 'imagemap' && (
+                  <ImageMapEditor
+                    value={b.value}
+                    onChange={(next) => updateBlock(b.id, { value: next })}
+                  />
                 )}
               </div>
             )}
@@ -323,6 +401,20 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
           >
             ▢ Flex
           </button>
+          <button
+            type="button"
+            onClick={() => addBlock('imagemap')}
+            className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
+          >
+            📐 リッチメッセージ
+          </button>
+          <button
+            type="button"
+            onClick={addCardBlock}
+            className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
+          >
+            🎴 カードタイプ
+          </button>
           <span className="text-xs text-gray-400 self-center ml-2">
             {value.length} / {MAX_BLOCKS}
           </span>
@@ -339,12 +431,35 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
 function summarize(b: Block): string {
   if (b.type === 'text') return b.text.slice(0, 30) || '（未入力）'
   if (b.type === 'image') return b.originalContentUrl || '（画像未設定）'
+  if (b.type === 'imagemap') return b.value.baseUrl ? b.value.altText : '（画像未設定）'
   // flex
   if (!b.contents.trim()) return '（テンプレ未選択）'
+  if (isCarouselJson(b.contents)) {
+    const n = countCarouselBubbles(b.contents)
+    return `カードタイプメッセージ（${n}枚）`
+  }
   try {
     const j = JSON.parse(b.contents) as { altText?: string; type?: string }
     return j.altText || j.type || 'Flexメッセージ'
   } catch {
     return 'Flexメッセージ'
+  }
+}
+
+function isCarouselJson(content: string): boolean {
+  try {
+    const parsed = JSON.parse(content) as { type?: string }
+    return parsed.type === 'carousel'
+  } catch {
+    return false
+  }
+}
+
+function countCarouselBubbles(content: string): number {
+  try {
+    const parsed = JSON.parse(content) as { contents?: unknown[] }
+    return Array.isArray(parsed.contents) ? parsed.contents.length : 0
+  } catch {
+    return 0
   }
 }

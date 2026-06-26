@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS scenario_steps (
   scenario_id     TEXT NOT NULL REFERENCES scenarios (id) ON DELETE CASCADE,
   step_order      INTEGER NOT NULL,
   delay_minutes   INTEGER NOT NULL DEFAULT 0,
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex')),
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'imagemap')),
   message_content TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   UNIQUE (scenario_id, step_order)
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   id              TEXT PRIMARY KEY,
   title           TEXT NOT NULL,
   -- 'multi' のとき message_content は [{type,content,altText?}, ...] の JSON 配列（最大5件・LINE API仕様）
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'multi')),
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'multi', 'imagemap')),
   message_content TEXT NOT NULL,
   target_type     TEXT NOT NULL CHECK (target_type IN ('all', 'tag', 'segment')) DEFAULT 'all',
   target_tag_id   TEXT REFERENCES tags (id) ON DELETE SET NULL,
@@ -311,7 +311,7 @@ CREATE TABLE IF NOT EXISTS reminder_steps (
   id              TEXT PRIMARY KEY,
   reminder_id     TEXT NOT NULL REFERENCES reminders (id) ON DELETE CASCADE,
   offset_minutes  INTEGER NOT NULL,
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex')),
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'imagemap')),
   message_content TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
@@ -372,7 +372,7 @@ CREATE TABLE IF NOT EXISTS templates (
   name            TEXT NOT NULL,
   category        TEXT NOT NULL DEFAULT 'general',
   -- 'multi' のとき message_content は [{type,content,altText?}, ...] の JSON 配列（最大5件・LINE API仕様）
-  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'carousel', 'multi')),
+  message_type    TEXT NOT NULL CHECK (message_type IN ('text', 'image', 'flex', 'carousel', 'multi', 'imagemap')),
   message_content TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
   updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))

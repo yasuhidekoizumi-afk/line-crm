@@ -25,6 +25,7 @@ const messageTypeLabels: Record<string, string> = {
   text: 'テキスト',
   image: '画像',
   flex: 'Flex',
+  imagemap: 'リッチ',
 }
 
 interface CreateFormState {

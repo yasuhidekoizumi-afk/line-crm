@@ -6,6 +6,11 @@ import FlexPreviewComponent from '@/components/flex-preview'
 import ImageUploader from '@/components/messages/image-uploader'
 import FlexTemplates from '@/components/messages/flex-templates'
 import FlexEditor from '@/components/messages/flex-editor'
+import ImageMapEditor, {
+  DEFAULT_IMAGEMAP_VALUE,
+  imageMapValueFromContent,
+  imageMapValueToContent,
+} from '@/components/messages/imagemap-editor'
 
 interface StepEditorProps {
   step?: ScenarioStep
@@ -18,6 +23,7 @@ const messageTypeLabels: Record<MessageType, string> = {
   text: 'テキスト',
   image: '画像',
   flex: 'Flexメッセージ',
+  imagemap: 'リッチメッセージ',
 }
 
 function minutesToDisplay(minutes: number): { days: number; hours: number; mins: number } {
@@ -52,6 +58,18 @@ export default function StepEditor({ step, stepOrder, onSave, onCancel }: StepEd
         JSON.parse(messageContent)
       } catch {
         setError('FlexメッセージのJSONが無効です')
+        return
+      }
+    }
+    if (messageType === 'imagemap') {
+      try {
+        const parsed = JSON.parse(messageContent) as { baseUrl?: string }
+        if (!parsed.baseUrl) {
+          setError('リッチメッセージの画像を設定してください')
+          return
+        }
+      } catch {
+        setError('リッチメッセージのJSONが無効です')
         return
       }
     }
@@ -244,6 +262,14 @@ export default function StepEditor({ step, stepOrder, onSave, onCancel }: StepEd
               onChange={(e) => setMessageContent(e.target.value)}
             />
           </details>
+        )}
+
+        {/* ── ImageMap (リッチメッセージ) type ─────────────────────── */}
+        {messageType === 'imagemap' && (
+          <ImageMapEditor
+            value={messageContent ? imageMapValueFromContent(messageContent) : { ...DEFAULT_IMAGEMAP_VALUE }}
+            onChange={(next) => setMessageContent(imageMapValueToContent(next))}
+          />
         )}
 
         {/* ── Flex preview fallback ─────────────────────────────────── */}

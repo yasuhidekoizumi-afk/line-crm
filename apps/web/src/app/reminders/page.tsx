@@ -68,6 +68,7 @@ const messageTypeLabels: Record<string, string> = {
   text: 'テキスト',
   image: '画像',
   flex: 'Flex',
+  imagemap: 'リッチ',
 }
 
 const ccPrompts = [
@@ -520,6 +521,7 @@ export default function RemindersPage() {
                                   <option value="text">テキスト</option>
                                   <option value="image">画像</option>
                                   <option value="flex">Flex</option>
+                                  <option value="imagemap">リッチメッセージ</option>
                                 </select>
                               </div>
                               <div>

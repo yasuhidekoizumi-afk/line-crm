@@ -19,6 +19,7 @@ export default function MessageBlocksPreview({ blocks }: Props) {
   const valid = blocks.filter((b) => {
     if (b.type === 'text') return b.text.trim().length > 0
     if (b.type === 'image') return b.originalContentUrl.trim().length > 0
+    if (b.type === 'imagemap') return b.value.baseUrl.trim().length > 0
     return b.contents.trim().length > 0
   })
 
@@ -68,6 +69,19 @@ export default function MessageBlocksPreview({ blocks }: Props) {
                 {b.type === 'flex' && (
                   <div className="rounded-xl overflow-hidden shadow-sm bg-white">
                     <FlexPreviewComponent content={b.contents} maxWidth={280} />
+                  </div>
+                )}
+                {b.type === 'imagemap' && (
+                  <div className="relative rounded-xl overflow-hidden shadow-sm bg-white">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={b.value.baseUrl}
+                      alt={`rich block ${i + 1}`}
+                      className="block w-full max-h-[280px] object-cover"
+                    />
+                    <div className="absolute bottom-1 left-1 right-1 bg-black/60 text-white text-[10px] px-2 py-1 rounded">
+                      📐 リッチメッセージ（{b.value.actions.length}エリア）
+                    </div>
                   </div>
                 )}
               </div>

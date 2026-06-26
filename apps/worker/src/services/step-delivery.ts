@@ -303,6 +303,28 @@ export function buildMessage(messageType: string, messageContent: string, altTex
     }
   }
 
+  if (messageType === 'imagemap') {
+    // LINE の imagemap message（公式LINEでいう「リッチメッセージ」）。
+    // messageContent: { baseUrl, altText?, baseSize:{width,height}, actions:[...] }
+    try {
+      const parsed = JSON.parse(messageContent) as {
+        baseUrl: string;
+        altText?: string;
+        baseSize: { width: number; height: number };
+        actions: Record<string, unknown>[];
+      };
+      return {
+        type: 'imagemap',
+        baseUrl: parsed.baseUrl,
+        altText: altText || parsed.altText || 'リッチメッセージ',
+        baseSize: parsed.baseSize,
+        actions: parsed.actions,
+      };
+    } catch {
+      return { type: 'text', text: messageContent };
+    }
+  }
+
   // Fallback
   return { type: 'text', text: messageContent };
 }
