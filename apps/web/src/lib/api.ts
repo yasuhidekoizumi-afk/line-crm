@@ -30,6 +30,46 @@ import type { Broadcast } from '@line-crm/shared'
 /** Broadcast type from API (now camelCase after worker serialization) */
 export type ApiBroadcast = Broadcast
 
+export interface ApiTrackedLinkClick {
+  id: string
+  friendId: string | null
+  friendDisplayName: string | null
+  clickedAt: string
+}
+
+export interface ApiTrackedLink {
+  id: string
+  name: string
+  originalUrl: string
+  trackingUrl: string
+  tagId: string | null
+  scenarioId: string | null
+  isActive: boolean
+  clickCount: number
+  createdAt: string
+  updatedAt: string
+  clicks?: ApiTrackedLinkClick[]
+}
+
+export interface ApiClickedNonBuyer {
+  friendId: string
+  lineUserId: string
+  displayName: string | null
+  pictureUrl: string | null
+  clickCount: number
+  firstClickedAt: string
+  lastClickedAt: string
+}
+
+export interface ClickedNonBuyerParams {
+  productId?: string
+  variantId?: string
+  sku?: string
+  windowDays?: number
+  limit?: number
+  offset?: number
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 if (!API_URL) {
   throw new Error(
@@ -601,6 +641,31 @@ export const api = {
       fetchApi<ApiResponse<null>>(`/api/staff/${id}`, { method: 'DELETE' }),
     regenerateKey: (id: string) =>
       fetchApi<ApiResponse<{ apiKey: string }>>(`/api/staff/${id}/regenerate-key`, { method: 'POST' }),
+  },
+  trackedLinks: {
+    list: () => fetchApi<ApiResponse<ApiTrackedLink[]>>('/api/tracked-links'),
+    get: (id: string) => fetchApi<ApiResponse<ApiTrackedLink>>(`/api/tracked-links/${id}`),
+    create: (data: { name: string; originalUrl: string; tagId?: string | null; scenarioId?: string | null }) =>
+      fetchApi<ApiResponse<ApiTrackedLink>>('/api/tracked-links', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) => fetchApi<ApiResponse<null>>(`/api/tracked-links/${id}`, { method: 'DELETE' }),
+    nonBuyers: (id: string, params: ClickedNonBuyerParams) => {
+      const query = new URLSearchParams()
+      if (params.productId) query.set('productId', params.productId)
+      if (params.variantId) query.set('variantId', params.variantId)
+      if (params.sku) query.set('sku', params.sku)
+      if (params.windowDays) query.set('windowDays', String(params.windowDays))
+      if (params.limit) query.set('limit', String(params.limit))
+      if (params.offset) query.set('offset', String(params.offset))
+      return fetchApi<ApiResponse<ApiClickedNonBuyer[]>>(`/api/tracked-links/${id}/non-buyers?${query}`)
+    },
+    tagNonBuyers: (id: string, data: ClickedNonBuyerParams & { tagId: string }) =>
+      fetchApi<ApiResponse<{ taggedCount: number; friendIds: string[] }>>(`/api/tracked-links/${id}/non-buyers/tag`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   images: {
     upload: async (file: File): Promise<{ id: string; key: string; url: string; mimeType: string; size: number }> => {

@@ -121,3 +121,152 @@ export async function getLinkClicks(
     .all<LinkClickWithFriend>();
   return result.results;
 }
+
+// ── Clicked but did not buy ──────────────────────────────────────────────────
+
+export interface ClickedNonBuyerQueryInput {
+  trackedLinkId: string;
+  productId?: string | null;
+  variantId?: string | null;
+  sku?: string | null;
+  windowDays?: number | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface QueryWithBindings {
+  sql: string;
+  bindings: unknown[];
+}
+
+export interface ClickedNonBuyerFriend {
+  friend_id: string;
+  line_user_id: string;
+  display_name: string | null;
+  picture_url: string | null;
+  click_count: number;
+  first_clicked_at: string;
+  last_clicked_at: string;
+}
+
+function normalizeWindowDays(windowDays?: number | null): number {
+  const n = Number(windowDays ?? 3);
+  if (!Number.isFinite(n) || n <= 0) return 3;
+  return Math.min(Math.floor(n), 90);
+}
+
+function buildProductMatcher(input: ClickedNonBuyerQueryInput): QueryWithBindings {
+  const parts: string[] = [];
+  const bindings: unknown[] = [];
+
+  if (input.productId) {
+    parts.push('oi.shopify_product_id = ?');
+    bindings.push(input.productId);
+  }
+  if (input.variantId) {
+    parts.push('oi.shopify_variant_id = ?');
+    bindings.push(input.variantId);
+  }
+  if (input.sku) {
+    parts.push('oi.sku = ?');
+    bindings.push(input.sku);
+  }
+
+  if (parts.length === 0) {
+    throw new Error('productId, variantId, or sku is required');
+  }
+
+  return { sql: `(${parts.join(' OR ')})`, bindings };
+}
+
+export function buildClickedNonBuyerQuery(input: ClickedNonBuyerQueryInput): QueryWithBindings {
+  if (!input.trackedLinkId) {
+    throw new Error('trackedLinkId is required');
+  }
+
+  const productMatcher = buildProductMatcher(input);
+  const windowDays = normalizeWindowDays(input.windowDays);
+  const limit = Math.min(Math.max(Number(input.limit ?? 500), 1), 5000);
+  const offset = Math.max(Number(input.offset ?? 0), 0);
+
+  return {
+    sql: `
+      WITH friend_clicks AS (
+        SELECT
+          lc.friend_id,
+          COUNT(*) AS click_count,
+          MIN(lc.clicked_at) AS first_clicked_at,
+          MAX(lc.clicked_at) AS last_clicked_at
+        FROM link_clicks lc
+        WHERE lc.tracked_link_id = ?
+          AND lc.friend_id IS NOT NULL
+        GROUP BY lc.friend_id
+      )
+      SELECT
+        f.id AS friend_id,
+        f.line_user_id,
+        f.display_name,
+        f.picture_url,
+        fc.click_count,
+        fc.first_clicked_at,
+        fc.last_clicked_at
+      FROM friend_clicks fc
+      JOIN friends f ON f.id = fc.friend_id
+      WHERE f.is_following = 1
+        AND f.line_user_id LIKE 'U%'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM shopify_orders o
+          JOIN shopify_order_items oi ON oi.shopify_order_id = o.shopify_order_id
+          WHERE o.friend_id = fc.friend_id
+            AND o.cancelled_at IS NULL
+            AND (o.financial_status IS NULL OR o.financial_status NOT IN ('refunded', 'voided'))
+            AND ${productMatcher.sql}
+            AND datetime(o.processed_at) >= datetime(fc.first_clicked_at)
+            AND datetime(o.processed_at) < datetime(fc.first_clicked_at, '+' || ? || ' days')
+        )
+      ORDER BY fc.last_clicked_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `,
+    bindings: [input.trackedLinkId, ...productMatcher.bindings, windowDays],
+  };
+}
+
+export async function getClickedNonBuyers(
+  db: D1Database,
+  input: ClickedNonBuyerQueryInput,
+): Promise<ClickedNonBuyerFriend[]> {
+  const query = buildClickedNonBuyerQuery(input);
+  const result = await db
+    .prepare(query.sql)
+    .bind(...query.bindings)
+    .all<ClickedNonBuyerFriend>();
+  return result.results;
+}
+
+export async function addTagToClickedNonBuyers(
+  db: D1Database,
+  input: ClickedNonBuyerQueryInput & { tagId: string },
+): Promise<{ taggedCount: number; friendIds: string[] }> {
+  if (!input.tagId) {
+    throw new Error('tagId is required');
+  }
+
+  const friends = await getClickedNonBuyers(db, input);
+  if (friends.length === 0) {
+    return { taggedCount: 0, friendIds: [] };
+  }
+
+  const now = jstNow();
+  for (const friend of friends) {
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO friend_tags (friend_id, tag_id, assigned_at)
+         VALUES (?, ?, ?)`,
+      )
+      .bind(friend.friend_id, input.tagId, now)
+      .run();
+  }
+
+  return { taggedCount: friends.length, friendIds: friends.map((f) => f.friend_id) };
+}

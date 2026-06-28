@@ -7,6 +7,8 @@ import {
   recordLinkClick,
   getLinkClicks,
   getFriendByLineUserId,
+  getClickedNonBuyers,
+  addTagToClickedNonBuyers,
 } from '@line-crm/db';
 import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { TrackedLink } from '@line-crm/db';
@@ -71,6 +73,98 @@ trackedLinks.get('/api/tracked-links/:id', async (c) => {
     });
   } catch (err) {
     console.error('GET /api/tracked-links/:id error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+function nonBuyerParamsFromRequest(c: {
+  req: {
+    param(name: string): string;
+    query(name: string): string | undefined;
+  };
+}) {
+  return {
+    trackedLinkId: c.req.param('id'),
+    productId: c.req.query('productId') ?? null,
+    variantId: c.req.query('variantId') ?? null,
+    sku: c.req.query('sku') ?? null,
+    windowDays: c.req.query('windowDays') ? Number(c.req.query('windowDays')) : 3,
+    limit: c.req.query('limit') ? Number(c.req.query('limit')) : 500,
+    offset: c.req.query('offset') ? Number(c.req.query('offset')) : 0,
+  };
+}
+
+// GET /api/tracked-links/:id/non-buyers — clicked but did not buy target product
+trackedLinks.get('/api/tracked-links/:id/non-buyers', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const link = await getTrackedLinkById(c.env.DB, id);
+    if (!link) {
+      return c.json({ success: false, error: 'Tracked link not found' }, 404);
+    }
+
+    const rows = await getClickedNonBuyers(c.env.DB, nonBuyerParamsFromRequest(c));
+    return c.json({
+      success: true,
+      data: rows.map((row) => ({
+        friendId: row.friend_id,
+        lineUserId: row.line_user_id,
+        displayName: row.display_name,
+        pictureUrl: row.picture_url,
+        clickCount: row.click_count,
+        firstClickedAt: row.first_clicked_at,
+        lastClickedAt: row.last_clicked_at,
+      })),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('productId, variantId, or sku is required')) {
+      return c.json({ success: false, error: message }, 400);
+    }
+    console.error('GET /api/tracked-links/:id/non-buyers error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/tracked-links/:id/non-buyers/tag — tag clicked non-buyers
+trackedLinks.post('/api/tracked-links/:id/non-buyers/tag', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const link = await getTrackedLinkById(c.env.DB, id);
+    if (!link) {
+      return c.json({ success: false, error: 'Tracked link not found' }, 404);
+    }
+
+    const body = await c.req.json<{
+      tagId?: string;
+      productId?: string | null;
+      variantId?: string | null;
+      sku?: string | null;
+      windowDays?: number | null;
+      limit?: number | null;
+    }>();
+
+    if (!body.tagId) {
+      return c.json({ success: false, error: 'tagId is required' }, 400);
+    }
+
+    const result = await addTagToClickedNonBuyers(c.env.DB, {
+      trackedLinkId: id,
+      productId: body.productId ?? null,
+      variantId: body.variantId ?? null,
+      sku: body.sku ?? null,
+      windowDays: body.windowDays ?? 3,
+      limit: body.limit ?? 500,
+      tagId: body.tagId,
+    });
+
+    return c.json({ success: true, data: result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('productId, variantId, or sku is required') || message.includes('tagId is required')) {
+      return c.json({ success: false, error: message }, 400);
+    }
+    console.error('POST /api/tracked-links/:id/non-buyers/tag error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

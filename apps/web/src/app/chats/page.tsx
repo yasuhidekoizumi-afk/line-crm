@@ -35,7 +35,7 @@ export default function ChatsPage() {
 
   const handleSelectChat = (chatId: string) => { setSelectedChatId(chatId); setMessageContent('') }
   const handleSendMessage = async () => { if (!selectedChatId || !messageContent.trim()) return; setSending(true); try { await api.chats.send(selectedChatId, { content: messageContent.trim() }); setMessageContent(''); loadChatDetail(selectedChatId); loadChats(); if (textareaRef.current) textareaRef.current.style.height = 'auto' } catch { setError('メッセージの送信に失敗') } finally { setSending(false) } }
-  const handleStatusUpdate = async (newStatus: string) => { if (!selectedChatId) return; try { await api.chats.update(selectedChatId, { status: newStatus }); loadChatDetail(selectedChatId); loadChats() } catch { setError('ステータスの更新に失敗') } }
+  const handleStatusUpdate = async (newStatus: NonNullable<Parameters<typeof api.chats.update>[1]['status']>) => { if (!selectedChatId) return; try { await api.chats.update(selectedChatId, { status: newStatus }); loadChatDetail(selectedChatId); loadChats() } catch { setError('ステータスの更新に失敗') } }
   const handleSaveNotes = async () => { if (!selectedChatId) return; setSavingNotes(true); try { await api.chats.update(selectedChatId, { notes }); loadChatDetail(selectedChatId) } catch { setError('メモの保存に失敗') } finally { setSavingNotes(false) } }
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage() } }
   const handleDraftSelect = (text: string) => { setMessageContent(text) }

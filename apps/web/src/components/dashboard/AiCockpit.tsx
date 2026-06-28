@@ -304,10 +304,15 @@ export default function AiCockpit() {
           </button>
         </div>
         {weekly ? (
-          <div>
-            <p className="text-xs text-gray-400 mb-2">{weekly.week_start} 〜 {weekly.week_end}</p>
-            <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{weekly.summary}</pre>
-          </div>
+          (() => {
+            const report = weekly!
+            return (
+              <div>
+                <p className="text-xs text-gray-400 mb-2">{report.week_start} 〜 {report.week_end}</p>
+                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{report.summary}</pre>
+              </div>
+            )
+          })()
         ) : (
           <p className="text-sm text-gray-400 text-center py-4">「✨ 生成」で先週の振り返りを AI が作成</p>
         )}
