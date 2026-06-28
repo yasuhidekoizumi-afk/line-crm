@@ -204,6 +204,60 @@ export interface CustomerWithFriendTags extends Customer {
   friend_tags: { id: string; name: string; color: string }[];
 }
 
+function buildCustomerLineEligibilityCondition(): string {
+  return `(
+    c.line_user_id IS NOT NULL
+    OR EXISTS (
+      SELECT 1
+      FROM loyalty_points lp
+      JOIN friends f ON f.id = lp.friend_id
+      WHERE lp.shopify_customer_id IN (c.shopify_customer_id_jp, c.shopify_customer_id_us)
+        AND f.line_user_id IS NOT NULL
+    )
+  )`;
+}
+
+function buildCustomerLineSearchCondition(): string {
+  return `(
+    c.display_name LIKE ?
+    OR c.email LIKE ?
+    OR c.line_user_id LIKE ?
+    OR EXISTS (
+      SELECT 1
+      FROM loyalty_points lp
+      JOIN friends f ON f.id = lp.friend_id
+      WHERE lp.shopify_customer_id IN (c.shopify_customer_id_jp, c.shopify_customer_id_us)
+        AND f.line_user_id LIKE ?
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM shopify_orders so
+      WHERE (
+          so.customer_id = c.customer_id
+          OR so.shopify_customer_id IN (c.shopify_customer_id_jp, c.shopify_customer_id_us)
+        )
+        AND (
+          so.email LIKE ?
+          OR so.customer_name LIKE ?
+        )
+    )
+  )`;
+}
+
+function buildResolvedLineUserIdSql(): string {
+  return `COALESCE(
+    c.line_user_id,
+    (
+      SELECT f.line_user_id
+      FROM loyalty_points lp
+      JOIN friends f ON f.id = lp.friend_id
+      WHERE lp.shopify_customer_id IN (c.shopify_customer_id_jp, c.shopify_customer_id_us)
+        AND f.line_user_id IS NOT NULL
+      LIMIT 1
+    )
+  )`;
+}
+
 export async function getCustomers(
   db: D1Database,
   opts?: {
@@ -216,35 +270,39 @@ export async function getCustomers(
     tag_id?: string;
   },
 ): Promise<CustomerWithFriendTags[]> {
-  // LINE公式アカウント登録者（line_user_id あり）のみを対象にする。
+  // LINE公式アカウント登録者（line_user_id あり、またはShopify IDからLINE IDを逆引き可能）のみを対象にする。
   // メール専用機能を切り離し、LINE中心の顧客管理に限定する方針。
-  const conditions: string[] = ['line_user_id IS NOT NULL'];
+  // Shopify ID 連携済みで customers.line_user_id が未同期の顧客も、
+  // loyalty_points -> friends 経由で LINE ID を解決できる場合は対象に含める。
+  const conditions: string[] = [buildCustomerLineEligibilityCondition()];
   const bindings: unknown[] = [];
 
   if (opts?.region) {
-    conditions.push('region = ?');
+    conditions.push('c.region = ?');
     bindings.push(opts.region);
   }
   if (opts?.subscribed_email !== undefined) {
-    conditions.push('subscribed_email = ?');
+    conditions.push('c.subscribed_email = ?');
     bindings.push(opts.subscribed_email ? 1 : 0);
   }
   // フリーワード検索: 名前・メール・LINE IDを部分一致（全件対象。表示中ページ内だけでなくDB全体を検索）
+  // Shopify ID 連携済み顧客は、loyalty_points -> friends の LINE ID と
+  // shopify_orders に残るメールアドレス・本名でも検索できるようにする。
   if (opts?.search) {
     const term = opts.search.trim();
     if (term) {
-      conditions.push('(display_name LIKE ? OR email LIKE ? OR line_user_id LIKE ?)');
+      conditions.push(buildCustomerLineSearchCondition());
       const like = `%${term}%`;
-      bindings.push(like, like, like);
+      bindings.push(like, like, like, like, like, like);
     }
   }
   // タグ絞り込み: customers.line_user_id → friends.id → friend_tags.tag_id
   if (opts?.tag_id) {
-    conditions.push(`line_user_id IN (
-      SELECT f.line_user_id FROM friends f
-      JOIN friend_tags ft ON ft.friend_id = f.id
-      WHERE ft.tag_id = ?
-    )`);
+    conditions.push(`${buildResolvedLineUserIdSql()} IN (
+        SELECT f.line_user_id FROM friends f
+        JOIN friend_tags ft ON ft.friend_id = f.id
+        WHERE ft.tag_id = ?
+      )`);
     bindings.push(opts.tag_id);
   }
 
@@ -255,7 +313,13 @@ export async function getCustomers(
   // 並び順: 購入の多い人・購入額の高い人・最近買った人を上に（取り込み直後の名前なし非購入者が
   // 先頭に来て埋もれるのを防ぐ）。同条件は作成日の新しい順。
   const result = await db
-    .prepare(`SELECT * FROM customers ${where} ORDER BY order_count DESC, ltv DESC, last_order_at DESC, created_at DESC LIMIT ? OFFSET ?`)
+    .prepare(
+      `SELECT c.*, ${buildResolvedLineUserIdSql()} AS line_user_id
+       FROM customers c
+       ${where}
+       ORDER BY c.order_count DESC, c.ltv DESC, c.last_order_at DESC, c.created_at DESC
+       LIMIT ? OFFSET ?`,
+    )
     .bind(...bindings, limit, offset)
     .all<Customer>();
 
@@ -397,39 +461,43 @@ export async function countCustomers(
   db: D1Database,
   opts?: { region?: string; subscribed_email?: boolean; search?: string; tag_id?: string },
 ): Promise<number> {
-  // 顧客一覧と件数を揃えるため、LINE登録者（line_user_id あり）のみ数える。
+  // 顧客一覧と件数を揃えるため、LINE登録者（line_user_id あり、またはShopify IDからLINE IDを逆引き可能）のみ数える。
   // 一覧側(getCustomers)と同じフィルタを適用して件数・ページネーションを一致させる。
-  const conditions: string[] = ['line_user_id IS NOT NULL'];
+  const conditions: string[] = [buildCustomerLineEligibilityCondition()];
   const bindings: unknown[] = [];
 
   if (opts?.region) {
-    conditions.push('region = ?');
+    conditions.push('c.region = ?');
     bindings.push(opts.region);
   }
   if (opts?.subscribed_email !== undefined) {
-    conditions.push('subscribed_email = ?');
+    conditions.push('c.subscribed_email = ?');
     bindings.push(opts.subscribed_email ? 1 : 0);
   }
   if (opts?.search) {
     const term = opts.search.trim();
     if (term) {
-      conditions.push('(display_name LIKE ? OR email LIKE ? OR line_user_id LIKE ?)');
+      conditions.push(buildCustomerLineSearchCondition());
       const like = `%${term}%`;
-      bindings.push(like, like, like);
+      bindings.push(like, like, like, like, like, like);
     }
   }
   if (opts?.tag_id) {
-    conditions.push(`line_user_id IN (
-      SELECT f.line_user_id FROM friends f
-      JOIN friend_tags ft ON ft.friend_id = f.id
-      WHERE ft.tag_id = ?
-    )`);
+    conditions.push(`${buildResolvedLineUserIdSql()} IN (
+        SELECT f.line_user_id FROM friends f
+        JOIN friend_tags ft ON ft.friend_id = f.id
+        WHERE ft.tag_id = ?
+      )`);
     bindings.push(opts.tag_id);
   }
 
   const where = `WHERE ${conditions.join(' AND ')}`;
   const row = await db
-    .prepare(`SELECT COUNT(*) as cnt FROM customers ${where}`)
+    .prepare(
+      `SELECT COUNT(DISTINCT c.customer_id) as cnt
+       FROM customers c
+       ${where}`,
+    )
     .bind(...bindings)
     .first<{ cnt: number }>();
   return row?.cnt ?? 0;
