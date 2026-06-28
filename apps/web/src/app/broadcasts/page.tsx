@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { Tag } from '@line-crm/shared'
-import { api, type ApiBroadcast } from '@/lib/api'
+import { api, type ApiBroadcast, type ApiBroadcastDetail } from '@/lib/api'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
@@ -84,6 +84,75 @@ function formatDatetime(iso: string | null): string {
   })
 }
 
+function formatPercent(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '未計測'
+  return `${value.toFixed(1)}%`
+}
+
+function formatMessageType(type: ApiBroadcast['messageType']): string {
+  if (type === 'text') return 'テキスト'
+  if (type === 'image') return '画像'
+  if (type === 'flex') return 'Flex'
+  if (type === 'multi') return '複数メッセージ'
+  if (type === 'imagemap') return 'リッチメッセージ'
+  return type
+}
+
+function renderMessageContent(broadcast: ApiBroadcast | ApiBroadcastDetail) {
+  if (broadcast.messageType === 'text') {
+    return (
+      <pre className="whitespace-pre-wrap break-words rounded-md bg-gray-50 p-4 text-sm leading-6 text-gray-800">
+        {broadcast.messageContent}
+      </pre>
+    )
+  }
+
+  try {
+    const parsed = JSON.parse(broadcast.messageContent)
+    if (broadcast.messageType === 'multi' && Array.isArray(parsed)) {
+      return (
+        <div className="space-y-3">
+          {parsed.map((block, index) => (
+            <div key={index} className="rounded-md border border-gray-200 bg-gray-50 p-3">
+              <div className="mb-2 text-xs font-medium text-gray-500">
+                {index + 1}件目: {formatMessageType(block.type)}
+              </div>
+              <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
+                {typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2)}
+              </pre>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    if (broadcast.messageType === 'image') {
+      return (
+        <div className="space-y-2 rounded-md bg-gray-50 p-4 text-sm text-gray-700">
+          {parsed.previewImageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={parsed.previewImageUrl} alt="" className="max-h-64 rounded border border-gray-200 object-contain" />
+          )}
+          <div>画像URL: {parsed.originalContentUrl ?? '-'}</div>
+          {parsed.linkUrl && <div>リンク先: {parsed.linkUrl}</div>}
+        </div>
+      )
+    }
+
+    return (
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-gray-50 p-4 text-xs leading-5 text-gray-800">
+        {JSON.stringify(parsed, null, 2)}
+      </pre>
+    )
+  } catch {
+    return (
+      <pre className="whitespace-pre-wrap break-words rounded-md bg-gray-50 p-4 text-sm leading-6 text-gray-800">
+        {broadcast.messageContent}
+      </pre>
+    )
+  }
+}
+
 // ai_action から即座に組み立てる「最低限のスケルトンドラフト」
 // Gemini が遅い・失敗してもこれが既に入っていればユーザーは作業継続できる。
 function skeletonDraftFromAction(action: AiAction): BroadcastDraft {
@@ -117,6 +186,8 @@ function BroadcastsPageInner() {
   )
   const [showCreate, setShowCreate] = useState(!!initialDraft || !!aiAction)
   const [editingBroadcast, setEditingBroadcast] = useState<ApiBroadcast | null>(null)
+  const [selectedDetail, setSelectedDetail] = useState<ApiBroadcastDetail | null>(null)
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [aiDrafting, setAiDrafting] = useState(false)
   const [aiDraftError, setAiDraftError] = useState<string | null>(null)
@@ -247,6 +318,20 @@ function BroadcastsPageInner() {
     }
   }
 
+  const handleOpenDetail = async (id: string) => {
+    setDetailLoadingId(id)
+    setError('')
+    try {
+      const res = await api.broadcasts.detail(id)
+      if (res.success) setSelectedDetail(res.data)
+      else setError(res.error)
+    } catch {
+      setError('配信詳細の読み込みに失敗しました。')
+    } finally {
+      setDetailLoadingId(null)
+    }
+  }
+
   const getTagName = (tagId: string | null) => {
     if (!tagId) return null
     return tags.find((t) => t.id === tagId)?.name ?? null
@@ -346,6 +431,120 @@ function BroadcastsPageInner() {
         </>
       )}
 
+      {selectedDetail && (
+        <div className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[selectedDetail.status].className}`}>
+                  {statusConfig[selectedDetail.status].label}
+                </span>
+                <span className="text-xs text-gray-500">{formatMessageType(selectedDetail.messageType)}</span>
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">{selectedDetail.title}</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                配信対象: {getTargetLabel(selectedDetail)} / 送信完了: {formatDatetime(selectedDetail.sentAt)}
+              </p>
+            </div>
+            <button
+              onClick={() => setSelectedDetail(null)}
+              className="self-start rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              閉じる
+            </button>
+          </div>
+
+          <div className="grid gap-3 border-b border-gray-100 p-5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-md bg-gray-50 p-4">
+              <div className="text-xs text-gray-500">配信成功</div>
+              <div className="mt-1 text-2xl font-semibold text-gray-900">
+                {selectedDetail.metrics.deliveredCount.toLocaleString('ja-JP')}
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                対象 {selectedDetail.totalCount.toLocaleString('ja-JP')} / 失敗 {selectedDetail.metrics.failedCount.toLocaleString('ja-JP')}
+              </div>
+            </div>
+            <div className="rounded-md bg-gray-50 p-4">
+              <div className="text-xs text-gray-500">開封率</div>
+              <div className="mt-1 text-2xl font-semibold text-gray-900">
+                {formatPercent(selectedDetail.metrics.openRate)}
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                開封数 {selectedDetail.metrics.openCount == null ? '未計測' : selectedDetail.metrics.openCount.toLocaleString('ja-JP')}
+              </div>
+            </div>
+            <div className="rounded-md bg-gray-50 p-4">
+              <div className="text-xs text-gray-500">リンククリック率</div>
+              <div className="mt-1 text-2xl font-semibold text-gray-900">
+                {formatPercent(selectedDetail.metrics.clickRate)}
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                クリック人数 {selectedDetail.metrics.uniqueClickCount.toLocaleString('ja-JP')} / イベント {selectedDetail.metrics.clickEvents.toLocaleString('ja-JP')}
+              </div>
+            </div>
+            <div className="rounded-md bg-gray-50 p-4">
+              <div className="text-xs text-gray-500">配信ログ</div>
+              <div className="mt-1 text-2xl font-semibold text-gray-900">
+                {selectedDetail.metrics.sentLogCount.toLocaleString('ja-JP')}
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                計測リンク {selectedDetail.metrics.trackedLinkCount.toLocaleString('ja-JP')} 件
+              </div>
+            </div>
+          </div>
+
+          {selectedDetail.errorSummary && (
+            <div className="border-b border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">
+              失敗理由: {selectedDetail.errorSummary}
+            </div>
+          )}
+
+          <div className="grid gap-5 p-5 lg:grid-cols-[1.3fr_1fr]">
+            <section>
+              <h3 className="mb-3 text-sm font-semibold text-gray-900">送信内容</h3>
+              {renderMessageContent(selectedDetail)}
+            </section>
+
+            <section>
+              <h3 className="mb-3 text-sm font-semibold text-gray-900">リンク別クリック</h3>
+              {selectedDetail.trackedLinks.length === 0 ? (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                  計測リンクはありません。
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-md border border-gray-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-xs text-gray-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold">リンク先</th>
+                        <th className="px-3 py-2 text-right font-semibold">人数</th>
+                        <th className="px-3 py-2 text-right font-semibold">回数</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {selectedDetail.trackedLinks.map((link) => (
+                        <tr key={link.id}>
+                          <td className="max-w-[260px] px-3 py-2">
+                            <div className="truncate font-medium text-gray-800">{link.name}</div>
+                            <div className="truncate text-xs text-gray-500">{link.originalUrl}</div>
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-700">
+                            {link.uniqueClickCount.toLocaleString('ja-JP')}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-700">
+                            {link.clickCount.toLocaleString('ja-JP')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
+
       {/* Loading */}
       {loading ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -403,7 +602,7 @@ function BroadcastsPageInner() {
                       <div>
                         <p className="text-sm font-medium text-gray-900">{broadcast.title}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {broadcast.messageType === 'text' ? 'テキスト' : broadcast.messageType === 'image' ? '画像' : 'Flex'}
+                          {formatMessageType(broadcast.messageType)}
                         </p>
                       </div>
                     </td>
@@ -463,6 +662,13 @@ function BroadcastsPageInner() {
                             編集
                           </button>
                         )}
+                        <button
+                          onClick={() => handleOpenDetail(broadcast.id)}
+                          disabled={detailLoadingId === broadcast.id}
+                          className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 rounded-md disabled:opacity-50 transition-colors"
+                        >
+                          {detailLoadingId === broadcast.id ? '読込中...' : '詳細'}
+                        </button>
                         {broadcast.status === 'draft' && (
                           <button
                             onClick={() => handleSend(broadcast.id)}

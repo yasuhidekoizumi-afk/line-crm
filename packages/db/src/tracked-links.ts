@@ -9,6 +9,7 @@ export interface TrackedLink {
   original_url: string;
   tag_id: string | null;
   scenario_id: string | null;
+  broadcast_id: string | null;
   is_active: number;
   click_count: number;
   created_at: string;
@@ -46,6 +47,7 @@ export interface CreateTrackedLinkInput {
   originalUrl: string;
   tagId?: string | null;
   scenarioId?: string | null;
+  broadcastId?: string | null;
 }
 
 export async function createTrackedLink(
@@ -55,13 +57,33 @@ export async function createTrackedLink(
   const id = crypto.randomUUID();
   const now = jstNow();
 
-  await db
-    .prepare(
-      `INSERT INTO tracked_links (id, name, original_url, tag_id, scenario_id, is_active, click_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)`,
-    )
-    .bind(id, input.name, input.originalUrl, input.tagId ?? null, input.scenarioId ?? null, now, now)
-    .run();
+  try {
+    await db
+      .prepare(
+        `INSERT INTO tracked_links (id, name, original_url, tag_id, scenario_id, broadcast_id, is_active, click_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+      )
+      .bind(
+        id,
+        input.name,
+        input.originalUrl,
+        input.tagId ?? null,
+        input.scenarioId ?? null,
+        input.broadcastId ?? null,
+        now,
+        now,
+      )
+      .run();
+  } catch (e) {
+    if (!String(e).includes('broadcast_id')) throw e;
+    await db
+      .prepare(
+        `INSERT INTO tracked_links (id, name, original_url, tag_id, scenario_id, is_active, click_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+      )
+      .bind(id, input.name, input.originalUrl, input.tagId ?? null, input.scenarioId ?? null, now, now)
+      .run();
+  }
 
   return (await getTrackedLinkById(db, id))!;
 }

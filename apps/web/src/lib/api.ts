@@ -26,9 +26,11 @@ import type {
 } from '@line-crm/shared'
 
 import type { Broadcast } from '@line-crm/shared'
+import type { BroadcastDetail } from '@line-crm/shared'
 
 /** Broadcast type from API (now camelCase after worker serialization) */
 export type ApiBroadcast = Broadcast
+export type ApiBroadcastDetail = BroadcastDetail
 
 export interface ApiTrackedLinkClick {
   id: string
@@ -262,6 +264,8 @@ export const api = {
     },
     get: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`),
+    detail: (id: string) =>
+      fetchApi<ApiResponse<ApiBroadcastDetail>>(`/api/broadcasts/${id}/detail`),
     create: (data: {
       title: string
       messageType: ApiBroadcast['messageType']
