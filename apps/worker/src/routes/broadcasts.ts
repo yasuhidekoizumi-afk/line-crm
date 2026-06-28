@@ -84,6 +84,159 @@ function serializeBroadcast(row: DbBroadcast) {
   };
 }
 
+const TRACKING_LINK_ID_RE = /\/t\/([0-9a-fA-F-]{36})/g;
+
+function extractTrackingLinkIds(value: string | null | undefined): string[] {
+  if (!value) return [];
+  return Array.from(new Set(Array.from(value.matchAll(TRACKING_LINK_ID_RE), (m) => m[1])));
+}
+
+async function getTrackedLinksForBroadcast(db: D1Database, broadcastId: string, content: string) {
+  type LinkRow = {
+    id: string;
+    name: string;
+    original_url: string;
+    click_count: number;
+  };
+
+  let directLinks: LinkRow[] = [];
+  try {
+    const result = await db
+      .prepare(
+        `SELECT id, name, original_url, click_count
+         FROM tracked_links
+         WHERE broadcast_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .bind(broadcastId)
+      .all<LinkRow>();
+    directLinks = result.results;
+  } catch (e) {
+    if (!String(e).includes('broadcast_id')) throw e;
+  }
+
+  const ids = extractTrackingLinkIds(content);
+  if (ids.length === 0) return directLinks;
+
+  const placeholders = ids.map(() => '?').join(',');
+  const embedded = await db
+    .prepare(
+      `SELECT id, name, original_url, click_count
+       FROM tracked_links
+       WHERE id IN (${placeholders})`,
+    )
+    .bind(...ids)
+    .all<LinkRow>();
+
+  const map = new Map<string, LinkRow>();
+  for (const link of [...directLinks, ...embedded.results]) map.set(link.id, link);
+  return Array.from(map.values());
+}
+
+async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
+  const links = await getTrackedLinksForBroadcast(db, row.id, row.message_content);
+  const linkIds = links.map((link) => link.id);
+
+  const sentLog = await db
+    .prepare(`SELECT COUNT(*) as count FROM messages_log WHERE broadcast_id = ?`)
+    .bind(row.id)
+    .first<{ count: number }>();
+
+  let clickEvents = 0;
+  let uniqueClickCount = 0;
+  let linkStats: Array<{
+    id: string;
+    name: string;
+    originalUrl: string;
+    clickCount: number;
+    uniqueClickCount: number;
+  }> = [];
+
+  if (linkIds.length > 0) {
+    const placeholders = linkIds.map(() => '?').join(',');
+    const total = await db
+      .prepare(
+        `SELECT
+           COUNT(*) as clickEvents,
+           COUNT(DISTINCT COALESCE(friend_id, link_clicks.id)) as uniqueClickCount
+         FROM link_clicks
+         WHERE tracked_link_id IN (${placeholders})`,
+      )
+      .bind(...linkIds)
+      .first<{ clickEvents: number; uniqueClickCount: number }>();
+    clickEvents = total?.clickEvents ?? 0;
+    uniqueClickCount = total?.uniqueClickCount ?? 0;
+
+    const perLink = await db
+      .prepare(
+        `SELECT
+           tracked_link_id as id,
+           COUNT(*) as clickCount,
+           COUNT(DISTINCT COALESCE(friend_id, link_clicks.id)) as uniqueClickCount
+         FROM link_clicks
+         WHERE tracked_link_id IN (${placeholders})
+         GROUP BY tracked_link_id`,
+      )
+      .bind(...linkIds)
+      .all<{ id: string; clickCount: number; uniqueClickCount: number }>();
+    const perLinkMap = new Map(perLink.results.map((item) => [item.id, item]));
+    linkStats = links.map((link) => {
+      const stat = perLinkMap.get(link.id);
+      return {
+        id: link.id,
+        name: link.name,
+        originalUrl: link.original_url,
+        clickCount: stat?.clickCount ?? link.click_count ?? 0,
+        uniqueClickCount: stat?.uniqueClickCount ?? 0,
+      };
+    });
+  }
+
+  type ManualMetrics = {
+    open_count: number | null;
+    open_rate: number | null;
+    click_count: number | null;
+    click_rate: number | null;
+  };
+  let manualMetrics: ManualMetrics | null = null;
+  try {
+    manualMetrics = await db
+      .prepare(
+        `SELECT open_count, open_rate, click_count, click_rate
+         FROM crm_manual_broadcasts
+         WHERE title = ?
+         ORDER BY ABS(strftime('%s', sent_at) - strftime('%s', ?)) ASC
+         LIMIT 1`,
+      )
+      .bind(row.title, row.sent_at ?? row.created_at)
+      .first<ManualMetrics>();
+  } catch (e) {
+    if (!String(e).includes('crm_manual_broadcasts')) throw e;
+  }
+
+  const deliveredCount = row.success_count || (sentLog?.count ?? 0);
+  const effectiveUniqueClickCount = uniqueClickCount || manualMetrics?.click_count || 0;
+  const clickRate = manualMetrics?.click_rate ?? (
+    deliveredCount > 0 ? (effectiveUniqueClickCount / deliveredCount) * 100 : null
+  );
+
+  return {
+    ...serializeBroadcast(row),
+    metrics: {
+      deliveredCount,
+      sentLogCount: sentLog?.count ?? 0,
+      failedCount: row.failed_count ?? 0,
+      openCount: manualMetrics?.open_count ?? null,
+      openRate: manualMetrics?.open_rate ?? null,
+      clickEvents,
+      uniqueClickCount: effectiveUniqueClickCount,
+      clickRate,
+      trackedLinkCount: links.length,
+    },
+    trackedLinks: linkStats,
+  };
+}
+
 // GET /api/broadcasts - list all
 broadcasts.get('/api/broadcasts', async (c) => {
   try {
@@ -144,6 +297,23 @@ broadcasts.get('/api/broadcasts/:id', async (c) => {
     return c.json({ success: true, data: serializeBroadcast(broadcast) });
   } catch (err) {
     console.error('GET /api/broadcasts/:id error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// GET /api/broadcasts/:id/detail - content + delivery/click metrics
+broadcasts.get('/api/broadcasts/:id/detail', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const broadcast = await getBroadcastById(c.env.DB, id);
+
+    if (!broadcast) {
+      return c.json({ success: false, error: 'Broadcast not found' }, 404);
+    }
+
+    return c.json({ success: true, data: await getBroadcastDetail(c.env.DB, broadcast) });
+  } catch (err) {
+    console.error('GET /api/broadcasts/:id/detail error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

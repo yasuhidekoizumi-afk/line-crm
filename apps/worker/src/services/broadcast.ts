@@ -36,7 +36,7 @@ export async function processBroadcastSend(
   }
   if (workerUrl) {
     const { autoTrackContent } = await import('./auto-track.js');
-    const tracked = await autoTrackContent(db, finalType, finalContent, workerUrl);
+    const tracked = await autoTrackContent(db, finalType, finalContent, workerUrl, broadcastId);
     finalType = tracked.messageType;
     finalContent = tracked.content;
   }

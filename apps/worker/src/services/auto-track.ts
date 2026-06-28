@@ -50,12 +50,14 @@ async function createTrackingMap(
   db: D1Database,
   urls: Set<string>,
   workerUrl: string,
+  broadcastId?: string | null,
 ): Promise<Map<string, { trackingUrl: string; originalUrl: string; label: string }>> {
   const urlMap = new Map<string, { trackingUrl: string; originalUrl: string; label: string }>();
   for (const url of urls) {
     const link = await createTrackedLink(db, {
       name: `auto: ${url.slice(0, 60)}`,
       originalUrl: url,
+      broadcastId: broadcastId ?? null,
     });
     // Use direct /t/ URL — Worker handles LINE app detection and LIFF redirect server-side
     const trackingUrl = `${workerUrl}/t/${link.id}`;
@@ -142,9 +144,10 @@ export async function autoTrackContent(
   messageType: string,
   content: string,
   workerUrl: string,
+  broadcastId?: string | null,
 ): Promise<AutoTrackResult> {
   if (messageType === 'multi') {
-    return autoTrackMultiContent(db, content, workerUrl);
+    return autoTrackMultiContent(db, content, workerUrl, broadcastId);
   }
 
   if (messageType === 'image') return { messageType, content };
@@ -152,7 +155,7 @@ export async function autoTrackContent(
   const urls = extractUrls(content);
   if (urls.size === 0) return { messageType, content };
 
-  const urlMap = await createTrackingMap(db, urls, workerUrl);
+  const urlMap = await createTrackingMap(db, urls, workerUrl, broadcastId);
 
   // Text messages → convert to Flex with buttons
   if (messageType === 'text') {
@@ -179,6 +182,7 @@ async function autoTrackMultiContent(
   db: D1Database,
   content: string,
   workerUrl: string,
+  broadcastId?: string | null,
 ): Promise<AutoTrackResult> {
   try {
     const blocks = JSON.parse(content) as Array<{ type: string; content: string; altText?: string }>;
@@ -193,11 +197,11 @@ async function autoTrackMultiContent(
         if (block.type === 'image') {
           return {
             ...block,
-            content: await autoTrackImageLinkUrl(db, block.content, workerUrl),
+            content: await autoTrackImageLinkUrl(db, block.content, workerUrl, broadcastId),
           };
         }
 
-        const tracked = await autoTrackContent(db, block.type, block.content, workerUrl);
+        const tracked = await autoTrackContent(db, block.type, block.content, workerUrl, broadcastId);
         return {
           ...block,
           type: tracked.messageType,
@@ -216,6 +220,7 @@ async function autoTrackImageLinkUrl(
   db: D1Database,
   content: string,
   workerUrl: string,
+  broadcastId?: string | null,
 ): Promise<string> {
   try {
     const parsed = JSON.parse(content) as {
@@ -226,7 +231,7 @@ async function autoTrackImageLinkUrl(
     const linkUrl = parsed.linkUrl?.trim();
     if (!linkUrl || shouldSkip(linkUrl)) return content;
 
-    const urlMap = await createTrackingMap(db, new Set([linkUrl]), workerUrl);
+    const urlMap = await createTrackingMap(db, new Set([linkUrl]), workerUrl, broadcastId);
     const tracked = urlMap.get(linkUrl);
     if (!tracked) return content;
 

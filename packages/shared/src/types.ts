@@ -188,6 +188,27 @@ export interface Broadcast {
   createdAt: string;
 }
 
+export interface BroadcastDetail extends Broadcast {
+  metrics: {
+    deliveredCount: number;
+    sentLogCount: number;
+    failedCount: number;
+    openCount: number | null;
+    openRate: number | null;
+    clickEvents: number;
+    uniqueClickCount: number;
+    clickRate: number | null;
+    trackedLinkCount: number;
+  };
+  trackedLinks: Array<{
+    id: string;
+    name: string;
+    originalUrl: string;
+    clickCount: number;
+    uniqueClickCount: number;
+  }>;
+}
+
 // -----------------------------------------------------------------------------
 // メッセージログ (MessageLog)
 // -----------------------------------------------------------------------------
