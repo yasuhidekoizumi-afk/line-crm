@@ -9,6 +9,7 @@ import {
   addLoyaltyTransaction,
   determineRank,
   calculatePoints,
+  recordAffiliateProgramOrder,
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js';
@@ -31,6 +32,35 @@ function verifyTokenParam(url: string, expected: string): boolean {
   }
 }
 
+function findAttributeValue(
+  attrs: Array<{ name?: string; key?: string; value?: string | number | null }> | undefined,
+  keys: string[],
+): string | null {
+  if (!attrs) return null;
+  const lowerKeys = new Set(keys.map((k) => k.toLowerCase()));
+  for (const attr of attrs) {
+    const name = (attr.name ?? attr.key ?? '').trim().toLowerCase();
+    if (!lowerKeys.has(name)) continue;
+    const value = attr.value == null ? '' : String(attr.value).trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+function extractAffiliateCodeFromOrder(order: {
+  note_attributes?: Array<{ name?: string; key?: string; value?: string | number | null }>;
+  line_items?: Array<{ properties?: Array<{ name?: string; key?: string; value?: string | number | null }> }>;
+}): { code: string | null; source: 'cart_attribute' | 'note_attribute' } {
+  const keys = ['affiliate_code', 'aff', '_affiliate_code', '_aff'];
+  const noteValue = findAttributeValue(order.note_attributes, keys);
+  if (noteValue) return { code: noteValue, source: 'cart_attribute' };
+  for (const item of order.line_items ?? []) {
+    const propValue = findAttributeValue(item.properties, keys);
+    if (propValue) return { code: propValue, source: 'note_attribute' };
+  }
+  return { code: null, source: 'cart_attribute' };
+}
+
 // POST /api/shopify/webhooks/orders-paid — Shopify 注文支払完了 Webhook
 shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   const rawBody = await c.req.text();
@@ -45,12 +75,17 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   let order: {
     id: number | string;
     name?: string;
+    email?: string | null;
     total_price?: string;
+    subtotal_price?: string;
     currency?: string;
-    customer?: { id?: number | string; tags?: string };
+    customer?: { id?: number | string; tags?: string; email?: string | null };
     line_items?: Array<{ product_id?: number; product_type?: string; vendor?: string; properties?: Array<{ name: string; value: string }> }>;
+    note_attributes?: Array<{ name: string; value: string }>;
     financial_status?: string;
     cancelled_at?: string | null;
+    created_at?: string;
+    processed_at?: string;
   };
   try {
     order = JSON.parse(rawBody);
@@ -65,6 +100,33 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
     }),
   );
 
+  const orderId = String(order.id);
+  const affiliateAttribution = extractAffiliateCodeFromOrder(order);
+  if (affiliateAttribution.code) {
+    c.executionCtx?.waitUntil(
+      recordAffiliateProgramOrder(c.env.DB, {
+        affiliateCode: affiliateAttribution.code,
+        shopifyOrderId: orderId,
+        shopifyOrderNumber: order.name ?? null,
+        shopifyCustomerId: order.customer?.id != null ? String(order.customer.id) : null,
+        customerEmail: order.email ?? order.customer?.email ?? null,
+        subtotalPrice: order.subtotal_price ? parseFloat(order.subtotal_price) : null,
+        totalPrice: order.total_price ? parseFloat(order.total_price) : null,
+        currency: order.currency ?? 'JPY',
+        financialStatus: order.financial_status ?? null,
+        cancelledAt: order.cancelled_at ?? null,
+        orderedAt: order.processed_at ?? order.created_at ?? null,
+        attributionSource: affiliateAttribution.source,
+        rawAffiliateValue: affiliateAttribution.code,
+      })
+        .then((r) => {
+          if (r.recorded) console.log(`[affiliate-program] recorded order=${orderId} code=${affiliateAttribution.code}`);
+          else if (r.reason && r.reason !== 'partner_not_found') console.log(`[affiliate-program] skipped order=${orderId} reason=${r.reason}`);
+        })
+        .catch((err) => console.error('[affiliate-program] record failed:', err)),
+    );
+  }
+
   if (order.cancelled_at) {
     return c.json({ success: true, data: { skipped: true, reason: 'cancelled' } });
   }
@@ -73,7 +135,6 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   }
 
   const shopifyCustomerId = String(order.customer.id);
-  const orderId = String(order.id);
   const orderAmount = Math.floor(parseFloat(order.total_price ?? '0'));
   if (orderAmount <= 0) {
     return c.json({ success: true, data: { skipped: true, reason: 'zero_amount' } });
