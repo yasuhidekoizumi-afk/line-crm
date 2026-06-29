@@ -298,7 +298,7 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
       processBirthdayCoupons(env)
         .then((r) => {
           if (r.enabled && (r.targets > 0 || r.errors > 0)) {
-            console.log(`[birthday-coupon] targets=${r.targets} issued=${r.issued} line=${r.lineSent} email=${r.emailSent} errors=${r.errors}`);
+            console.log(`[birthday-coupon] targets=${r.targets} issued=${r.issued} line=${r.lineSent} errors=${r.errors}`);
           }
         })
         .catch((e) => console.error('[birthday-coupon] error:', e)),
