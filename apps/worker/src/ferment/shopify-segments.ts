@@ -28,10 +28,12 @@ export type ShopifySegmentEnv = {
 
 const API_VERSION = '2024-01';
 
-/** 1チャンク（1 Worker 実行）で取得するメンバーページ数の上限。
- *  1ページ250件。1ページ ≒ GraphQL 1 + D1 数回 のサブリクエスト。
- *  上限(~1000)に対し余裕を持って 80 ページ（=最大2万件/実行）に制限。 */
-const MAX_PAGES_PER_CHUNK = 80;
+/**
+ * 1チャンク（1 Worker 実行）で取得するメンバーページ数の上限。
+ * 1ページ250件に対して D1 参照・挿入が複数回走るため、Workers のサブリクエスト上限に
+ * 余裕を持たせて 8 ページ（=最大2,000件/実行）に制限する。
+ */
+const MAX_PAGES_PER_CHUNK = 8;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -128,9 +130,10 @@ export async function listShopifySegments(env: ShopifySegmentEnv): Promise<Shopi
 /** customerSegmentMembers の1ページ（最大250件）を取得し、顧客ID(数字)とnextCursorを返す */
 async function fetchMemberPage(
   env: ShopifySegmentEnv,
-  segmentGid: string,
+  source: { segmentGid: string } | { queryId: string },
   after: string | null,
 ): Promise<{ customerIds: string[]; nextCursor: string | null }> {
+  const byQuery = 'queryId' in source;
   const data = await shopifyGraphQL<{
     customerSegmentMembers: {
       edges: Array<{ node: { id: string } }>;
@@ -138,13 +141,17 @@ async function fetchMemberPage(
     };
   }>(
     env,
-    `query($segmentId: ID!, $after: String) {
-      customerSegmentMembers(first: 250, segmentId: $segmentId, after: $after) {
+    `query($segmentId: ID, $queryId: ID, $after: String) {
+      customerSegmentMembers(first: 250, segmentId: $segmentId, queryId: $queryId, after: $after) {
         edges { node { id } }
         pageInfo { hasNextPage endCursor }
       }
     }`,
-    { segmentId: segmentGid, after },
+    {
+      segmentId: byQuery ? null : source.segmentGid,
+      queryId: byQuery ? source.queryId : null,
+      after,
+    },
   );
   const conn = data.customerSegmentMembers;
   // node.id = gid://shopify/CustomerSegmentMember/<customerId>（数字部分が顧客ID = legacyResourceId）
@@ -158,6 +165,75 @@ async function fetchMemberPage(
     customerIds,
     nextCursor: conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null,
   };
+}
+
+async function createCustomerSegmentMembersQuery(
+  env: ShopifySegmentEnv,
+  segmentGid: string,
+): Promise<{ id: string; done: boolean; currentCount: number }> {
+  const data = await shopifyGraphQL<{
+    customerSegmentMembersQueryCreate: {
+      customerSegmentMembersQuery: { id: string; done: boolean; currentCount: number } | null;
+      userErrors: Array<{ field?: string[] | null; message: string }>;
+    };
+  }>(
+    env,
+    `mutation($input: CustomerSegmentMembersQueryInput!) {
+      customerSegmentMembersQueryCreate(input: $input) {
+        customerSegmentMembersQuery { id done currentCount }
+        userErrors { field message }
+      }
+    }`,
+    { input: { segmentId: segmentGid } },
+  );
+  const payload = data.customerSegmentMembersQueryCreate;
+  if (payload.userErrors.length > 0 || !payload.customerSegmentMembersQuery) {
+    throw new Error(`Shopify async segment query errors: ${JSON.stringify(payload.userErrors).slice(0, 300)}`);
+  }
+  return payload.customerSegmentMembersQuery;
+}
+
+async function getCustomerSegmentMembersQuery(
+  env: ShopifySegmentEnv,
+  queryId: string,
+): Promise<{ id: string; done: boolean; currentCount: number }> {
+  const data = await shopifyGraphQL<{
+    customerSegmentMembersQuery: { id: string; done: boolean; currentCount: number };
+  }>(
+    env,
+    `query($id: ID!) {
+      customerSegmentMembersQuery(id: $id) { id done currentCount }
+    }`,
+    { id: queryId },
+  );
+  return data.customerSegmentMembersQuery;
+}
+
+type SyncCursorState = { after: string | null; queryId?: string };
+
+function parseSyncCursor(raw: string | null): SyncCursorState {
+  if (!raw) return { after: null };
+  try {
+    const parsed = JSON.parse(raw) as Partial<SyncCursorState>;
+    if (typeof parsed === 'object' && parsed) {
+      return {
+        after: typeof parsed.after === 'string' ? parsed.after : null,
+        queryId: typeof parsed.queryId === 'string' ? parsed.queryId : undefined,
+      };
+    }
+  } catch {
+    // 旧形式のカーソルはそのまま after として扱う。
+  }
+  return { after: raw };
+}
+
+function stringifySyncCursor(state: SyncCursorState): string | null {
+  if (!state.after && !state.queryId) return null;
+  return JSON.stringify(state);
+}
+
+function requiresAsyncSegmentQuery(err: unknown): boolean {
+  return String(err).includes('USE_CUSTOMER_SEGMENT_MEMBERS_QUERY_CREATE_MUTATION');
 }
 
 /** Shopify 顧客ID配列 → ハーネスの LINE 連携済み customer_id 配列に変換する */
@@ -202,6 +278,14 @@ export interface SyncChunkResult {
   totalMembers: number;   // 現在の段階での累積メンバー数（LINE連携済み）
 }
 
+async function countSegmentMembers(db: D1Database, segmentId: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT COUNT(*) as n FROM segment_members WHERE segment_id = ?')
+    .bind(segmentId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
 /**
  * Shopify セグメントを「分割・再開可能」に同期する（1チャンク分）。
  *
@@ -222,10 +306,14 @@ export async function syncShopifySegmentChunk(
   }
   const gid = segment.shopify_segment_id;
 
-  // 再開判定: 'syncing' なら続き、それ以外は新規同期（メンバーを一旦クリア）
+  // 再開判定: 'syncing' / 'error' でカーソルがある場合は続き、それ以外は新規同期（メンバーを一旦クリア）
   let cursor: string | null;
-  if (segment.sync_status === 'syncing') {
-    cursor = segment.sync_cursor ?? null;
+  let queryId: string | undefined;
+  if ((segment.sync_status === 'syncing' || segment.sync_status === 'error') && segment.sync_cursor) {
+    const state = parseSyncCursor(segment.sync_cursor);
+    cursor = state.after;
+    queryId = state.queryId;
+    await updateSegment(env.DB, segmentId, { sync_status: 'syncing', sync_error: null });
   } else {
     cursor = null;
     await env.DB.prepare('DELETE FROM segment_members WHERE segment_id = ?').bind(segmentId).run();
@@ -235,7 +323,37 @@ export async function syncShopifySegmentChunk(
   let pages = 0;
   try {
     while (pages < MAX_PAGES_PER_CHUNK) {
-      const { customerIds, nextCursor } = await fetchMemberPage(env, gid, cursor);
+      if (queryId) {
+        const asyncQuery = await getCustomerSegmentMembersQuery(env, queryId);
+        if (!asyncQuery.done) {
+          await updateSegment(env.DB, segmentId, {
+            sync_status: 'syncing',
+            sync_cursor: stringifySyncCursor({ queryId, after: cursor }),
+            customer_count: await countSegmentMembers(env.DB, segmentId),
+            last_computed_at: new Date().toISOString(),
+          });
+          return { done: false, processedPages: pages, totalMembers: await countSegmentMembers(env.DB, segmentId) };
+        }
+      }
+
+      let page: { customerIds: string[]; nextCursor: string | null };
+      try {
+        page = await fetchMemberPage(env, queryId ? { queryId } : { segmentGid: gid }, cursor);
+      } catch (err) {
+        if (!queryId && requiresAsyncSegmentQuery(err)) {
+          const asyncQuery = await createCustomerSegmentMembersQuery(env, gid);
+          queryId = asyncQuery.id;
+          await updateSegment(env.DB, segmentId, {
+            sync_status: 'syncing',
+            sync_cursor: stringifySyncCursor({ queryId, after: null }),
+            customer_count: await countSegmentMembers(env.DB, segmentId),
+            last_computed_at: new Date().toISOString(),
+          });
+          return { done: false, processedPages: pages, totalMembers: await countSegmentMembers(env.DB, segmentId) };
+        }
+        throw err;
+      }
+      const { customerIds, nextCursor } = page;
       pages++;
       if (customerIds.length > 0) {
         const harnessIds = await mapToLineLinkedCustomerIds(env.DB, customerIds);
@@ -245,25 +363,24 @@ export async function syncShopifySegmentChunk(
       if (!nextCursor) break;
     }
   } catch (err) {
+    const totalMembers = await countSegmentMembers(env.DB, segmentId);
     await updateSegment(env.DB, segmentId, {
       sync_status: 'error',
       sync_error: String(err).slice(0, 300),
-      sync_cursor: cursor,
+      sync_cursor: stringifySyncCursor({ queryId, after: cursor }),
+      customer_count: totalMembers,
+      last_computed_at: new Date().toISOString(),
     });
     throw err;
   }
 
-  const cntRow = await env.DB
-    .prepare('SELECT COUNT(*) as n FROM segment_members WHERE segment_id = ?')
-    .bind(segmentId)
-    .first<{ n: number }>();
-  const totalMembers = cntRow?.n ?? 0;
+  const totalMembers = await countSegmentMembers(env.DB, segmentId);
   const done = cursor === null;
   const now = new Date().toISOString();
 
   await updateSegment(env.DB, segmentId, {
     sync_status: done ? null : 'syncing',
-    sync_cursor: done ? null : cursor,
+    sync_cursor: done ? null : stringifySyncCursor({ queryId, after: cursor }),
     sync_error: null,
     customer_count: totalMembers,
     last_computed_at: now,
