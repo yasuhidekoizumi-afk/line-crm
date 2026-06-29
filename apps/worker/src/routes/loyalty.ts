@@ -26,6 +26,9 @@ import {
   RANK_THRESHOLDS,
   RANK_MULTIPLIERS,
   getFriendByLineUserId,
+  getTags,
+  createTag,
+  addTagToFriend,
   type LoyaltyRank,
   type CampaignCondition,
   type CampaignActionType,
@@ -42,6 +45,27 @@ import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
+const BIRTHDAY_REGISTERED_TAG_NAME = '誕生日登録済み';
+const BIRTHDAY_REGISTERED_TAG_COLOR = '#EAB308';
+
+async function ensureBirthdayRegisteredTag(db: D1Database): Promise<string> {
+  const existing = (await getTags(db)).find((tag) => tag.name === BIRTHDAY_REGISTERED_TAG_NAME);
+  if (existing) return existing.id;
+
+  try {
+    const created = await createTag(db, {
+      name: BIRTHDAY_REGISTERED_TAG_NAME,
+      color: BIRTHDAY_REGISTERED_TAG_COLOR,
+    });
+    return created.id;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE|constraint/i.test(err.message)) {
+      const tag = (await getTags(db)).find((item) => item.name === BIRTHDAY_REGISTERED_TAG_NAME);
+      if (tag) return tag.id;
+    }
+    throw err;
+  }
+}
 
 // GET /api/loyalty/settings — 設定一覧取得
 loyalty.get('/api/loyalty/settings', async (c) => {
@@ -981,6 +1005,13 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
     // 誕生日クーポン自動配信用に、誕生日を自社D1にも保存（毎日Shopify全件走査を避けるため）
     await c.env.DB.prepare(`UPDATE loyalty_points SET birthday = ? WHERE friend_id = ?`)
       .bind(birthday, friendId).run().catch(() => {});
+
+    // 誕生日登録済みセグメントをLINEハーネス上で扱えるよう、登録成功時にタグも付与する。
+    await ensureBirthdayRegisteredTag(c.env.DB)
+      .then((tagId) => addTagToFriend(c.env.DB, friendId, tagId))
+      .catch((err) => {
+        console.error('birthday registered tag assignment failed:', err);
+      });
 
     // 4. LINE or メール通知（非同期・失敗しても付与には影響させない）
     c.executionCtx?.waitUntil(
