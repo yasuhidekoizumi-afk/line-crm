@@ -19,6 +19,7 @@ import { users } from './routes/users.js';
 import { lineAccounts } from './routes/line-accounts.js';
 import { conversions } from './routes/conversions.js';
 import { affiliates } from './routes/affiliates.js';
+import { affiliateProgram } from './routes/affiliate-program.js';
 import { openapi } from './routes/openapi.js';
 import { liffRoutes } from './routes/liff.js';
 // Round 3 ルート
@@ -176,6 +177,7 @@ app.route('/', users);
 app.route('/', lineAccounts);
 app.route('/', conversions);
 app.route('/', affiliates);
+app.route('/', affiliateProgram);
 app.route('/', openapi);
 app.route('/', liffRoutes);
 

@@ -7,6 +7,7 @@ export * from './users';
 export * from './line-accounts';
 export * from './conversions';
 export * from './affiliates';
+export * from './affiliate-program';
 export * from './webhooks';
 export * from './calendar';
 export * from './reminders';
