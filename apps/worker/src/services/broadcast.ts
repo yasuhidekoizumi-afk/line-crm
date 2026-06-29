@@ -16,6 +16,14 @@ import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js'
 
 const MULTICAST_BATCH_SIZE = 500;
 
+export function isSendableLineUserId(lineUserId: string | null | undefined): lineUserId is string {
+  return /^U[0-9a-f]{32}$/i.test(lineUserId?.trim() ?? '');
+}
+
+function normalizeSendableLineUserId(lineUserId: string): string {
+  return lineUserId.trim();
+}
+
 export async function resolveBroadcastLineClient(
   db: D1Database,
   defaultAccessToken: string,
@@ -84,7 +92,7 @@ export async function processBroadcastSend(
       const followingFriends = friends.filter(
         (f) =>
           f.is_following &&
-          f.line_user_id &&
+          isSendableLineUserId(f.line_user_id) &&
           (!broadcast.line_account_id ||
             (f as unknown as { line_account_id?: string | null }).line_account_id === broadcast.line_account_id),
       );
@@ -96,7 +104,7 @@ export async function processBroadcastSend(
       for (let i = 0; i < followingFriends.length; i += MULTICAST_BATCH_SIZE) {
         const batchIndex = Math.floor(i / MULTICAST_BATCH_SIZE);
         const batch = followingFriends.slice(i, i + MULTICAST_BATCH_SIZE);
-        const lineUserIds = batch.map((f) => f.line_user_id);
+        const lineUserIds = batch.map((f) => normalizeSendableLineUserId(f.line_user_id));
 
         // Stealth: add staggered delay between batches
         if (batchIndex > 0) {
@@ -161,13 +169,14 @@ export async function processBroadcastSend(
         .bind(...friendIds, ...(broadcast.line_account_id ? [broadcast.line_account_id] : []))
         .all<{ id: string; line_user_id: string }>();
       const friends = result.results;
-      totalCount = friends.length;
+      const validFriends = friends.filter((f) => isSendableLineUserId(f.line_user_id));
+      totalCount = validFriends.length;
 
       const now = jstNow();
-      const lineUserIds = friends.map((f) => f.line_user_id);
+      const lineUserIds = validFriends.map((f) => normalizeSendableLineUserId(f.line_user_id));
       for (let i = 0; i < lineUserIds.length; i += MULTICAST_BATCH_SIZE) {
-        const batch = friends.slice(i, i + MULTICAST_BATCH_SIZE);
-        const batchUserIds = batch.map((f) => f.line_user_id);
+        const batch = validFriends.slice(i, i + MULTICAST_BATCH_SIZE);
+        const batchUserIds = batch.map((f) => normalizeSendableLineUserId(f.line_user_id));
         try {
           await lineClient.multicast(batchUserIds, messages);
           successCount += batch.length;
@@ -197,7 +206,9 @@ export async function processBroadcastSend(
         throw new Error('target_segment_id is required for segment-targeted broadcasts');
       }
 
-      const lineUserIds = await getSegmentLineUserIds(db, broadcast.target_segment_id);
+      const lineUserIds = (await getSegmentLineUserIds(db, broadcast.target_segment_id))
+        .filter(isSendableLineUserId)
+        .map(normalizeSendableLineUserId);
       totalCount = lineUserIds.length;
 
       // Send in batches with stealth delays

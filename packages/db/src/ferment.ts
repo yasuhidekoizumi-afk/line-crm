@@ -957,7 +957,9 @@ export async function getSegmentLineUserIds(
     .prepare(
       `SELECT c.line_user_id FROM customers c
        INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
-       WHERE sm.segment_id = ? AND c.line_user_id IS NOT NULL`,
+       WHERE sm.segment_id = ?
+         AND c.line_user_id LIKE 'U%'
+         AND length(c.line_user_id) = 33`,
     )
     .bind(segmentId)
     .all<{ line_user_id: string }>();
