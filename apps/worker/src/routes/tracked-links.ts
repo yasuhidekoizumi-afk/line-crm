@@ -287,6 +287,21 @@ function buildAppRedirectHtml(destinationUrl: string): string {
 </body></html>`;
 }
 
+function buildLiffRedirectUrl(liffUrl: string, directUrl: string): string {
+  const url = new URL(liffUrl);
+  url.searchParams.set('redirect', directUrl);
+
+  // LIFFエンドポイント側のビルド環境にIDが入っていない場合でも初期化できるようにする。
+  if (!url.searchParams.has('liffId')) {
+    const liffIdMatch = liffUrl.match(/liff\.line\.me\/([^?]+)/);
+    if (liffIdMatch?.[1]) {
+      url.searchParams.set('liffId', liffIdMatch[1]);
+    }
+  }
+
+  return url.toString();
+}
+
 // GET /t/:linkId — click tracking redirect (no auth, fast redirect)
 trackedLinks.get('/t/:linkId', async (c) => {
   const linkId = c.req.param('linkId');
@@ -308,7 +323,7 @@ trackedLinks.get('/t/:linkId', async (c) => {
   const isLineApp = /\bLine\b/i.test(ua);
   if (!useAppRedirect && !lineUserId && !friendId && isLineApp && c.env.LIFF_URL) {
     const directUrl = `${c.env.WORKER_URL || new URL(c.req.url).origin}/t/${linkId}`;
-    const liffRedirect = `${c.env.LIFF_URL}?redirect=${encodeURIComponent(directUrl)}`;
+    const liffRedirect = buildLiffRedirectUrl(c.env.LIFF_URL, directUrl);
     return c.redirect(liffRedirect, 302);
   }
 
