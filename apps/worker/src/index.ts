@@ -101,6 +101,7 @@ import { processScheduledEmailCampaigns } from './ferment/cron-campaigns.js';
 import { processFlowDeliveries } from './ferment/cron-flows.js';
 import { recomputeAllSegments } from './ferment/cron-segments.js';
 import { sendDailySummary } from './ferment/cron-daily-summary.js';
+import { processBirthdayCoupons } from './services/birthday-coupon.js';
 
 export type Env = {
   Bindings: {
@@ -293,6 +294,15 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     jobs.push(sendDailySummary(env));
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
     jobs.push(checkRakutenLicenseExpiry(env).then(() => undefined).catch(() => undefined));
+    jobs.push(
+      processBirthdayCoupons(env)
+        .then((r) => {
+          if (r.enabled && (r.targets > 0 || r.errors > 0)) {
+            console.log(`[birthday-coupon] targets=${r.targets} issued=${r.issued} line=${r.lineSent} email=${r.emailSent} errors=${r.errors}`);
+          }
+        })
+        .catch((e) => console.error('[birthday-coupon] error:', e)),
+    );
     // B2: 未使用ポイント割引コードの自動返還（設定 unused_code_auto_refund_enabled='1' のときのみ動作）
     jobs.push(
       import('./services/loyalty-unused-code-sweep.js')
