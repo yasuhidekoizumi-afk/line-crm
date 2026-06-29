@@ -64,12 +64,36 @@ function detectLiffId(): string {
   if (fromParam) return fromParam;
   return import.meta.env?.VITE_LIFF_ID || '';
 }
+/**
+ * 「読み込み中...」のままユーザーが詰まらないよう、画面にエラーとデバッグ情報を表示する。
+ * throw だけだと index.html の初期表示（スピナー+「読み込み中...」）のまま固まる。
+ */
+function mountFatalError(title: string, detail: string): void {
+  const app = typeof document !== 'undefined' ? document.getElementById('app') : null;
+  if (!app) return;
+  const params = new URLSearchParams(window.location.search);
+  const debug = [
+    `URL: ${window.location.href}`,
+    `path: ${window.location.pathname}`,
+    `search: ${window.location.search || '(none)'}`,
+    `liff.state: ${params.get('liff.state') ?? '(none)'}`,
+    `liffId (query): ${params.get('liffId') ?? '(none)'}`,
+    `VITE_LIFF_ID (build): ${import.meta.env?.VITE_LIFF_ID ?? '(none)'}`,
+    `UA: ${navigator.userAgent}`,
+  ].join('\n');
+  app.innerHTML = `
+    <div class="card">
+      <h2 style="color:#e53e3e">${title}</h2>
+      <p class="message">${detail}</p>
+      <pre style="text-align:left;font-size:10px;white-space:pre-wrap;word-break:break-all;background:#f0f0f0;padding:8px;border-radius:4px;margin-top:12px;color:#333">${debug.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string))}</pre>
+    </div>
+  `;
+}
+
 const LIFF_ID = detectLiffId();
-if (!LIFF_ID && !new URLSearchParams(window.location.search).get('liffId')) {
-  throw new Error(
-    'VITE_LIFF_ID is not set and no liffId query param provided. ' +
-    'Set VITE_LIFF_ID in .env (local) or GitHub Secrets (CI).'
-  )
+if (!LIFF_ID) {
+  mountFatalError('LIFF初期化失敗', 'LIFF IDが見つかりません。GitHub Variables の VITE_LIFF_ID が未設定の可能性があります。');
+  throw new Error('LIFF ID not found');
 }
 const UUID_STORAGE_KEY = 'lh_uuid';
 // LINE公式アカウントの友だち追加URL（LINE Developers Console → Messaging API → Bot basic ID）
@@ -276,7 +300,14 @@ async function linkAndAddFlow() {
 
   } catch (err) {
     if (redirectUrl) {
-      window.location.href = redirectUrl;
+      // ループ防止: redirectUrl が /t/ で lu= が無いと /t/ で再度LIFFにリダイレクトされて
+      // 無限ループ→レート制限 429 になる。失敗時は _skip_liff=1 を付けてLIFF経由を回避させる。
+      if (redirectUrl.includes('/t/') && !redirectUrl.includes('lu=')) {
+        const sep = redirectUrl.includes('?') ? '&' : '?';
+        window.location.href = `${redirectUrl}${sep}_skip_liff=1`;
+      } else {
+        window.location.href = redirectUrl;
+      }
     } else {
       showError(err instanceof Error ? err.message : 'エラーが発生しました');
     }

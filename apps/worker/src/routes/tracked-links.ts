@@ -307,6 +307,9 @@ trackedLinks.get('/t/:linkId', async (c) => {
   const linkId = c.req.param('linkId');
   const lineUserId = c.req.query('lu') ?? null;
   let friendId = c.req.query('f') ?? null;
+  // LIFF側で getProfile 等が失敗した場合、クライアントが _skip_liff=1 を付けて戻す。
+  // ここで再びLIFFへリダイレクトすると無限ループ→429 になるため、明示的にスキップする。
+  const skipLiff = c.req.query('_skip_liff') === '1';
 
   // Look up the link first
   const link = await getTrackedLinkById(c.env.DB, linkId);
@@ -321,7 +324,7 @@ trackedLinks.get('/t/:linkId', async (c) => {
   // Skip LIFF redirect for app-link domains (they'll come from Safari via externalBrowser)
   const ua = c.req.header('user-agent') || '';
   const isLineApp = /\bLine\b/i.test(ua);
-  if (!useAppRedirect && !lineUserId && !friendId && isLineApp && c.env.LIFF_URL) {
+  if (!useAppRedirect && !lineUserId && !friendId && isLineApp && c.env.LIFF_URL && !skipLiff) {
     const directUrl = `${c.env.WORKER_URL || new URL(c.req.url).origin}/t/${linkId}`;
     const liffRedirect = buildLiffRedirectUrl(c.env.LIFF_URL, directUrl);
     return c.redirect(liffRedirect, 302);
