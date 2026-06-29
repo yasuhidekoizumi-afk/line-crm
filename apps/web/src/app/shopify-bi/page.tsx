@@ -199,8 +199,39 @@ export default function ShopifyBiTopPage() {
 
   const lineSeg = funnel.find((f) => f.segment === 'LINE連携あり')
   const noLineSeg = funnel.find((f) => f.segment === 'LINE連携なし')
+  const totalFirstCustomers = funnel.reduce((s, f) => s + f.first_order_customers, 0)
+  const totalRepeatCustomers = funnel.reduce((s, f) => s + f.repeat_customers, 0)
+  const totalUnconvertedCustomers = Math.max(0, totalFirstCustomers - totalRepeatCustomers)
+  const totalRepeatRate = totalFirstCustomers > 0 ? (totalRepeatCustomers / totalFirstCustomers) * 100 : 0
+  const totalRepeatWithin30 = funnel.reduce((s, f) => s + f.repeat_within_30d, 0)
+  const repeatWithin30Rate = totalFirstCustomers > 0 ? (totalRepeatWithin30 / totalFirstCustomers) * 100 : 0
 
   const ltvDelta = lineSeg && noLineSeg ? Math.max(0, lineSeg.ltv - noLineSeg.ltv) : 0
+  const repeatRateLift = lineSeg && noLineSeg ? lineSeg.repeat_rate_pct - noLineSeg.repeat_rate_pct : 0
+  const lineUnconvertedCustomers = lineSeg ? Math.max(0, lineSeg.first_order_customers - lineSeg.repeat_customers) : 0
+  const noLineUnconvertedCustomers = noLineSeg ? Math.max(0, noLineSeg.first_order_customers - noLineSeg.repeat_customers) : 0
+  const incrementalLineRepeats = lineSeg && noLineSeg
+    ? Math.max(0, Math.round(lineSeg.repeat_customers - lineSeg.first_order_customers * (noLineSeg.repeat_rate_pct / 100)))
+    : 0
+  const ltvRows = funnel
+    .map((f) => ({
+      ...f,
+      unconverted: Math.max(0, f.first_order_customers - f.repeat_customers),
+      repeatShare: totalRepeatCustomers > 0 ? (f.repeat_customers / totalRepeatCustomers) * 100 : 0,
+      ltvIndex: noLineSeg && noLineSeg.ltv > 0 ? (f.ltv / noLineSeg.ltv) * 100 : 100,
+      repeatRevenueProxy: f.repeat_customers * f.ltv,
+    }))
+    .sort((a, b) => b.ltv - a.ltv)
+  const ltvOpportunity = ltvDelta > 0 && noLineSeg
+    ? noLineUnconvertedCustomers * ltvDelta
+    : 0
+  const additionalF2IfNoLineMatchesLine = lineSeg && noLineSeg && repeatRateLift > 0
+    ? Math.round(noLineSeg.first_order_customers * (repeatRateLift / 100))
+    : 0
+  const additionalLtvIfNoLineMatchesLine = additionalF2IfNoLineMatchesLine * (noLineSeg?.ltv ?? 0)
+  const prioritySegmentLabel = noLineUnconvertedCustomers >= lineUnconvertedCustomers
+    ? 'LINE未連携の初回購入者'
+    : 'LINE連携済みのF2未到達者'
   const lostCustomersInAnomalies = anomalies.reduce((s, c) => s + Math.round(c.first_order_customers * (0.5 - c.line_link_rate_pct / 100)), 0)
   const lostValue = ltvDelta * lostCustomersInAnomalies
 
@@ -266,6 +297,171 @@ export default function ShopifyBiTopPage() {
                 <KpiCard label={`${periodLabel} 売上`} value={yen(stats.total_revenue)} color="green" />
                 <KpiCard label={`${periodLabel} 顧客数`} value={num(stats.unique_customers)} unit="人" color="purple" />
                 <KpiCard label={`${periodLabel} LINE連携比率`} value={stats.order_count > 0 ? `${((stats.line_linked_orders / stats.order_count) * 100).toFixed(1)}%` : '—'} color="pink" />
+              </div>
+            )}
+
+            {funnel.length > 0 && totalFirstCustomers > 0 && (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
+                  <h2 className="font-bold text-gray-900">🔁 F2転換ファネル（初回 → 2回目購入）</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">{periodLabel} に初回購入した顧客の2回目購入到達状況。F2はLTVの最大レバー。</p>
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-gray-200">
+                  <FunnelStat label="初回購入顧客" value={num(totalFirstCustomers)} unit="人" tone="neutral" />
+                  <FunnelStat label="F2到達" value={num(totalRepeatCustomers)} unit="人" sub={`${totalRepeatRate.toFixed(1)}%`} tone="good" />
+                  <FunnelStat label="30日内F2" value={`${repeatWithin30Rate.toFixed(1)}%`} sub={`${num(totalRepeatWithin30)}人`} tone="neutral" />
+                  <FunnelStat label="F2未到達" value={num(totalUnconvertedCustomers)} unit="人" sub="フォロー対象" tone="warn" />
+                </div>
+                <div className="px-4 sm:px-5 py-3 border-t border-gray-200">
+                  <div className="flex h-3 w-full overflow-hidden rounded-full bg-gray-100">
+                    <div className="bg-indigo-500 h-3" style={{ width: `${Math.min(100, totalRepeatRate)}%` }} title={`F2到達 ${totalRepeatRate.toFixed(1)}%`} />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>F2到達 {totalRepeatRate.toFixed(1)}%</span>
+                    <span>未到達 {(100 - totalRepeatRate).toFixed(1)}%</span>
+                  </div>
+                </div>
+                {lineSeg && noLineSeg && (
+                  <div className="overflow-x-auto border-t border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs text-gray-600">
+                        <tr>
+                          <th className="px-3 py-2 text-left">セグメント</th>
+                          <th className="px-3 py-2 text-right">初回</th>
+                          <th className="px-3 py-2 text-right">F2率</th>
+                          <th className="px-3 py-2 text-right hidden sm:table-cell">7日内</th>
+                          <th className="px-3 py-2 text-right hidden sm:table-cell">30日内</th>
+                          <th className="px-3 py-2 text-right hidden md:table-cell">平均日数</th>
+                          <th className="px-3 py-2 text-right">未到達</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {[lineSeg, noLineSeg].map((s) => {
+                          const within7 = s.first_order_customers > 0 ? (s.repeat_within_7d / s.first_order_customers) * 100 : 0
+                          const within30 = s.first_order_customers > 0 ? (s.repeat_within_30d / s.first_order_customers) * 100 : 0
+                          const unconv = Math.max(0, s.first_order_customers - s.repeat_customers)
+                          const isLine = s.segment === 'LINE連携あり'
+                          return (
+                            <tr key={s.segment} className={isLine ? 'bg-green-50/40' : ''}>
+                              <td className="px-3 py-2 font-medium text-gray-900">{isLine ? '🟢' : '⚪'} {s.segment}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{num(s.first_order_customers)}</td>
+                              <td className={`px-3 py-2 text-right font-bold tabular-nums ${s.repeat_rate_pct >= 30 ? 'text-green-700' : s.repeat_rate_pct >= 15 ? 'text-yellow-700' : 'text-red-700'}`}>{s.repeat_rate_pct}%</td>
+                              <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden sm:table-cell">{within7.toFixed(1)}%</td>
+                              <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden sm:table-cell">{within30.toFixed(1)}%</td>
+                              <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{s.avg_days_to_second}日</td>
+                              <td className="px-3 py-2 text-right font-medium text-amber-700 tabular-nums">{num(unconv)}人</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {repeatRateLift > 0 && (
+                  <div className="px-4 sm:px-5 py-3 bg-indigo-50 border-t border-indigo-100 text-sm space-y-1">
+                    <div>
+                      <span className="font-bold text-indigo-900">LINE連携でF2率 +{repeatRateLift.toFixed(1)}pt</span>
+                      <span className="text-indigo-700 ml-2">（{lineSeg!.repeat_rate_pct}% vs {noLineSeg!.repeat_rate_pct}%）</span>
+                    </div>
+                    {incrementalLineRepeats > 0 && (
+                      <div className="text-indigo-700 text-xs">
+                        ↑ LINE連携の押し上げで約 <span className="font-bold">{num(incrementalLineRepeats)}人</span> が追加でF2到達（非連携並みの転換率だった場合との差）。
+                        未連携の初回購入 {num(noLineUnconvertedCustomers)}人 をLINE連携に誘導できれば、ここがF2の伸びしろ。
+                      </div>
+                    )}
+                  </div>
+                )}
+                {lineSeg && noLineSeg && (
+                  <div className="px-4 sm:px-5 py-4 bg-slate-50 border-t border-slate-200">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <h3 className="font-bold text-gray-900">経営判断メモ</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">次のCRM投資をどこに寄せるべきか</p>
+                      </div>
+                      <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
+                        優先: {prioritySegmentLabel}
+                      </span>
+                    </div>
+                    <div className="grid md:grid-cols-3 gap-3 mt-3 text-sm">
+                      <div className="rounded-md bg-white border border-gray-200 p-3">
+                        <div className="text-xs text-gray-500">最優先施策</div>
+                        <div className="font-bold text-gray-900 mt-1">未連携F2未到達 {num(noLineUnconvertedCustomers)}人へのLINE連携導線</div>
+                        <p className="text-xs text-gray-600 mt-1">母数が大きく、F2率もLINE連携ありの方が高い。購入後メール・同梱物・マイページで友だち追加を回収。</p>
+                      </div>
+                      <div className="rounded-md bg-white border border-gray-200 p-3">
+                        <div className="text-xs text-gray-500">伸びしろ</div>
+                        <div className="font-bold text-gray-900 mt-1">F2到達 +{num(additionalF2IfNoLineMatchesLine)}人 相当</div>
+                        <p className="text-xs text-gray-600 mt-1">未連携のF2率がLINE連携あり水準まで上がった場合の概算。売上機会は約 {yen(additionalLtvIfNoLineMatchesLine)}。</p>
+                      </div>
+                      <div className="rounded-md bg-white border border-gray-200 p-3">
+                        <div className="text-xs text-gray-500">次の意思決定</div>
+                        <div className="font-bold text-gray-900 mt-1">自動フォローは30日以内F2を主KPIにする</div>
+                        <p className="text-xs text-gray-600 mt-1">単発売上より、初回購入後7/21/45日で接触してF2未到達を減らす設計が優先。</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {ltvRows.length > 0 && lineSeg && noLineSeg && (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
+                  <h2 className="font-bold text-gray-900">💰 LTV分解（LINE連携 × F2転換）</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">LTVを「F2転換率」「30日内転換速度」「顧客あたり売上」に分解。どのレバーを伸ばすべきかを見る。</p>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-px bg-gray-200">
+                  <div className="bg-white px-4 py-3">
+                    <div className="text-xs text-gray-500">LTV差分</div>
+                    <div className="mt-1 text-xl font-bold text-indigo-700 tabular-nums">{yen(ltvDelta)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">LINE連携あり − なし</div>
+                  </div>
+                  <div className="bg-white px-4 py-3">
+                    <div className="text-xs text-gray-500">F2率差分</div>
+                    <div className="mt-1 text-xl font-bold text-green-700 tabular-nums">+{repeatRateLift.toFixed(1)}pt</div>
+                    <div className="text-xs text-gray-500 mt-0.5">初回後の継続率レバー</div>
+                  </div>
+                  <div className="bg-white px-4 py-3">
+                    <div className="text-xs text-gray-500">LTV機会額</div>
+                    <div className="mt-1 text-xl font-bold text-amber-700 tabular-nums">{yen(ltvOpportunity)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">未連携F2未到達 × LTV差分</div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto border-t border-gray-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-xs text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left">セグメント</th>
+                        <th className="px-3 py-2 text-right">LTV</th>
+                        <th className="px-3 py-2 text-right">LTV指数</th>
+                        <th className="px-3 py-2 text-right">F2率</th>
+                        <th className="px-3 py-2 text-right hidden sm:table-cell">30日内F2</th>
+                        <th className="px-3 py-2 text-right hidden md:table-cell">F2到達の内訳</th>
+                        <th className="px-3 py-2 text-right">次アクション</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {ltvRows.map((row) => {
+                        const within30 = row.first_order_customers > 0 ? (row.repeat_within_30d / row.first_order_customers) * 100 : 0
+                        const isLine = row.segment === 'LINE連携あり'
+                        return (
+                          <tr key={row.segment}>
+                            <td className="px-3 py-2 font-medium text-gray-900">{isLine ? '🟢' : '⚪'} {row.segment}</td>
+                            <td className="px-3 py-2 text-right font-bold tabular-nums">{yen(row.ltv)}</td>
+                            <td className={`px-3 py-2 text-right tabular-nums ${row.ltvIndex >= 120 ? 'text-green-700 font-bold' : 'text-gray-700'}`}>{row.ltvIndex.toFixed(0)}</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums">{row.repeat_rate_pct}%</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden sm:table-cell">{within30.toFixed(1)}%</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{num(row.repeat_customers)}人 <span className="text-gray-400">({row.repeatShare.toFixed(0)}%)</span></td>
+                            <td className="px-3 py-2 text-right text-xs text-gray-600">{isLine ? '配信頻度/商品提案を最適化' : 'LINE連携・友だち追加を最優先'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 sm:px-5 py-3 bg-amber-50 border-t border-amber-100 text-xs text-amber-800">
+                  注: 現APIで取れる範囲の簡易分解。次段階では `total_orders` をAPIへ出し、購入頻度 = 総注文数/顧客数、AOV = 総売上/総注文数まで厳密化する。
+                </div>
               </div>
             )}
 
@@ -488,4 +684,19 @@ function SegmentBlock({ seg, variant }: { seg: FunnelRow; variant: 'primary' | '
 
 function NavCard({ href, emoji, title, desc }: { href: string; emoji: string; title: string; desc: string }) {
   return (<Link href={href} className="block bg-white border border-gray-200 rounded-lg p-4 hover:border-indigo-300 hover:shadow-sm transition"><div className="text-2xl">{emoji}</div><div className="mt-2 font-bold text-gray-900">{title}</div><div className="text-xs text-gray-500 mt-0.5">{desc}</div></Link>)
+}
+
+function FunnelStat({ label, value, unit, sub, tone }: { label: string; value: string; unit?: string; sub?: string; tone: 'neutral' | 'good' | 'warn' }) {
+  const toneMap = {
+    neutral: 'text-gray-900',
+    good: 'text-green-700',
+    warn: 'text-amber-700',
+  }
+  return (
+    <div className="bg-white px-4 py-3">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className={`mt-1 text-xl font-bold tabular-nums ${toneMap[tone]}`}>{value}{unit && <span className="text-sm font-normal text-gray-500 ml-1">{unit}</span>}</div>
+      {sub && <div className="text-xs text-gray-500 mt-0.5">{sub}</div>}
+    </div>
+  )
 }
