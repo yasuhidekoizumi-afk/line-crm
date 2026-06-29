@@ -17,6 +17,7 @@ interface BroadcastDraft {
   targetType?: ApiBroadcast['targetType']
   targetTagId?: string
   targetSegmentId?: string
+  targetFriendIds?: string[]
   scheduledAt?: string
   sendNow?: boolean
 }
@@ -348,6 +349,7 @@ function BroadcastsPageInner() {
     () => decodeBase64Json<BroadcastDraft>(draftToken)
       ?? (aiAction ? skeletonDraftFromAction(aiAction) : null),
   )
+  const [draftRevision, setDraftRevision] = useState(0)
   const [showCreate, setShowCreate] = useState(!!initialDraft || !!aiAction)
   const [editingBroadcast, setEditingBroadcast] = useState<ApiBroadcast | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<ApiBroadcastDetail | null>(null)
@@ -482,6 +484,30 @@ function BroadcastsPageInner() {
     }
   }
 
+  const handleNewBroadcast = () => {
+    setInitialDraft(null)
+    setDraftRevision((revision) => revision + 1)
+    setEditingBroadcast(null)
+    setShowCreate(true)
+  }
+
+  const handleDuplicate = (broadcast: ApiBroadcast) => {
+    setInitialDraft({
+      title: `${broadcast.title}（コピー）`,
+      messageType: broadcast.messageType,
+      messageContent: broadcast.messageContent,
+      targetType: broadcast.targetType,
+      targetTagId: broadcast.targetTagId ?? '',
+      targetSegmentId: broadcast.targetSegmentId ?? '',
+      targetFriendIds: broadcast.targetFriendIds ?? [],
+      scheduledAt: '',
+    })
+    setDraftRevision((revision) => revision + 1)
+    setEditingBroadcast(null)
+    setSelectedDetail(null)
+    setShowCreate(true)
+  }
+
   const handleOpenDetail = async (id: string) => {
     setDetailLoadingId(id)
     setError('')
@@ -525,7 +551,7 @@ function BroadcastsPageInner() {
         title="LINE一斉配信"
         action={
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={handleNewBroadcast}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
             style={{ backgroundColor: '#06C755' }}
           >
@@ -585,12 +611,12 @@ function BroadcastsPageInner() {
             </div>
           )}
           <BroadcastForm
-            key={initialDraft?.messageContent ?? 'empty'}
+            key={`create-${draftRevision}`}
             tags={tags}
             segments={segments}
             initialDraft={initialDraft}
-            onSuccess={() => { setShowCreate(false); load() }}
-            onCancel={() => setShowCreate(false)}
+            onSuccess={() => { setShowCreate(false); setInitialDraft(null); load() }}
+            onCancel={() => { setShowCreate(false); setInitialDraft(null) }}
           />
         </>
       )}
@@ -610,12 +636,20 @@ function BroadcastsPageInner() {
                 配信対象: {getTargetLabel(selectedDetail)} / 送信完了: {formatDatetime(selectedDetail.sentAt)}
               </p>
             </div>
-            <button
-              onClick={() => setSelectedDetail(null)}
-              className="self-start rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
-            >
-              閉じる
-            </button>
+            <div className="flex items-center gap-2 self-start">
+              <button
+                onClick={() => handleDuplicate(selectedDetail)}
+                className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                複製
+              </button>
+              <button
+                onClick={() => setSelectedDetail(null)}
+                className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              >
+                閉じる
+              </button>
+            </div>
           </div>
 
           <div className="grid gap-3 border-b border-gray-100 p-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -818,6 +852,12 @@ function BroadcastsPageInner() {
                     {/* Actions */}
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleDuplicate(broadcast)}
+                          className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 rounded-md transition-colors"
+                        >
+                          複製
+                        </button>
                         {broadcast.status === 'draft' && (
                           <button
                             onClick={() => { setEditingBroadcast(broadcast); setShowCreate(false) }}
