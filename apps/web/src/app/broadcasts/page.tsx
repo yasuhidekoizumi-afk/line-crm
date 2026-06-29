@@ -98,6 +98,162 @@ function formatMessageType(type: ApiBroadcast['messageType']): string {
   return type
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function asContents(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(isRecord)
+}
+
+function renderFlexNode(node: unknown, key?: string | number) {
+  if (!isRecord(node)) return null
+  const type = asString(node.type)
+
+  if (type === 'text') {
+    const text = asString(node.text) ?? ''
+    const weight = node.weight === 'bold' ? 'font-semibold' : 'font-normal'
+    const size = node.size === 'sm' || node.size === 'xs' ? 'text-xs' : node.size === 'lg' ? 'text-base' : 'text-sm'
+    const color = asString(node.color) ?? '#1f2937'
+    return (
+      <div key={key} className={`${weight} ${size} leading-5`} style={{ color }}>
+        {text}
+      </div>
+    )
+  }
+
+  if (type === 'image') {
+    const url = asString(node.url)
+    if (!url) return null
+    const aspectRatio = asString(node.aspectRatio)?.replace(':', ' / ') ?? '1 / 1'
+    return (
+      <div key={key} className="overflow-hidden bg-gray-100" style={{ aspectRatio }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      </div>
+    )
+  }
+
+  if (type === 'button') {
+    const action = isRecord(node.action) ? node.action : {}
+    const label = asString(action.label) ?? asString(action.text) ?? 'ボタン'
+    const uri = asString(action.uri)
+    const isPrimary = node.style === 'primary'
+    return (
+      <div key={key} className="pt-1">
+        <div
+          className={`flex min-h-10 items-center justify-center rounded-md px-3 py-2 text-sm font-semibold ${
+            isPrimary ? 'text-white' : 'border border-gray-200 bg-white text-gray-700'
+          }`}
+          style={isPrimary ? { backgroundColor: asString(node.color) ?? '#06C755' } : undefined}
+          title={uri ?? undefined}
+        >
+          {label}
+        </div>
+      </div>
+    )
+  }
+
+  if (type === 'separator') {
+    return <div key={key} className="my-2 border-t border-gray-100" />
+  }
+
+  if (type === 'spacer') {
+    return <div key={key} className="h-2" />
+  }
+
+  if (type === 'box') {
+    const layout = node.layout === 'horizontal' ? 'flex-row' : 'flex-col'
+    const spacing = node.spacing === 'md' ? 'gap-3' : node.spacing === 'lg' ? 'gap-4' : 'gap-2'
+    return (
+      <div key={key} className={`flex ${layout} ${spacing}`}>
+        {asContents(node.contents).map((child, index) => renderFlexNode(child, index))}
+      </div>
+    )
+  }
+
+  return null
+}
+
+function renderFlexBubble(bubble: Record<string, unknown>, key?: string | number) {
+  const hero = isRecord(bubble.hero) ? bubble.hero : null
+  const body = isRecord(bubble.body) ? bubble.body : null
+  const footer = isRecord(bubble.footer) ? bubble.footer : null
+
+  return (
+    <div key={key} className="w-full max-w-[340px] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      {hero && renderFlexNode(hero)}
+      {body && <div className="space-y-2 p-4">{renderFlexNode(body)}</div>}
+      {footer && <div className="space-y-2 border-t border-gray-100 p-3">{renderFlexNode(footer)}</div>}
+    </div>
+  )
+}
+
+function renderFlexPreview(content: unknown) {
+  if (!isRecord(content)) return null
+  const type = asString(content.type)
+
+  if (type === 'carousel') {
+    const bubbles = asContents(content.contents).filter((item) => item.type === 'bubble')
+    return (
+      <div className="overflow-x-auto rounded-md bg-gray-50 p-4">
+        <div className="flex gap-4">
+          {bubbles.map((bubble, index) => renderFlexBubble(bubble, index))}
+        </div>
+      </div>
+    )
+  }
+
+  if (type === 'bubble') {
+    return (
+      <div className="rounded-md bg-gray-50 p-4">
+        {renderFlexBubble(content)}
+      </div>
+    )
+  }
+
+  return null
+}
+
+function renderFlexContent(content: string) {
+  try {
+    const parsed = JSON.parse(content)
+    const preview = renderFlexPreview(parsed)
+    if (preview) return preview
+    return (
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-gray-50 p-4 text-xs leading-5 text-gray-800">
+        {JSON.stringify(parsed, null, 2)}
+      </pre>
+    )
+  } catch {
+    return (
+      <pre className="whitespace-pre-wrap break-words rounded-md bg-gray-50 p-4 text-sm leading-6 text-gray-800">
+        {content}
+      </pre>
+    )
+  }
+}
+
+function renderFlexBlockContent(content: unknown) {
+  if (typeof content === 'string') {
+    return renderFlexContent(content)
+  }
+
+  const preview = renderFlexPreview(content)
+  if (preview) return preview
+
+  return (
+    <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
+      {JSON.stringify(content, null, 2)}
+    </pre>
+  )
+}
+
 function renderMessageContent(broadcast: ApiBroadcast | ApiBroadcastDetail) {
   if (broadcast.messageType === 'text') {
     return (
@@ -117,9 +273,13 @@ function renderMessageContent(broadcast: ApiBroadcast | ApiBroadcastDetail) {
               <div className="mb-2 text-xs font-medium text-gray-500">
                 {index + 1}件目: {formatMessageType(block.type)}
               </div>
-              <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
-                {typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2)}
-              </pre>
+              {block.type === 'flex'
+                ? renderFlexBlockContent(block.content)
+                : (
+                  <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
+                    {typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2)}
+                  </pre>
+                )}
             </div>
           ))}
         </div>
@@ -137,6 +297,10 @@ function renderMessageContent(broadcast: ApiBroadcast | ApiBroadcastDetail) {
           {parsed.linkUrl && <div>リンク先: {parsed.linkUrl}</div>}
         </div>
       )
+    }
+
+    if (broadcast.messageType === 'flex') {
+      return renderFlexContent(broadcast.messageContent)
     }
 
     return (
