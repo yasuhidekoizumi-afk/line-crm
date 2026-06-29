@@ -25,8 +25,15 @@ async function countBroadcastTargets(
 ): Promise<number> {
   if (targetType === 'all') {
     const sql = lineAccountId
-      ? 'SELECT COUNT(*) AS count FROM friends WHERE is_following = 1 AND line_account_id = ?'
-      : 'SELECT COUNT(*) AS count FROM friends WHERE is_following = 1';
+      ? `SELECT COUNT(*) AS count FROM friends
+         WHERE is_following = 1
+           AND line_user_id LIKE 'U%'
+           AND length(line_user_id) = 33
+           AND line_account_id = ?`
+      : `SELECT COUNT(*) AS count FROM friends
+         WHERE is_following = 1
+           AND line_user_id LIKE 'U%'
+           AND length(line_user_id) = 33`;
     const row = await (lineAccountId ? db.prepare(sql).bind(lineAccountId) : db.prepare(sql))
       .first<{ count: number }>();
     return row?.count ?? 0;
@@ -38,11 +45,18 @@ async function countBroadcastTargets(
       ? `SELECT COUNT(DISTINCT f.id) AS count
          FROM friends f
          INNER JOIN friend_tags ft ON ft.friend_id = f.id
-         WHERE ft.tag_id = ? AND f.is_following = 1 AND f.line_account_id = ?`
+         WHERE ft.tag_id = ?
+           AND f.is_following = 1
+           AND f.line_user_id LIKE 'U%'
+           AND length(f.line_user_id) = 33
+           AND f.line_account_id = ?`
       : `SELECT COUNT(DISTINCT f.id) AS count
          FROM friends f
          INNER JOIN friend_tags ft ON ft.friend_id = f.id
-         WHERE ft.tag_id = ? AND f.is_following = 1`;
+         WHERE ft.tag_id = ?
+           AND f.is_following = 1
+           AND f.line_user_id LIKE 'U%'
+           AND length(f.line_user_id) = 33`;
     const stmt = db.prepare(sql);
     const row = await (lineAccountId ? stmt.bind(targetTagId, lineAccountId) : stmt.bind(targetTagId))
       .first<{ count: number }>();

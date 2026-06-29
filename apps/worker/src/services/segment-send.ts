@@ -8,7 +8,7 @@ import type { LineClient } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
 import { buildSegmentQuery } from './segment-query.js';
 // multi タイプを含む全タイプを正しく Message[] に展開するため、broadcast.ts の buildMessages を使う
-import { buildMessages } from './broadcast.js';
+import { buildMessages, isSendableLineUserId } from './broadcast.js';
 import type { SegmentCondition } from './segment-query.js';
 
 const MULTICAST_BATCH_SIZE = 500;
@@ -56,10 +56,10 @@ export async function processSegmentSend(
     for (let i = 0; i < friends.length; i += MULTICAST_BATCH_SIZE) {
       const batchIndex = Math.floor(i / MULTICAST_BATCH_SIZE);
       const batch = friends.slice(i, i + MULTICAST_BATCH_SIZE);
-      // 宛先が無効(line_user_id が null/空)の友だちを除外する。
+      // 宛先が無効(line_user_id が null/空/合成ID)の友だちを除外する。
       // 1件でも無効なIDが混ざると LINE の multicast がバッチ全体(最大500件)を弾くため、事前に取り除く。
-      const validFriends = batch.filter((f) => !!f.line_user_id);
-      const lineUserIds = validFriends.map((f) => f.line_user_id);
+      const validFriends = batch.filter((f) => isSendableLineUserId(f.line_user_id));
+      const lineUserIds = validFriends.map((f) => f.line_user_id.trim());
       if (lineUserIds.length === 0) continue;
 
       // Stealth: stagger delays between batches
