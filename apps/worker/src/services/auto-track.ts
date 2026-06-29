@@ -152,6 +152,10 @@ export async function autoTrackContent(
 
   if (messageType === 'image') return { messageType, content };
 
+  if (messageType === 'imagemap') {
+    return autoTrackImageMapContent(db, content, workerUrl, broadcastId);
+  }
+
   const urls = extractUrls(content);
   if (urls.size === 0) return { messageType, content };
 
@@ -213,6 +217,51 @@ async function autoTrackMultiContent(
     return { messageType: 'multi', content: JSON.stringify(trackedBlocks) };
   } catch {
     return { messageType: 'multi', content };
+  }
+}
+
+async function autoTrackImageMapContent(
+  db: D1Database,
+  content: string,
+  workerUrl: string,
+  broadcastId?: string | null,
+): Promise<AutoTrackResult> {
+  try {
+    const parsed = JSON.parse(content) as {
+      baseUrl?: string;
+      altText?: string;
+      baseSize?: { width: number; height: number };
+      actions?: Array<Record<string, unknown>>;
+    };
+    if (!Array.isArray(parsed.actions)) {
+      return { messageType: 'imagemap', content };
+    }
+
+    const urls = new Set<string>();
+    for (const action of parsed.actions) {
+      if (action?.type !== 'uri' || typeof action.linkUri !== 'string') continue;
+      const linkUri = action.linkUri.trim();
+      if (linkUri && !shouldSkip(linkUri)) urls.add(linkUri);
+    }
+    if (urls.size === 0) return { messageType: 'imagemap', content };
+
+    const urlMap = await createTrackingMap(db, urls, workerUrl, broadcastId);
+    const actions = parsed.actions.map((action) => {
+      if (action?.type !== 'uri' || typeof action.linkUri !== 'string') return action;
+      const tracked = urlMap.get(action.linkUri.trim());
+      if (!tracked) return action;
+      const finalUrl = isAppLinkDomain(tracked.originalUrl)
+        ? `${tracked.trackingUrl}${tracked.trackingUrl.includes('?') ? '&' : '?'}openExternalBrowser=1`
+        : tracked.trackingUrl;
+      return { ...action, linkUri: finalUrl };
+    });
+
+    return {
+      messageType: 'imagemap',
+      content: JSON.stringify({ ...parsed, actions }),
+    };
+  } catch {
+    return { messageType: 'imagemap', content };
   }
 }
 

@@ -40,6 +40,30 @@ const RATIOS: Array<{ id: Ratio; label: string; h: number }> = [
   { id: '20:13', label: '20:13（バナー）', h: Math.round((BASE_WIDTH * 13) / 20) },
 ]
 
+function toImageMapBaseUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed = new URL(trimmed)
+    const match = parsed.pathname.match(/\/images\/([^/]+)$/)
+    if (!match) return trimmed
+    const id = match[1].replace(/\.(jpe?g|png|webp|gif)$/i, '')
+    parsed.pathname = `/images/imagemap/${id}`
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString()
+  } catch {
+    return trimmed
+  }
+}
+
+function imageMapPreviewUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim()
+  if (!trimmed) return ''
+  if (/\/images\/imagemap\/[^/]+$/i.test(trimmed)) return `${trimmed}/1040`
+  return trimmed
+}
+
 type LayoutId = '1' | '2v' | '2h' | '4' | '6'
 
 // 各エリアは 0〜1 の相対座標で持ち、baseSize と掛け合わせて絶対座標化する
@@ -137,7 +161,7 @@ export function imageMapValueToContent(v: ImageMapValue): string {
     .filter(Boolean)
 
   return JSON.stringify({
-    baseUrl: v.baseUrl,
+    baseUrl: toImageMapBaseUrl(v.baseUrl),
     altText: v.altText || 'リッチメッセージ',
     baseSize,
     actions,
@@ -191,6 +215,7 @@ interface Props {
 export default function ImageMapEditor({ value, onChange }: Props) {
   const ratioDef = RATIOS.find((r) => r.id === value.ratio) ?? RATIOS[0]
   const layout = LAYOUTS[value.layoutId] ?? LAYOUTS['1']
+  const previewUrl = imageMapPreviewUrl(value.baseUrl)
 
   // 既存 actions の長さがレイアウトのエリア数と一致しない場合の調整値
   const adjustedActions = useMemo<ImageMapActionInput[]>(() => {
@@ -232,7 +257,7 @@ export default function ImageMapEditor({ value, onChange }: Props) {
         <label className="block text-xs text-gray-500 mb-1">
           画像 <span className="text-gray-400">(必須・推奨幅 1040px)</span>
         </label>
-        <ImageUploader onUploaded={(url) => onChange({ ...value, baseUrl: url })} />
+        <ImageUploader onUploaded={(url, meta) => onChange({ ...value, baseUrl: meta?.imagemapBaseUrl ?? toImageMapBaseUrl(url) })} />
         <input
           type="url"
           className="w-full mt-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
@@ -291,12 +316,12 @@ export default function ImageMapEditor({ value, onChange }: Props) {
           <div
             className="absolute inset-0 bg-gray-100 border border-gray-200 rounded-md overflow-hidden"
             style={{
-              backgroundImage: value.baseUrl ? `url(${value.baseUrl})` : undefined,
+              backgroundImage: previewUrl ? `url(${previewUrl})` : undefined,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
             }}
           >
-            {!value.baseUrl && (
+            {!previewUrl && (
               <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400">
                 画像が未設定
               </div>

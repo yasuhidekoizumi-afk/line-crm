@@ -3,6 +3,21 @@ import type { Env } from '../index.js';
 
 const images = new Hono<Env>();
 
+const IMAGEMAP_WIDTHS = new Set(['1040', '700', '460', '300', '240']);
+const IMAGE_EXTENSIONS = ['jpg', 'png', 'webp', 'gif'];
+
+async function getStoredImage(env: Env['Bindings'], keyOrId: string) {
+  const direct = await env.IMAGES.get(keyOrId);
+  if (direct) return direct;
+
+  const basename = keyOrId.replace(/\.(jpe?g|png|webp|gif)$/i, '');
+  for (const ext of IMAGE_EXTENSIONS) {
+    const object = await env.IMAGES.get(`${basename}.${ext}`);
+    if (object) return object;
+  }
+  return null;
+}
+
 // POST /api/images — upload image (base64 or binary)
 images.post('/api/images', async (c) => {
   try {
@@ -61,15 +76,37 @@ images.post('/api/images', async (c) => {
 
     const workerUrl = c.env.WORKER_URL || new URL(c.req.url).origin;
     const url = `${workerUrl}/images/${key}`;
+    const imagemapBaseUrl = `${workerUrl}/images/imagemap/${id}`;
 
     return c.json({
       success: true,
-      data: { id, key, url, mimeType, size: data.byteLength },
+      data: { id, key, url, imagemapBaseUrl, mimeType, size: data.byteLength },
     }, 201);
   } catch (err) {
     console.error('POST /api/images error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
+});
+
+// GET /images/imagemap/:id/:size — LINE imagemap message image endpoint
+images.get('/images/imagemap/:id/:size', async (c) => {
+  const id = c.req.param('id');
+  const size = c.req.param('size');
+  if (!IMAGEMAP_WIDTHS.has(size)) {
+    return c.json({ success: false, error: 'Invalid imagemap size' }, 400);
+  }
+
+  const object = await getStoredImage(c.env, id);
+  if (!object) {
+    return c.json({ success: false, error: 'Image not found' }, 404);
+  }
+
+  const headers = new Headers();
+  headers.set('Content-Type', object.httpMetadata?.contentType || 'image/png');
+  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  headers.set('ETag', object.etag);
+
+  return new Response(object.body, { headers });
 });
 
 // GET /images/:key — serve image (public, no auth)
