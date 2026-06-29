@@ -239,6 +239,21 @@ function renderFlexContent(content: string) {
   }
 }
 
+function renderFlexBlockContent(content: unknown) {
+  if (typeof content === 'string') {
+    return renderFlexContent(content)
+  }
+
+  const preview = renderFlexPreview(content)
+  if (preview) return preview
+
+  return (
+    <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
+      {JSON.stringify(content, null, 2)}
+    </pre>
+  )
+}
+
 function renderMessageContent(broadcast: ApiBroadcast | ApiBroadcastDetail) {
   if (broadcast.messageType === 'text') {
     return (
@@ -258,8 +273,8 @@ function renderMessageContent(broadcast: ApiBroadcast | ApiBroadcastDetail) {
               <div className="mb-2 text-xs font-medium text-gray-500">
                 {index + 1}件目: {formatMessageType(block.type)}
               </div>
-              {block.type === 'flex' && typeof block.content === 'string'
-                ? renderFlexContent(block.content)
+              {block.type === 'flex'
+                ? renderFlexBlockContent(block.content)
                 : (
                   <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-800">
                     {typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2)}
