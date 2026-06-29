@@ -5,7 +5,6 @@ import {
   getLoyaltyPointByShopifyCustomerId,
 } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
-import { sendEmail } from '@line-crm/email-sdk';
 import { buildMessage } from './step-delivery.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 
@@ -16,7 +15,7 @@ import { getShopifyAdminToken } from '../utils/shopify-token.js';
 //   仕様（確定）:
 //     - 誕生日「当日」配信。直近注文額 <5,000円 → 送料無料 / ≥5,000円 → 500円OFF を出し分け。
 //     - 有効期限 = 誕生日 +14日。年1回（同一顧客×同一年に二重発行/配信しない）。
-//     - LINE連携済みの人へ Flex（お祝い画像＋クーポン）を配信。送れない場合はメールへフォールバック。
+//     - LINE連携後に誕生日登録した人へ Flex（お祝い画像＋クーポン）を配信。メール代替配信はしない。
 //     - 文面ルール: 送料無料ラインには触れない（500円OFF側で5,300円カートを誘発しないため）。
 //
 //   ★安全モード（このファイルの肝）:
@@ -35,9 +34,6 @@ export interface BdayEnv {
   SHOPIFY_ADMIN_TOKEN?: string;
   SHOPIFY_CLIENT_ID?: string;
   SHOPIFY_CLIENT_SECRET?: string;
-  RESEND_API_KEY?: string;
-  FERMENT_FROM_EMAIL_JP?: string;
-  FERMENT_FROM_NAME_JP?: string;
 }
 
 const HERO_IMAGE = 'https://oryzae-line-crm.oryzae.workers.dev/images/448496d1-1d2a-4c06-831f-2c0110b5f6ca.png';
@@ -47,7 +43,6 @@ const EXPIRY_DAYS = 14;
 
 type CouponType = 'free_shipping' | 'fixed_500';
 type Mode = 'dryrun' | 'test' | 'live';
-type DeliveryChannel = 'line' | 'email' | 'none';
 
 /** JSTの「今日」の年とMM-DD */
 function jstToday(): { year: number; mmdd: string } {
@@ -61,15 +56,6 @@ function jstToday(): { year: number; mmdd: string } {
 function formatJaDate(d: Date): string {
   const j = new Date(d.getTime() + 9 * 60 * 60 * 1000);
   return `${j.getUTCFullYear()}/${String(j.getUTCMonth() + 1).padStart(2, '0')}/${String(j.getUTCDate()).padStart(2, '0')}`;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 /** クーポン発行（link-reward-coupon と同型の price_rules + discount_codes REST） */
@@ -180,30 +166,6 @@ async function recentOrderAmount(db: D1Database, scid: string): Promise<number> 
   return row ? Math.floor(row.total_price) : 0;
 }
 
-async function fetchShopifyCustomer(
-  env: BdayEnv,
-  scid: string,
-): Promise<{ email: string | null; name: string | null } | { error: string }> {
-  const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
-  const adminToken = await getShopifyAdminToken(env);
-  if (!shopDomain || !adminToken) return { error: 'Shopify 設定が未構成です' };
-
-  const res = await fetch(`https://${shopDomain}/admin/api/2024-10/customers/${scid}.json`, {
-    headers: { 'X-Shopify-Access-Token': adminToken },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    return { error: `customer ${res.status} ${text.slice(0, 150)}` };
-  }
-
-  const data = (await res.json()) as {
-    customer?: { email?: string | null; first_name?: string | null; last_name?: string | null };
-  };
-  const customer = data.customer;
-  const name = [customer?.last_name, customer?.first_name].filter(Boolean).join(' ').trim();
-  return { email: customer?.email?.trim() || null, name: name || null };
-}
-
 /** LINE連携済みの friend へ Flex を送る（送れたら true） */
 async function sendLineFlex(
   env: BdayEnv, friendId: string, type: CouponType, name: string, code: string, expire: string,
@@ -229,79 +191,17 @@ async function sendLineFlex(
   }
 }
 
-function buildBirthdayEmail(type: CouponType, name: string, code: string, expire: string): { subject: string; html: string; text: string } {
-  const safeName = escapeHtml(name);
-  const safeCode = escapeHtml(code);
-  const safeExpire = escapeHtml(expire);
-  const title = type === 'free_shipping' ? '送料無料クーポン' : '500円OFFクーポン';
-  const subject = `🎂 ${name}さん、お誕生日おめでとうございます（${title}）`;
-  const lead =
-    type === 'free_shipping'
-      ? 'オリゼからの誕生日プレゼントとして、送料無料クーポンをお届けします。'
-      : 'いつものご愛顧に感謝を込めて、500円OFFクーポンをお届けします。';
-  const discountUrl = `${SHOP_URL}/discount/${encodeURIComponent(code)}`;
-  const html = `
-    <div style="font-family:'Zen Kaku Gothic New','Hiragino Sans',sans-serif;max-width:520px;margin:0 auto;background:#faf8f4;color:#333;">
-      <img src="${HERO_IMAGE}" alt="${safeName}さん、お誕生日おめでとうございます" style="display:block;width:100%;height:auto;border:0;" />
-      <div style="padding:24px 20px;background:#fff;margin:0 12px 12px;border-radius:0 0 12px 12px;">
-        <p style="margin:0 0 16px;font-size:15px;line-height:1.8;">${safeName}さん<br>お誕生日おめでとうございます🎂</p>
-        <p style="margin:0 0 18px;font-size:14px;line-height:1.8;">${lead}</p>
-        <div style="background:#fbf6ed;border:1px solid #ead6b0;border-radius:10px;padding:16px;margin:0 0 20px;">
-          <div style="font-size:15px;font-weight:700;color:#5c4a2e;margin-bottom:8px;">${escapeHtml(title)}</div>
-          <div style="font-size:12px;color:#8a7a5c;">クーポンコード</div>
-          <div style="font-size:18px;font-weight:700;color:#5c4a2e;letter-spacing:0;margin:2px 0 8px;">${safeCode}</div>
-          <div style="font-size:12px;color:#8a7a5c;">有効期限：${safeExpire}まで</div>
-        </div>
-        <a href="${discountUrl}" style="display:block;text-align:center;padding:14px;background:#C9A86A;color:#fff;border-radius:10px;font-size:15px;font-weight:700;text-decoration:none;margin:0 0 10px;">クーポンを使ってお買い物</a>
-        <p style="margin:0 0 18px;font-size:12px;color:#8a7a5c;text-align:center;">ボタンを押すとクーポンが自動で適用されます。</p>
-        <p style="margin:0;font-size:13px;line-height:1.8;color:#8a7a5c;text-align:center;">発酵のようにゆっくり豊かに育ちますように🌾</p>
-      </div>
-      <div style="padding:12px 20px 20px;text-align:center;font-size:11px;color:#aaa;">株式会社オリゼ<br><a href="${SHOP_URL}" style="color:#b8860b;text-decoration:none;">${SHOP_URL}</a></div>
-    </div>
-  `;
-  const text = `${name}さん\nお誕生日おめでとうございます。\n\n${lead}\n\n${title}\nクーポンコード: ${code}\n有効期限: ${expire}まで\n\n${discountUrl}\n\n発酵のようにゆっくり豊かに育ちますように`;
-  return { subject, html, text };
-}
-
-async function sendBirthdayEmail(
-  env: BdayEnv,
-  to: string,
-  type: CouponType,
-  name: string,
-  code: string,
-  expire: string,
-): Promise<{ sent: boolean; error?: string }> {
-  if (!env.RESEND_API_KEY || !env.FERMENT_FROM_EMAIL_JP) {
-    return { sent: false, error: 'Resend 設定が未構成です' };
-  }
-  const content = buildBirthdayEmail(type, name, code, expire);
-  const fromName = env.FERMENT_FROM_NAME_JP ?? 'オリゼ';
-  const result = await sendEmail(env.RESEND_API_KEY, {
-    from: `${fromName} <${env.FERMENT_FROM_EMAIL_JP}>`,
-    to,
-    subject: content.subject,
-    html: content.html,
-    text: content.text,
-    tags: [
-      { name: 'kind', value: 'birthday_coupon' },
-      { name: 'coupon_type', value: type },
-    ],
-  });
-  return result.ok ? { sent: true } : { sent: false, error: result.error ?? 'send_failed' };
-}
-
 export interface BdayRunResult {
   enabled: boolean;
   mode: Mode;
   todayMMDD: string;
-  targets: number;          // 対象（誕生日一致・連携済み）
+  targets: number;          // 対象（誕生日一致・LINE連携済み）
   alreadyDone: number;      // 今年すでに発行済み（スキップ）
   freeShipping: number;     // 送料無料を発行/予定
   fixed500: number;         // 500円OFFを発行/予定
   issued: number;           // 実際にクーポン発行した数（dryrunは0）
-  sent: number;             // 実際に送信した数（dryrunは0）
+  sent: number;             // 実際にLINE送信した数（dryrunは0）
   lineSent: number;
-  emailSent: number;
   errors: number;
   errorSamples: string[];
   sample: Array<{ scid: string; type: CouponType; recentAmount: number; code?: string }>;
@@ -333,7 +233,7 @@ export async function processBirthdayCoupons(
   const result: BdayRunResult = {
     enabled, mode, todayMMDD,
     targets: 0, alreadyDone: 0, freeShipping: 0, fixed500: 0, issued: 0, sent: 0,
-    lineSent: 0, emailSent: 0, errors: 0, errorSamples: [], sample: [],
+    lineSent: 0, errors: 0, errorSamples: [], sample: [],
   };
 
   // ① 緊急停止スイッチ: enabled=1 でなければ何もしない（force で上書き可＝手動テスト）
@@ -349,15 +249,20 @@ export async function processBirthdayCoupons(
     if (!lp) { result.errorSamples.push('test_recipientが自社ポイント未連携'); result.errors++; return result; }
     targets = [{ shopify_customer_id: testScid, friend_id: lp.friend_id }];
   } else {
-    // dryrun / live: 当日誕生日（MM-DD一致）かつ連携済み(shopify_customer_id あり)。
+    // dryrun / live: 当日誕生日（MM-DD一致）かつLINE連携済み・フォロー中。
     // うるう年: 今日が2/28なら2/29生まれも含める（平年は2/28配信）。
     const patterns = todayMMDD === '02-28' ? [`%-${todayMMDD}`, '%-02-29'] : [`%-${todayMMDD}`];
-    const where = patterns.map(() => 'birthday LIKE ?').join(' OR ');
+    const where = patterns.map(() => 'lp.birthday LIKE ?').join(' OR ');
     const rows = await db
       .prepare(
         `SELECT lp.shopify_customer_id AS shopify_customer_id, lp.friend_id AS friend_id
          FROM loyalty_points lp
-         WHERE lp.shopify_customer_id IS NOT NULL AND lp.birthday IS NOT NULL AND (${where})`,
+         INNER JOIN friends f ON f.id = lp.friend_id
+         WHERE lp.shopify_customer_id IS NOT NULL
+           AND lp.birthday IS NOT NULL
+           AND f.is_following = 1
+           AND f.line_user_id LIKE 'U%'
+           AND (${where})`,
       )
       .bind(...patterns)
       .all<TargetRow>();
@@ -377,7 +282,7 @@ export async function processBirthdayCoupons(
       const type: CouponType = recentAmount >= AMOUNT_THRESHOLD ? 'fixed_500' : 'free_shipping';
       if (type === 'free_shipping') result.freeShipping++; else result.fixed500++;
 
-      // 表示名（LINE/メール用）
+      // 表示名（LINE用）
       const friend = await getFriendById(db, t.friend_id);
       const name = (friend?.display_name || 'お客様').toString();
 
@@ -421,35 +326,13 @@ export async function processBirthdayCoupons(
           .bind(issued.code, scid, year).run();
       }
 
-      // LINE送信。送れない場合はShopify顧客メールへフォールバックする。
-      let channel: DeliveryChannel = 'none';
-      let deliveryError = '';
+      // LINE送信のみ。送れない場合もメール代替配信はしない。
       const sendRes = await sendLineFlex(env, t.friend_id, type, name, issued.code, expireStr);
+      const channel = sendRes.sent ? 'line' : 'none';
+      const deliveryError = sendRes.sent ? '' : (sendRes.error ?? 'line_send_failed');
       if (sendRes.sent) {
-        channel = 'line';
         result.sent++;
         result.lineSent++;
-      } else if (sendRes.error) {
-        deliveryError = sendRes.error;
-      }
-
-      if (channel === 'none') {
-        const customer = await fetchShopifyCustomer(env, scid);
-        if ('error' in customer) {
-          deliveryError = `${deliveryError || 'line_failed'}; email_lookup: ${customer.error}`;
-        } else if (!customer.email) {
-          deliveryError = `${deliveryError || 'line_failed'}; no_customer_email`;
-        } else {
-          const emailName = name === 'お客様' && customer.name ? customer.name : name;
-          const emailRes = await sendBirthdayEmail(env, customer.email, type, emailName, issued.code, expireStr);
-          if (emailRes.sent) {
-            channel = 'email';
-            result.sent++;
-            result.emailSent++;
-          } else {
-            deliveryError = `${deliveryError || 'line_failed'}; email_send: ${emailRes.error ?? 'send_failed'}`;
-          }
-        }
       }
 
       if (mode === 'live') {
