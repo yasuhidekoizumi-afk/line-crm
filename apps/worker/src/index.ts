@@ -263,9 +263,9 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
   for (const token of activeTokens) {
     const lineClient = new LineClient(token);
     jobs.push(processStepDeliveries(env.DB, lineClient, env.WORKER_URL));
-    jobs.push(processScheduledBroadcasts(env.DB, lineClient, env.WORKER_URL));
     jobs.push(processReminderDeliveries(env.DB, lineClient));
   }
+  jobs.push(processScheduledBroadcasts(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, env.WORKER_URL));
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
   jobs.push(processLoyaltyExpirations(env.DB));

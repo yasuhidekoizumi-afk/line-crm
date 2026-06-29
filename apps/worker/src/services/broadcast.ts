@@ -5,14 +5,32 @@ import {
   updateBroadcastStatus,
   getFriendsByTag,
   getSegmentLineUserIds,
+  getLineAccountById,
   jstNow,
 } from '@line-crm/db';
 import type { Broadcast } from '@line-crm/db';
 import type { LineClient } from '@line-crm/line-sdk';
+import { LineClient as LineClientImpl } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
 
 const MULTICAST_BATCH_SIZE = 500;
+
+export async function resolveBroadcastLineClient(
+  db: D1Database,
+  defaultAccessToken: string,
+  broadcast: Pick<Broadcast, 'id' | 'line_account_id'>,
+): Promise<LineClient> {
+  if (!broadcast.line_account_id) return new LineClientImpl(defaultAccessToken);
+
+  const account = await getLineAccountById(db, broadcast.line_account_id).catch(() => null);
+  if (!account?.channel_access_token) {
+    console.warn(`Broadcast ${broadcast.id} has missing line_account_id token; falling back to default token`);
+    return new LineClientImpl(defaultAccessToken);
+  }
+
+  return new LineClientImpl(account.channel_access_token);
+}
 
 export async function processBroadcastSend(
   db: D1Database,
@@ -63,7 +81,13 @@ export async function processBroadcastSend(
       const friends = await getFriendsByTag(db, broadcast.target_tag_id);
       // line_user_id が NULL/空の行が1件でも混じると LINE API がバッチ全体(最大500人)を
       // 400 で弾いて全滅するため、フォロー中かつ有効なIDのみに絞る。
-      const followingFriends = friends.filter((f) => f.is_following && f.line_user_id);
+      const followingFriends = friends.filter(
+        (f) =>
+          f.is_following &&
+          f.line_user_id &&
+          (!broadcast.line_account_id ||
+            (f as unknown as { line_account_id?: string | null }).line_account_id === broadcast.line_account_id),
+      );
       totalCount = followingFriends.length;
 
       // Send in batches with stealth delays to mimic human patterns
@@ -127,9 +151,14 @@ export async function processBroadcastSend(
       // Fetch line_user_id for each friend
       const result = await db
         .prepare(
-          `SELECT id, line_user_id FROM friends WHERE id IN (${friendIds.map(() => '?').join(',')}) AND is_following = 1 AND line_user_id IS NOT NULL AND line_user_id != ''`,
+          `SELECT id, line_user_id FROM friends
+           WHERE id IN (${friendIds.map(() => '?').join(',')})
+             AND is_following = 1
+             AND line_user_id IS NOT NULL
+             AND line_user_id != ''
+             ${broadcast.line_account_id ? 'AND line_account_id = ?' : ''}`,
         )
-        .bind(...friendIds)
+        .bind(...friendIds, ...(broadcast.line_account_id ? [broadcast.line_account_id] : []))
         .all<{ id: string; line_user_id: string }>();
       const friends = result.results;
       totalCount = friends.length;
@@ -242,7 +271,7 @@ export async function processBroadcastSend(
 
 export async function processScheduledBroadcasts(
   db: D1Database,
-  lineClient: LineClient,
+  defaultAccessToken: string,
   workerUrl?: string,
 ): Promise<void> {
   const allBroadcasts = await getBroadcasts(db);
@@ -265,6 +294,7 @@ export async function processScheduledBroadcasts(
 
   for (const broadcast of scheduled) {
     try {
+      const lineClient = await resolveBroadcastLineClient(db, defaultAccessToken, broadcast);
       await processBroadcastSend(db, lineClient, broadcast.id, workerUrl);
     } catch (err) {
       console.error(`Failed to send scheduled broadcast ${broadcast.id}:`, err);
