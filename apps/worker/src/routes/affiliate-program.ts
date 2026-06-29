@@ -189,13 +189,14 @@ affiliateProgram.post('/api/affiliate-program/orders/manual', async (c) => {
       financialStatus?: string | null;
       cancelledAt?: string | null;
       orderedAt?: string | null;
+      attributionSource?: 'cart_attribute' | 'note_attribute' | 'manual';
     }>();
     if (!body.affiliateCode?.trim() || !body.shopifyOrderId?.trim()) {
       return c.json({ success: false, error: 'affiliateCode and shopifyOrderId are required' }, 400);
     }
     const result = await recordAffiliateProgramOrder(c.env.DB, {
       ...body,
-      attributionSource: 'manual',
+      attributionSource: body.attributionSource ?? 'manual',
       rawAffiliateValue: body.affiliateCode,
     });
     return c.json({
