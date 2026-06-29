@@ -4,7 +4,7 @@ import { useState, useRef } from 'react'
 import { api } from '@/lib/api'
 
 interface ImageUploaderProps {
-  onUploaded: (url: string) => void
+  onUploaded: (url: string, meta?: { imagemapBaseUrl?: string }) => void
 }
 
 export default function ImageUploader({ onUploaded }: ImageUploaderProps) {
@@ -33,7 +33,7 @@ export default function ImageUploader({ onUploaded }: ImageUploaderProps) {
     try {
       const result = await api.images.upload(file)
       setPreview(result.url)
-      onUploaded(result.url)
+      onUploaded(result.url, { imagemapBaseUrl: result.imagemapBaseUrl })
     } catch {
       setPreview(null)
       setError('アップロードに失敗しました')

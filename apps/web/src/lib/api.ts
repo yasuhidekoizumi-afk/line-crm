@@ -672,7 +672,7 @@ export const api = {
       }),
   },
   images: {
-    upload: async (file: File): Promise<{ id: string; key: string; url: string; mimeType: string; size: number }> => {
+    upload: async (file: File): Promise<{ id: string; key: string; url: string; imagemapBaseUrl?: string; mimeType: string; size: number }> => {
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => {
@@ -695,7 +695,7 @@ export const api = {
         }),
       })
       if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-      const json = await res.json() as { success: boolean; data: { id: string; key: string; url: string; mimeType: string; size: number }; error?: string }
+      const json = await res.json() as { success: boolean; data: { id: string; key: string; url: string; imagemapBaseUrl?: string; mimeType: string; size: number }; error?: string }
       if (!json.success) throw new Error(json.error || 'Upload failed')
       return json.data
     },
