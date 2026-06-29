@@ -8,8 +8,7 @@ import {
   deleteBroadcast,
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
-import { LineClient } from '@line-crm/line-sdk';
-import { processBroadcastSend } from '../services/broadcast.js';
+import { processBroadcastSend, resolveBroadcastLineClient } from '../services/broadcast.js';
 import { processSegmentSend } from '../services/segment-send.js';
 import { getSegmentLineUserIds } from '@line-crm/db';
 import type { SegmentCondition } from '../services/segment-query.js';
@@ -599,7 +598,7 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
       return c.json({ success: false, error: 'Broadcast is already sent or sending' }, 400);
     }
 
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    const lineClient = await resolveBroadcastLineClient(c.env.DB, c.env.LINE_CHANNEL_ACCESS_TOKEN, existing);
 
     if (existing.target_type === 'segment' && existing.target_segment_id) {
       // セグメントターゲット: 事前に空でないことを確認
@@ -642,7 +641,7 @@ broadcasts.post('/api/broadcasts/:id/send-segment', async (c) => {
       );
     }
 
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    const lineClient = await resolveBroadcastLineClient(c.env.DB, c.env.LINE_CHANNEL_ACCESS_TOKEN, existing);
     await processSegmentSend(c.env.DB, lineClient, id, body.conditions);
 
     const result = await getBroadcastById(c.env.DB, id);
