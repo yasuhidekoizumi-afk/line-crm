@@ -3,8 +3,8 @@
  *
  * Shopify Admin GraphQL の Customer Segments を取得し、各セグメントのメンバー
  * （顧客）を customerSegmentMembers から取り出して、ハーネスの segments /
- * segment_members に写し取る。LINE 連携済み（line_user_id あり）の顧客のみを
- * 配信対象として保存する。
+ * segment_members に写し取る。送信可能かどうかは配信時に friends / loyalty_points
+ * から判定するため、同期段階では Shopify 顧客行を可能な限り保持する。
  *
  * 大きいセグメントは1回の Worker 実行で取り切れない（サブリクエスト上限 ~1000）ため、
  * sync_cursor / sync_status を使って「分割・再開可能」に同期する。
@@ -29,9 +29,10 @@ export type ShopifySegmentEnv = {
 const API_VERSION = '2024-01';
 
 /** 1チャンク（1 Worker 実行）で取得するメンバーページ数の上限。
- *  1ページ250件。1ページ ≒ GraphQL 1 + D1 数回 のサブリクエスト。
- *  上限(~1000)に対し余裕を持って 80 ページ（=最大2万件/実行）に制限。 */
-const MAX_PAGES_PER_CHUNK = 80;
+ *  1ページ250件。1ページ ≒ GraphQL 1 + D1 数回 のサブリクエスト。 */
+// Workers のサブリクエスト上限を超えないよう、1回の同期は小さく刻む。
+// 続きは sync_cursor で再開される。
+const MAX_PAGES_PER_CHUNK = 8;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -160,8 +161,8 @@ async function fetchMemberPage(
   };
 }
 
-/** Shopify 顧客ID配列 → ハーネスの LINE 連携済み customer_id 配列に変換する */
-async function mapToLineLinkedCustomerIds(db: D1Database, shopifyIds: string[]): Promise<string[]> {
+/** Shopify 顧客ID配列 → ハーネスの customer_id 配列に変換する */
+async function mapToHarnessCustomerIds(db: D1Database, shopifyIds: string[]): Promise<string[]> {
   const out: string[] = [];
   const chunk = 90; // D1 のバインド上限対策
   for (let i = 0; i < shopifyIds.length; i += chunk) {
@@ -171,9 +172,10 @@ async function mapToLineLinkedCustomerIds(db: D1Database, shopifyIds: string[]):
     const res = await db
       .prepare(
         `SELECT customer_id FROM customers
-         WHERE line_user_id IS NOT NULL AND shopify_customer_id_jp IN (${placeholders})`,
+         WHERE shopify_customer_id_jp IN (${placeholders})
+            OR shopify_customer_id_us IN (${placeholders})`,
       )
-      .bind(...part)
+      .bind(...part, ...part)
       .all<{ customer_id: string }>();
     for (const r of res.results) out.push(r.customer_id);
   }
@@ -199,15 +201,15 @@ async function appendMembers(db: D1Database, segmentId: string, customerIds: str
 export interface SyncChunkResult {
   done: boolean;          // このセグメントの同期が完了したか
   processedPages: number; // この実行で処理したメンバーページ数
-  totalMembers: number;   // 現在の段階での累積メンバー数（LINE連携済み）
+  totalMembers: number;   // 現在の段階での累積メンバー数（ハーネス上のShopify顧客）
 }
 
 /**
  * Shopify セグメントを「分割・再開可能」に同期する（1チャンク分）。
  *
- * - 同期開始時（sync_status != 'syncing'）: 既存メンバーを全削除して 'syncing' にする
+ * - 同期開始時（sync_status != 'syncing'/'error'）: 既存メンバーを全削除して 'syncing' にする
  * - sync_cursor からメンバーページを最大 MAX_PAGES_PER_CHUNK 件取得
- *   → LINE 連携済みにマップ → segment_members へ追記
+ *   → ハーネス顧客にマップ → segment_members へ追記
  * - 続きがあれば cursor を保存して 'syncing' のまま（次回 cron / 手動で再開）
  * - 全件取り切ったら sync_status=null・customer_count を確定
  */
@@ -222,10 +224,12 @@ export async function syncShopifySegmentChunk(
   }
   const gid = segment.shopify_segment_id;
 
-  // 再開判定: 'syncing' なら続き、それ以外は新規同期（メンバーを一旦クリア）
+  // 再開判定: 'syncing' または cursor 付きの 'error' なら続き。
+  // サブリクエスト上限などで落ちた部分同期を、次回に最初から消さない。
   let cursor: string | null;
-  if (segment.sync_status === 'syncing') {
+  if (segment.sync_status === 'syncing' || (segment.sync_status === 'error' && segment.sync_cursor)) {
     cursor = segment.sync_cursor ?? null;
+    await updateSegment(env.DB, segmentId, { sync_status: 'syncing', sync_error: null });
   } else {
     cursor = null;
     await env.DB.prepare('DELETE FROM segment_members WHERE segment_id = ?').bind(segmentId).run();
@@ -238,7 +242,7 @@ export async function syncShopifySegmentChunk(
       const { customerIds, nextCursor } = await fetchMemberPage(env, gid, cursor);
       pages++;
       if (customerIds.length > 0) {
-        const harnessIds = await mapToLineLinkedCustomerIds(env.DB, customerIds);
+        const harnessIds = await mapToHarnessCustomerIds(env.DB, customerIds);
         if (harnessIds.length > 0) await appendMembers(env.DB, segmentId, harnessIds);
       }
       cursor = nextCursor;
