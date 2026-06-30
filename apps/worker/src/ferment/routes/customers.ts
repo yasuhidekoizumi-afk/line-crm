@@ -33,6 +33,11 @@ customerRoutes.get('/', async (c) => {
     const subscribed = c.req.query('subscribed_email');
     const search = c.req.query('q') ?? c.req.query('search');
     const tagId = c.req.query('tag_id');
+    const scopeParam = c.req.query('scope');
+    const scope = scopeParam === 'sendable' || scopeParam === 'shopify' || scopeParam === 'all'
+      ? scopeParam
+      : 'line';
+    const lineAccountId = c.req.query('lineAccountId') ?? null;
     const limit = Number(c.req.query('limit') ?? 50);
     const offset = Number(c.req.query('offset') ?? 0);
     const subscribedEmail = subscribed !== undefined ? subscribed === 'true' : undefined;
@@ -43,10 +48,19 @@ customerRoutes.get('/', async (c) => {
         subscribed_email: subscribedEmail,
         search,
         tag_id: tagId,
+        scope,
+        line_account_id: lineAccountId,
         limit,
         offset,
       }),
-      countCustomers(c.env.DB, { region, subscribed_email: subscribedEmail, search, tag_id: tagId }),
+      countCustomers(c.env.DB, {
+        region,
+        subscribed_email: subscribedEmail,
+        search,
+        tag_id: tagId,
+        scope,
+        line_account_id: lineAccountId,
+      }),
     ]);
 
     return c.json({

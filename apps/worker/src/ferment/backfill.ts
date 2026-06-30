@@ -9,7 +9,7 @@
  */
 
 import { Hono } from 'hono'
-import { generateFermentId, upsertCustomer } from '@line-crm/db'
+import { generateFermentId, updateCustomer, upsertCustomer } from '@line-crm/db'
 import { getShopifyAdminToken } from '../utils/shopify-token.js'
 import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js'
 import type { FermentEnv } from './types'
@@ -270,7 +270,6 @@ backfillRoutes.post('/shopify-customers', async (c) => {
         ltv: Math.floor(parseFloat(sc.total_spent ?? '0')),
         ltv_currency: region === 'US' ? 'USD' : 'JPY',
         order_count: sc.orders_count,
-        last_order_at: sc.updated_at,
         subscribed_email: isSubscribed,
         tags: tags.length > 0 ? tags.join(',') : null,
       } as Parameters<typeof upsertCustomer>[1])
@@ -391,7 +390,6 @@ backfillRoutes.post('/shopify-customer', async (c) => {
     ltv: Math.floor(parseFloat(sc.total_spent ?? '0')),
     ltv_currency: region === 'US' ? 'USD' : 'JPY',
     order_count: sc.orders_count,
-    last_order_at: sc.updated_at,
     subscribed_email: isSubscribed,
     tags: tags.length > 0 ? tags.join(',') : null,
   } as Parameters<typeof upsertCustomer>[1])
@@ -420,6 +418,14 @@ backfillRoutes.post('/shopify-customer', async (c) => {
           // スキーマ系のエラー文のみ（個人情報なし）。先頭3件だけ収集。
           if (orderErrors.length < 3) orderErrors.push(String((e as Error)?.message ?? e).slice(0, 200))
         }
+      }
+      const latestProcessedAt = (orders ?? [])
+        .map((o) => o.processed_at ?? o.created_at ?? null)
+        .filter((v): v is string => typeof v === 'string' && v.length > 0)
+        .sort()
+        .at(-1)
+      if (latestProcessedAt) {
+        await updateCustomer(db, customerId, { last_order_at: latestProcessedAt })
       }
     }
   } catch (e) {
