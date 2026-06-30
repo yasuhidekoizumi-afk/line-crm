@@ -15,7 +15,7 @@
  */
 
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
-import { getSegmentById, replaceSegmentMembers, updateSegment } from '@line-crm/db';
+import { getSegmentById, updateSegment } from '@line-crm/db';
 
 /** Shopify 同期に必要な環境変数（FermentEnv['Bindings'] の部分集合） */
 export type ShopifySegmentEnv = {
@@ -232,9 +232,12 @@ async function syncProductsPurchasedSegmentFromLocalOrders(
       )`
     : '';
 
-  const rows = await env.DB
+  await env.DB.prepare('DELETE FROM segment_members WHERE segment_id = ?').bind(segmentId).run();
+
+  await env.DB
     .prepare(
-      `WITH eligible_shopify AS (
+      `INSERT OR IGNORE INTO segment_members (segment_id, customer_id)
+       WITH eligible_shopify AS (
          SELECT DISTINCT o.shopify_customer_id
          FROM shopify_orders o
          JOIN shopify_order_items oi ON oi.shopify_order_id = o.shopify_order_id
@@ -242,23 +245,29 @@ async function syncProductsPurchasedSegmentFromLocalOrders(
            AND o.shopify_customer_id IS NOT NULL
            ${excludeClause}
        )
-       SELECT DISTINCT c.customer_id
+       SELECT DISTINCT ? AS segment_id, c.customer_id
        FROM customers c
        JOIN eligible_shopify es
          ON es.shopify_customer_id IN (c.shopify_customer_id_jp, c.shopify_customer_id_us)`,
     )
-    .bind(...rule.include, ...rule.exclude)
-    .all<{ customer_id: string }>();
+    .bind(...rule.include, ...rule.exclude, segmentId)
+    .run();
 
-  const customerIds = rows.results.map((r) => r.customer_id);
-  await replaceSegmentMembers(env.DB, segmentId, customerIds);
+  const countRow = await env.DB
+    .prepare('SELECT COUNT(*) AS count FROM segment_members WHERE segment_id = ?')
+    .bind(segmentId)
+    .first<{ count: number }>();
+  const totalMembers = countRow?.count ?? 0;
+
   await updateSegment(env.DB, segmentId, {
+    customer_count: totalMembers,
+    last_computed_at: new Date().toISOString(),
     sync_status: null,
     sync_cursor: null,
     sync_error: null,
   });
 
-  return { done: true, processedPages: 0, totalMembers: customerIds.length };
+  return { done: true, processedPages: 0, totalMembers };
 }
 
 export interface SyncChunkResult {
