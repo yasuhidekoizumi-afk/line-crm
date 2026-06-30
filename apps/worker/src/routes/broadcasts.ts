@@ -65,7 +65,7 @@ async function countBroadcastTargets(
 
   if (targetType === 'segment') {
     if (!targetSegmentId) return 0;
-    return (await getSegmentLineUserIds(db, targetSegmentId)).length;
+    return (await getSegmentLineUserIds(db, targetSegmentId, lineAccountId)).length;
   }
 
   return 0;
@@ -616,7 +616,11 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
 
     if (existing.target_type === 'segment' && existing.target_segment_id) {
       // セグメントターゲット: 事前に空でないことを確認
-      const count = (await getSegmentLineUserIds(c.env.DB, existing.target_segment_id)).length;
+      const count = (await getSegmentLineUserIds(
+        c.env.DB,
+        existing.target_segment_id,
+        existing.line_account_id,
+      )).length;
       if (count === 0) {
         return c.json({ success: false, error: 'セグメントに一致するLINE友だちがいません' }, 400);
       }

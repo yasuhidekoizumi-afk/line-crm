@@ -206,7 +206,11 @@ export async function processBroadcastSend(
         throw new Error('target_segment_id is required for segment-targeted broadcasts');
       }
 
-      const lineUserIds = (await getSegmentLineUserIds(db, broadcast.target_segment_id))
+      const lineUserIds = (await getSegmentLineUserIds(
+        db,
+        broadcast.target_segment_id,
+        broadcast.line_account_id,
+      ))
         .filter(isSendableLineUserId)
         .map(normalizeSendableLineUserId);
       totalCount = lineUserIds.length;

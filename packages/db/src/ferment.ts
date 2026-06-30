@@ -952,16 +952,41 @@ export async function getSegmentMemberIds(
 export async function getSegmentLineUserIds(
   db: D1Database,
   segmentId: string,
+  lineAccountId?: string | null,
 ): Promise<string[]> {
+  const accountFilter = lineAccountId ? 'AND f.line_account_id = ?' : '';
+  const bindings = lineAccountId
+    ? [segmentId, lineAccountId, segmentId, lineAccountId]
+    : [segmentId, segmentId];
   const result = await db
     .prepare(
-      `SELECT c.line_user_id FROM customers c
-       INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
-       WHERE sm.segment_id = ?
-         AND c.line_user_id LIKE 'U%'
-         AND length(c.line_user_id) = 33`,
+      `SELECT DISTINCT line_user_id FROM (
+         SELECT f.line_user_id AS line_user_id
+         FROM customers c
+         INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
+         INNER JOIN friends f ON f.line_user_id = c.line_user_id
+         WHERE sm.segment_id = ?
+           AND f.is_following = 1
+           AND f.line_user_id LIKE 'U%'
+           AND length(f.line_user_id) = 33
+           ${accountFilter}
+
+         UNION
+
+         SELECT f.line_user_id AS line_user_id
+         FROM customers c
+         INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
+         INNER JOIN loyalty_points lp
+           ON lp.shopify_customer_id IN (c.shopify_customer_id_jp, c.shopify_customer_id_us)
+         INNER JOIN friends f ON f.id = lp.friend_id
+         WHERE sm.segment_id = ?
+           AND f.is_following = 1
+           AND f.line_user_id LIKE 'U%'
+           AND length(f.line_user_id) = 33
+           ${accountFilter}
+       )`,
     )
-    .bind(segmentId)
+    .bind(...bindings)
     .all<{ line_user_id: string }>();
   return result.results.map((r) => r.line_user_id);
 }

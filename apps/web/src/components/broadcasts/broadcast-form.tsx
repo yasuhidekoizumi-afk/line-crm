@@ -66,6 +66,9 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
   const [targetCount, setTargetCount] = useState<number | null>(null)
   const [targetCountLoading, setTargetCountLoading] = useState(false)
   const [targetCountError, setTargetCountError] = useState('')
+  const selectedSegment = form.targetType === 'segment'
+    ? segments.find((seg) => seg.segment_id === form.targetSegmentId)
+    : null
 
   // 個別指定: 友だち検索
   const [friendSearchTag, setFriendSearchTag] = useState('')
@@ -407,24 +410,34 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             </div>
           )}
           <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="text-xs font-medium text-gray-500">配信予定人数</span>
-              {targetCountLoading ? (
-                <span className="text-sm font-semibold text-gray-400">計算中...</span>
-              ) : targetCount === null ? (
-                <span className="text-sm font-semibold text-gray-400">対象を選択してください</span>
-              ) : (
-                <span className="text-lg font-bold tabular-nums text-gray-900">
-                  {targetCount.toLocaleString('ja-JP')} 名
-                </span>
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <div className="flex items-baseline gap-x-2">
+                <span className="text-xs font-medium text-gray-500">配信予定人数</span>
+                {targetCountLoading ? (
+                  <span className="text-sm font-semibold text-gray-400">計算中...</span>
+                ) : targetCount === null ? (
+                  <span className="text-sm font-semibold text-gray-400">対象を選択してください</span>
+                ) : (
+                  <span className="text-lg font-bold tabular-nums text-gray-900">
+                    {targetCount.toLocaleString('ja-JP')} 名
+                  </span>
+                )}
+              </div>
+              {selectedSegment && (
+                <div className="flex items-baseline gap-x-2">
+                  <span className="text-xs font-medium text-gray-500">セグメント人数</span>
+                  <span className="text-sm font-semibold tabular-nums text-gray-700">
+                    {selectedSegment.customer_count.toLocaleString('ja-JP')} 名
+                  </span>
+                </div>
               )}
             </div>
             <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
               {form.targetType === 'all' && '現在フォロー中の友だち数です。'}
               {form.targetType === 'tag' && '選択したタグが付いた、現在フォロー中の友だち数です。'}
-              {form.targetType === 'segment' && '選択したセグメント内で、LINEユーザーIDが紐づいている顧客数です。'}
+              {form.targetType === 'segment' && '配信予定人数は、選択したセグメント内で現在フォロー中かつ選択中のLINEアカウントから送信できる友だち数です。'}
               {form.targetType === 'individual' && '個別指定で選択中の友だち数です。'}
-              {selectedAccountId && form.targetType !== 'segment' ? ' 選択中のLINEアカウントで絞り込んでいます。' : ''}
+              {selectedAccountId ? ' 選択中のLINEアカウントで絞り込んでいます。' : ''}
             </p>
             {targetCountError && (
               <p className="mt-1 text-[11px] text-red-600">{targetCountError}</p>
