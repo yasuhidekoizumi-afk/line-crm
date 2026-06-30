@@ -15,7 +15,7 @@
  */
 
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
-import { getSegmentById, updateSegment } from '@line-crm/db';
+import { getSegmentById, replaceSegmentMembers, updateSegment } from '@line-crm/db';
 
 /** Shopify 同期に必要な環境変数（FermentEnv['Bindings'] の部分集合） */
 export type ShopifySegmentEnv = {
@@ -198,6 +198,69 @@ async function appendMembers(db: D1Database, segmentId: string, customerIds: str
   }
 }
 
+function parseProductsPurchasedRule(text: string | null | undefined): { include: string[]; exclude: string[] } | null {
+  const include = new Set<string>();
+  const exclude = new Set<string>();
+  const source = text ?? '';
+  const blockRegex = /products_purchased\s+(NOT\s+)?MATCHES\s*\(([\s\S]*?)\)/gi;
+  for (const match of source.matchAll(blockRegex)) {
+    const target = match[1] ? exclude : include;
+    const ids = match[2].match(/\d{6,}/g) ?? [];
+    for (const id of ids) target.add(id);
+  }
+  if (include.size === 0) return null;
+  return { include: [...include], exclude: [...exclude] };
+}
+
+async function syncProductsPurchasedSegmentFromLocalOrders(
+  env: ShopifySegmentEnv,
+  segmentId: string,
+  queryText: string | null | undefined,
+): Promise<SyncChunkResult | null> {
+  const rule = parseProductsPurchasedRule(queryText);
+  if (!rule) return null;
+
+  const includePlaceholders = rule.include.map(() => '?').join(', ');
+  const excludePlaceholders = rule.exclude.map(() => '?').join(', ');
+  const excludeClause = rule.exclude.length > 0
+    ? `AND NOT EXISTS (
+        SELECT 1
+        FROM shopify_orders o2
+        JOIN shopify_order_items oi2 ON oi2.shopify_order_id = o2.shopify_order_id
+        WHERE o2.shopify_customer_id = o.shopify_customer_id
+          AND oi2.shopify_product_id IN (${excludePlaceholders})
+      )`
+    : '';
+
+  const rows = await env.DB
+    .prepare(
+      `WITH eligible_shopify AS (
+         SELECT DISTINCT o.shopify_customer_id
+         FROM shopify_orders o
+         JOIN shopify_order_items oi ON oi.shopify_order_id = o.shopify_order_id
+         WHERE oi.shopify_product_id IN (${includePlaceholders})
+           AND o.shopify_customer_id IS NOT NULL
+           ${excludeClause}
+       )
+       SELECT DISTINCT c.customer_id
+       FROM customers c
+       JOIN eligible_shopify es
+         ON es.shopify_customer_id IN (c.shopify_customer_id_jp, c.shopify_customer_id_us)`,
+    )
+    .bind(...rule.include, ...rule.exclude)
+    .all<{ customer_id: string }>();
+
+  const customerIds = rows.results.map((r) => r.customer_id);
+  await replaceSegmentMembers(env.DB, segmentId, customerIds);
+  await updateSegment(env.DB, segmentId, {
+    sync_status: null,
+    sync_cursor: null,
+    sync_error: null,
+  });
+
+  return { done: true, processedPages: 0, totalMembers: customerIds.length };
+}
+
 export interface SyncChunkResult {
   done: boolean;          // このセグメントの同期が完了したか
   processedPages: number; // この実行で処理したメンバーページ数
@@ -249,6 +312,10 @@ export async function syncShopifySegmentChunk(
       if (!nextCursor) break;
     }
   } catch (err) {
+    if (String(err).includes('USE_CUSTOMER_SEGMENT_MEMBERS_QUERY_CREATE_MUTATION')) {
+      const fallback = await syncProductsPurchasedSegmentFromLocalOrders(env, segmentId, segment.description);
+      if (fallback) return fallback;
+    }
     await updateSegment(env.DB, segmentId, {
       sync_status: 'error',
       sync_error: String(err).slice(0, 300),
