@@ -234,12 +234,33 @@ export async function getCustomers(
     search?: string;
     /** LINE-CRMタグでの絞り込み。tags.id を指定。 */
     tag_id?: string;
+    scope?: 'line' | 'sendable' | 'shopify' | 'all';
+    line_account_id?: string | null;
   },
 ): Promise<CustomerWithFriendTags[]> {
-  // LINE公式アカウント登録者（line_user_id あり）のみを対象にする。
-  // メール専用機能を切り離し、LINE中心の顧客管理に限定する方針。
-  const conditions: string[] = ['line_user_id IS NOT NULL'];
+  const scope = opts?.scope ?? 'line';
+  const conditions: string[] = [];
   const bindings: unknown[] = [];
+
+  if (scope === 'line') {
+    conditions.push('line_user_id IS NOT NULL');
+  } else if (scope === 'sendable') {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM friends f
+      LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
+      WHERE f.is_following = 1
+        AND f.line_user_id LIKE 'U%'
+        AND length(f.line_user_id) = 33
+        AND (
+          f.line_user_id = customers.line_user_id
+          OR lp.shopify_customer_id IN (customers.shopify_customer_id_jp, customers.shopify_customer_id_us)
+        )
+        ${opts?.line_account_id ? 'AND f.line_account_id = ?' : ''}
+    )`);
+    if (opts?.line_account_id) bindings.push(opts.line_account_id);
+  } else if (scope === 'shopify') {
+    conditions.push('(shopify_customer_id_jp IS NOT NULL OR shopify_customer_id_us IS NOT NULL)');
+  }
 
   if (opts?.region) {
     conditions.push('region = ?');
@@ -415,12 +436,39 @@ export async function updateCustomer(
 
 export async function countCustomers(
   db: D1Database,
-  opts?: { region?: string; subscribed_email?: boolean; search?: string; tag_id?: string },
+  opts?: {
+    region?: string;
+    subscribed_email?: boolean;
+    search?: string;
+    tag_id?: string;
+    scope?: 'line' | 'sendable' | 'shopify' | 'all';
+    line_account_id?: string | null;
+  },
 ): Promise<number> {
-  // 顧客一覧と件数を揃えるため、LINE登録者（line_user_id あり）のみ数える。
   // 一覧側(getCustomers)と同じフィルタを適用して件数・ページネーションを一致させる。
-  const conditions: string[] = ['line_user_id IS NOT NULL'];
+  const scope = opts?.scope ?? 'line';
+  const conditions: string[] = [];
   const bindings: unknown[] = [];
+
+  if (scope === 'line') {
+    conditions.push('line_user_id IS NOT NULL');
+  } else if (scope === 'sendable') {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM friends f
+      LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
+      WHERE f.is_following = 1
+        AND f.line_user_id LIKE 'U%'
+        AND length(f.line_user_id) = 33
+        AND (
+          f.line_user_id = customers.line_user_id
+          OR lp.shopify_customer_id IN (customers.shopify_customer_id_jp, customers.shopify_customer_id_us)
+        )
+        ${opts?.line_account_id ? 'AND f.line_account_id = ?' : ''}
+    )`);
+    if (opts?.line_account_id) bindings.push(opts.line_account_id);
+  } else if (scope === 'shopify') {
+    conditions.push('(shopify_customer_id_jp IS NOT NULL OR shopify_customer_id_us IS NOT NULL)');
+  }
 
   if (opts?.region) {
     conditions.push('region = ?');
@@ -447,7 +495,7 @@ export async function countCustomers(
     bindings.push(opts.tag_id);
   }
 
-  const where = `WHERE ${conditions.join(' AND ')}`;
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const row = await db
     .prepare(`SELECT COUNT(*) as cnt FROM customers ${where}`)
     .bind(...bindings)

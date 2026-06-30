@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fermentApi, type Customer } from '@/lib/ferment-api'
 import { api } from '@/lib/api'
+import { useAccount } from '@/contexts/account-context'
 
 type TagItem = { id: string; name: string; color: string }
 
@@ -13,8 +14,25 @@ function fmt(iso: string | null) {
 
 // 一覧でタグ列表示・タグフィルタ用に Customer に friend_tags を含む形を使う。
 type CustomerWithTags = Customer & { friend_tags?: TagItem[] }
+type CustomerScope = 'line' | 'sendable' | 'shopify'
+
+const scopeLabels: Record<CustomerScope, { label: string; description: string }> = {
+  line: {
+    label: 'LINE連携あり',
+    description: 'customers にLINE IDが保存されている顧客',
+  },
+  sendable: {
+    label: '配信可能',
+    description: '現在フォロー中で、選択中のLINEアカウントから送信できる顧客',
+  },
+  shopify: {
+    label: 'Shopify顧客',
+    description: 'Shopify顧客IDを持つ顧客。LINE未連携も含みます',
+  },
+}
 
 export default function CustomersPage() {
+  const { selectedAccountId, selectedAccount } = useAccount()
   const [customers, setCustomers] = useState<CustomerWithTags[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -23,6 +41,7 @@ export default function CustomersPage() {
   const [regionFilter, setRegionFilter] = useState('')
   const [emailFilter, setEmailFilter] = useState<'' | 'subscribed' | 'unsubscribed'>('')
   const [tagFilter, setTagFilter] = useState('')  // タグID。空文字は「全て」
+  const [scope, setScope] = useState<CustomerScope>('line')
   const [offset, setOffset] = useState(0)
   const [total, setTotal] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -57,6 +76,8 @@ export default function CustomersPage() {
       if (emailFilter === 'unsubscribed') params.subscribed_email = false
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
       if (tagFilter) params.tag_id = tagFilter
+      params.scope = scope
+      if (scope === 'sendable') params.lineAccountId = selectedAccountId
       const res = await fermentApi.customers.list(params)
       if (res.success && res.data) {
         setCustomers(res.data)
@@ -67,7 +88,7 @@ export default function CustomersPage() {
     } finally {
       setLoading(false)
     }
-  }, [regionFilter, emailFilter, debouncedSearch, tagFilter])
+  }, [regionFilter, emailFilter, debouncedSearch, tagFilter, scope, selectedAccountId])
 
   // 入力を300msデバウンスしてからサーバー検索（全件対象）
   useEffect(() => {
@@ -165,17 +186,42 @@ export default function CustomersPage() {
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">LINE顧客</h1>
-        <p className="text-sm text-gray-500 mt-1">LINE公式アカウント登録者の顧客プロファイル</p>
+        <h1 className="text-2xl font-bold text-gray-900">統合顧客</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Shopify顧客・LINE連携・配信可否を分けて確認します
+        </p>
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
+
+      {/* 対象スコープ */}
+      <div className="mb-4">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
+          {(Object.keys(scopeLabels) as CustomerScope[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setScope(key)}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                scope === key ? 'bg-green-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {scopeLabels[key].label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-gray-500">
+          {scopeLabels[scope].description}
+          {scope === 'sendable' && selectedAccount ? `（${selectedAccount.displayName || selectedAccount.name}）` : ''}
+          。注文数・累計購入額はShopify顧客情報、最終注文日は取り込み状況により参考値として扱います。
+        </p>
+      </div>
 
       {/* フィルター */}
       <div className="flex flex-wrap gap-3 mb-4">
         <input
           className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-56"
-          placeholder="名前・メール・LINE IDで検索（全件）"
+          placeholder="名前・メール・LINE IDで検索"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -230,7 +276,7 @@ export default function CustomersPage() {
                       <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">地域</th>
                       <th className="text-right px-4 py-3 font-medium text-gray-600">LTV</th>
                       <th className="text-right px-4 py-3 font-medium text-gray-600 hidden md:table-cell">注文数</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">最終注文</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">最終注文（参考）</th>
                       <th className="text-left px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">タグ</th>
                       <th className="text-center px-4 py-3 font-medium text-gray-600">メール</th>
                     </tr>
@@ -352,7 +398,7 @@ export default function CustomersPage() {
                 <span className="text-gray-800">{detail.region}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">累計購入額(LTV)</span>
+                <span className="text-gray-500">累計購入額</span>
                 <span className="text-gray-800 font-medium">¥{detail.ltv.toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
@@ -460,6 +506,9 @@ export default function CustomersPage() {
             {/* 購入履歴 */}
             <div className="border-t border-gray-100 pt-3">
               <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">購入履歴</h4>
+              <p className="text-[10px] text-gray-400 mb-2">
+                一覧の注文数・累計購入額はShopify顧客情報、下の履歴はLINEハーネスに取り込まれた注文です。
+              </p>
               {detailLoading ? (
                 <p className="text-xs text-gray-400 py-2">読み込み中...</p>
               ) : !profile || profile.orders.length === 0 ? (
