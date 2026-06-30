@@ -164,7 +164,7 @@ async function fetchMemberPage(
 /** Shopify 顧客ID配列 → ハーネスの customer_id 配列に変換する */
 async function mapToHarnessCustomerIds(db: D1Database, shopifyIds: string[]): Promise<string[]> {
   const out: string[] = [];
-  const chunk = 90; // D1 のバインド上限対策
+  const chunk = 45; // JP/USの2条件でbind数が倍になるため、D1の変数上限に合わせる
   for (let i = 0; i < shopifyIds.length; i += chunk) {
     const part = shopifyIds.slice(i, i + chunk);
     if (part.length === 0) continue;
