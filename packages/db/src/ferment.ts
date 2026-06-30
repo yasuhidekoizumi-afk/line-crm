@@ -245,19 +245,38 @@ export async function getCustomers(
   if (scope === 'line') {
     conditions.push('line_user_id IS NOT NULL');
   } else if (scope === 'sendable') {
-    conditions.push(`EXISTS (
-      SELECT 1 FROM friends f
-      LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
-      WHERE f.is_following = 1
-        AND f.line_user_id LIKE 'U%'
-        AND length(f.line_user_id) = 33
-        AND (
-          f.line_user_id = customers.line_user_id
-          OR lp.shopify_customer_id IN (customers.shopify_customer_id_jp, customers.shopify_customer_id_us)
-        )
-        ${opts?.line_account_id ? 'AND f.line_account_id = ?' : ''}
+    const accountCondition = opts?.line_account_id ? 'AND f.line_account_id = ?' : '';
+    conditions.push(`(
+      line_user_id IN (
+        SELECT f.line_user_id
+        FROM friends f
+        WHERE f.is_following = 1
+          AND f.line_user_id LIKE 'U%'
+          AND length(f.line_user_id) = 33
+          ${accountCondition}
+      )
+      OR shopify_customer_id_jp IN (
+        SELECT lp.shopify_customer_id
+        FROM loyalty_points lp
+        JOIN friends f ON f.id = lp.friend_id
+        WHERE f.is_following = 1
+          AND f.line_user_id LIKE 'U%'
+          AND length(f.line_user_id) = 33
+          AND lp.shopify_customer_id IS NOT NULL
+          ${accountCondition}
+      )
+      OR shopify_customer_id_us IN (
+        SELECT lp.shopify_customer_id
+        FROM loyalty_points lp
+        JOIN friends f ON f.id = lp.friend_id
+        WHERE f.is_following = 1
+          AND f.line_user_id LIKE 'U%'
+          AND length(f.line_user_id) = 33
+          AND lp.shopify_customer_id IS NOT NULL
+          ${accountCondition}
+      )
     )`);
-    if (opts?.line_account_id) bindings.push(opts.line_account_id);
+    if (opts?.line_account_id) bindings.push(opts.line_account_id, opts.line_account_id, opts.line_account_id);
   } else if (scope === 'shopify') {
     conditions.push('(shopify_customer_id_jp IS NOT NULL OR shopify_customer_id_us IS NOT NULL)');
   }
@@ -453,19 +472,38 @@ export async function countCustomers(
   if (scope === 'line') {
     conditions.push('line_user_id IS NOT NULL');
   } else if (scope === 'sendable') {
-    conditions.push(`EXISTS (
-      SELECT 1 FROM friends f
-      LEFT JOIN loyalty_points lp ON lp.friend_id = f.id
-      WHERE f.is_following = 1
-        AND f.line_user_id LIKE 'U%'
-        AND length(f.line_user_id) = 33
-        AND (
-          f.line_user_id = customers.line_user_id
-          OR lp.shopify_customer_id IN (customers.shopify_customer_id_jp, customers.shopify_customer_id_us)
-        )
-        ${opts?.line_account_id ? 'AND f.line_account_id = ?' : ''}
+    const accountCondition = opts?.line_account_id ? 'AND f.line_account_id = ?' : '';
+    conditions.push(`(
+      line_user_id IN (
+        SELECT f.line_user_id
+        FROM friends f
+        WHERE f.is_following = 1
+          AND f.line_user_id LIKE 'U%'
+          AND length(f.line_user_id) = 33
+          ${accountCondition}
+      )
+      OR shopify_customer_id_jp IN (
+        SELECT lp.shopify_customer_id
+        FROM loyalty_points lp
+        JOIN friends f ON f.id = lp.friend_id
+        WHERE f.is_following = 1
+          AND f.line_user_id LIKE 'U%'
+          AND length(f.line_user_id) = 33
+          AND lp.shopify_customer_id IS NOT NULL
+          ${accountCondition}
+      )
+      OR shopify_customer_id_us IN (
+        SELECT lp.shopify_customer_id
+        FROM loyalty_points lp
+        JOIN friends f ON f.id = lp.friend_id
+        WHERE f.is_following = 1
+          AND f.line_user_id LIKE 'U%'
+          AND length(f.line_user_id) = 33
+          AND lp.shopify_customer_id IS NOT NULL
+          ${accountCondition}
+      )
     )`);
-    if (opts?.line_account_id) bindings.push(opts.line_account_id);
+    if (opts?.line_account_id) bindings.push(opts.line_account_id, opts.line_account_id, opts.line_account_id);
   } else if (scope === 'shopify') {
     conditions.push('(shopify_customer_id_jp IS NOT NULL OR shopify_customer_id_us IS NOT NULL)');
   }
