@@ -24,6 +24,39 @@ function normalizeSendableLineUserId(lineUserId: string): string {
   return lineUserId.trim();
 }
 
+function uniqueBySendableLineUserId<T extends { line_user_id: string }>(
+  items: T[],
+  sentLineUserIds?: Set<string>,
+): T[] {
+  const seen = new Set<string>();
+  const uniqueItems: T[] = [];
+
+  for (const item of items) {
+    const lineUserId = normalizeSendableLineUserId(item.line_user_id);
+    if (sentLineUserIds?.has(lineUserId)) continue;
+    if (seen.has(lineUserId)) continue;
+    seen.add(lineUserId);
+    uniqueItems.push({ ...item, line_user_id: lineUserId });
+  }
+
+  return uniqueItems;
+}
+
+function uniqueSendableLineUserIds(lineUserIds: string[], sentLineUserIds?: Set<string>): string[] {
+  const seen = new Set<string>();
+  const uniqueIds: string[] = [];
+
+  for (const rawLineUserId of lineUserIds) {
+    const lineUserId = normalizeSendableLineUserId(rawLineUserId);
+    if (sentLineUserIds?.has(lineUserId)) continue;
+    if (seen.has(lineUserId)) continue;
+    seen.add(lineUserId);
+    uniqueIds.push(lineUserId);
+  }
+
+  return uniqueIds;
+}
+
 export async function resolveBroadcastLineClient(
   db: D1Database,
   defaultAccessToken: string,
@@ -45,6 +78,7 @@ export async function processBroadcastSend(
   lineClient: LineClient,
   broadcastId: string,
   workerUrl?: string,
+  sentLineUserIds?: Set<string>,
 ): Promise<Broadcast> {
   // Mark as sending
   await updateBroadcastStatus(db, broadcastId, 'sending');
@@ -89,13 +123,22 @@ export async function processBroadcastSend(
       const friends = await getFriendsByTag(db, broadcast.target_tag_id);
       // line_user_id が NULL/空の行が1件でも混じると LINE API がバッチ全体(最大500人)を
       // 400 で弾いて全滅するため、フォロー中かつ有効なIDのみに絞る。
-      const followingFriends = friends.filter(
+      const rawFollowingFriends = friends.filter(
         (f) =>
           f.is_following &&
           isSendableLineUserId(f.line_user_id) &&
           (!broadcast.line_account_id ||
             (f as unknown as { line_account_id?: string | null }).line_account_id === broadcast.line_account_id),
       );
+      const followingFriends = uniqueBySendableLineUserId(
+        rawFollowingFriends,
+        sentLineUserIds,
+      );
+      if (followingFriends.length !== rawFollowingFriends.length) {
+        console.warn(
+          `Broadcast ${broadcastId} skipped ${rawFollowingFriends.length - followingFriends.length} duplicate line_user_id recipients`,
+        );
+      }
       totalCount = followingFriends.length;
 
       // Send in batches with stealth delays to mimic human patterns
@@ -124,6 +167,9 @@ export async function processBroadcastSend(
 
         try {
           await lineClient.multicast(lineUserIds, batchMessages);
+          for (const lineUserId of lineUserIds) {
+            sentLineUserIds?.add(lineUserId);
+          }
           successCount += batch.length;
         } catch (err) {
           console.error(`Multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
@@ -169,7 +215,15 @@ export async function processBroadcastSend(
         .bind(...friendIds, ...(broadcast.line_account_id ? [broadcast.line_account_id] : []))
         .all<{ id: string; line_user_id: string }>();
       const friends = result.results;
-      const validFriends = friends.filter((f) => isSendableLineUserId(f.line_user_id));
+      const rawValidFriends = friends.filter((f): f is { id: string; line_user_id: string } =>
+        isSendableLineUserId(f.line_user_id),
+      );
+      const validFriends = uniqueBySendableLineUserId(rawValidFriends, sentLineUserIds);
+      if (validFriends.length !== rawValidFriends.length) {
+        console.warn(
+          `Broadcast ${broadcastId} skipped ${rawValidFriends.length - validFriends.length} duplicate line_user_id recipients`,
+        );
+      }
       totalCount = validFriends.length;
 
       const now = jstNow();
@@ -179,6 +233,9 @@ export async function processBroadcastSend(
         const batchUserIds = batch.map((f) => normalizeSendableLineUserId(f.line_user_id));
         try {
           await lineClient.multicast(batchUserIds, messages);
+          for (const lineUserId of batchUserIds) {
+            sentLineUserIds?.add(lineUserId);
+          }
           successCount += batch.length;
         } catch (err) {
           console.error(`Individual multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
@@ -213,6 +270,13 @@ export async function processBroadcastSend(
       ))
         .filter(isSendableLineUserId)
         .map(normalizeSendableLineUserId);
+      const uniqueLineUserIds = uniqueSendableLineUserIds(lineUserIds, sentLineUserIds);
+      if (uniqueLineUserIds.length !== lineUserIds.length) {
+        console.warn(
+          `Broadcast ${broadcastId} skipped ${lineUserIds.length - uniqueLineUserIds.length} duplicate line_user_id recipients`,
+        );
+      }
+      lineUserIds.splice(0, lineUserIds.length, ...uniqueLineUserIds);
       totalCount = lineUserIds.length;
 
       // Send in batches with stealth delays
@@ -239,6 +303,9 @@ export async function processBroadcastSend(
 
         try {
           await lineClient.multicast(batch, batchMessages);
+          for (const lineUserId of batch) {
+            sentLineUserIds?.add(lineUserId);
+          }
           successCount += batch.length;
         } catch (err) {
           console.error(`Segment multicast batch ${batchIndex} failed:`, err);
@@ -300,17 +367,32 @@ export async function processScheduledBroadcasts(
     await updateBroadcastStatus(db, b.id, 'draft');
   }
 
-  const scheduled = allBroadcasts.filter(
-    (b) =>
-      b.status === 'scheduled' &&
-      b.scheduled_at !== null &&
-      new Date(b.scheduled_at).getTime() <= nowMs,
-  );
+  const scheduled = allBroadcasts
+    .filter(
+      (b) =>
+        b.status === 'scheduled' &&
+        b.scheduled_at !== null &&
+        new Date(b.scheduled_at).getTime() <= nowMs,
+    )
+    .sort((a, b) => {
+      const scheduledDiff =
+        new Date(a.scheduled_at ?? 0).getTime() - new Date(b.scheduled_at ?? 0).getTime();
+      if (scheduledDiff !== 0) return scheduledDiff;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+  const sentLineUserIdsByScheduledAt = new Map<string, Set<string>>();
 
   for (const broadcast of scheduled) {
     try {
       const lineClient = await resolveBroadcastLineClient(db, defaultAccessToken, broadcast);
-      await processBroadcastSend(db, lineClient, broadcast.id, workerUrl);
+      const scheduledAt = broadcast.scheduled_at ?? '';
+      let sentLineUserIds = sentLineUserIdsByScheduledAt.get(scheduledAt);
+      if (!sentLineUserIds) {
+        sentLineUserIds = new Set<string>();
+        sentLineUserIdsByScheduledAt.set(scheduledAt, sentLineUserIds);
+      }
+      await processBroadcastSend(db, lineClient, broadcast.id, workerUrl, sentLineUserIds);
     } catch (err) {
       console.error(`Failed to send scheduled broadcast ${broadcast.id}:`, err);
       // Continue with next broadcast
