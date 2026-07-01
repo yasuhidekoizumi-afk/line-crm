@@ -13,6 +13,7 @@ import type { LineClient } from '@line-crm/line-sdk';
 import { LineClient as LineClientImpl } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
+import { assertLineBroadcastAllowed } from './delivery-safety.js';
 
 const MULTICAST_BATCH_SIZE = 500;
 const DEFAULT_IMAGE_MAP_SIZE = { width: 1040, height: 1040 };
@@ -252,6 +253,11 @@ export async function processBroadcastSend(
   workerUrl?: string,
   dedupeContext?: BroadcastDedupeContext,
 ): Promise<Broadcast> {
+  const current = await getBroadcastById(db, broadcastId);
+  if (!current) {
+    throw new Error(`Broadcast ${broadcastId} not found`);
+  }
+  await assertLineBroadcastAllowed(db, current.line_account_id);
   const broadcast = await claimBroadcastForSending(db, broadcastId);
   const dedupeDate = getBroadcastDedupeDate(broadcast);
   const activeDedupeContext =

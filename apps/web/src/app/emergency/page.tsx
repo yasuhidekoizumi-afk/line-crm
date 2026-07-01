@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { api } from '@/lib/api'
+import { useEffect, useState } from 'react'
+import { api, type EmergencyStatus } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 
@@ -35,6 +35,7 @@ const emergencyPrompts = [
 ]
 
 export default function EmergencyPage() {
+  const [emergencyStatus, setEmergencyStatus] = useState<EmergencyStatus | null>(null)
   const [actions, setActions] = useState<EmergencyAction[]>([
     {
       id: 'stop-broadcasts',
@@ -62,6 +63,15 @@ export default function EmergencyPage() {
     )
   }
 
+  const refreshEmergencyStatus = async () => {
+    const res = await api.emergency.status()
+    if (res.success) setEmergencyStatus(res.data)
+  }
+
+  useEffect(() => {
+    refreshEmergencyStatus().catch(() => undefined)
+  }, [])
+
   const handleAction = async (id: string) => {
     const action = actions.find((a) => a.id === id)
     if (!action) return
@@ -76,13 +86,8 @@ export default function EmergencyPage() {
 
       try {
         if (id === 'stop-broadcasts') {
-          const res = await api.broadcasts.list()
-          if (res.success) {
-            const scheduled = res.data.filter((b) => b.status === 'scheduled')
-            await Promise.allSettled(
-              scheduled.map((b) => api.broadcasts.update(b.id, { scheduledAt: null }))
-            )
-          }
+          await api.emergency.stopBroadcasts()
+          await refreshEmergencyStatus()
         } else if (id === 'stop-scenarios') {
           const res = await api.scenarios.list()
           if (res.success) {
@@ -151,6 +156,29 @@ export default function EmergencyPage() {
               各ボタンをクリックすると確認ダイアログが表示されます。「実行」で操作が開始されます。
             </p>
           </div>
+        </div>
+      </div>
+
+      <div className="mb-6 grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <p className="text-xs text-gray-500">配信停止</p>
+          <p className={`mt-1 text-lg font-bold ${emergencyStatus?.paused ? 'text-red-600' : 'text-green-600'}`}>
+            {emergencyStatus?.paused ? '停止中' : '通常'}
+          </p>
+        </div>
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <p className="text-xs text-gray-500">リスク</p>
+          <p className={`mt-1 text-lg font-bold ${emergencyStatus?.riskLevel === 'danger' ? 'text-red-600' : emergencyStatus?.riskLevel === 'warning' ? 'text-yellow-600' : 'text-green-600'}`}>
+            {emergencyStatus?.riskLevel ?? '-'}
+          </p>
+        </div>
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <p className="text-xs text-gray-500">直近1時間のブロック/解除</p>
+          <p className="mt-1 text-lg font-bold text-gray-900">{emergencyStatus?.recentUnfollows ?? '-'}</p>
+        </div>
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <p className="text-xs text-gray-500">予約中の配信</p>
+          <p className="mt-1 text-lg font-bold text-gray-900">{emergencyStatus?.scheduledBroadcasts ?? '-'}</p>
         </div>
       </div>
 

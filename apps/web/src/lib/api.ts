@@ -89,6 +89,13 @@ export interface SystemStatus {
   deployments: SystemDeployment[]
 }
 
+export interface EmergencyStatus {
+  paused: boolean
+  riskLevel: 'normal' | 'warning' | 'danger'
+  recentUnfollows: number
+  scheduledBroadcasts: number
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 if (!API_URL) {
   throw new Error(
@@ -192,6 +199,11 @@ export type FriendWithTags = Friend & { tags: Tag[] }
 export const api = {
   system: {
     status: () => fetchApi<ApiResponse<SystemStatus>>('/api/system/status'),
+  },
+  emergency: {
+    status: () => fetchApi<ApiResponse<EmergencyStatus>>('/api/emergency/status'),
+    stopBroadcasts: () => fetchApi<ApiResponse<{ paused: boolean; unscheduledBroadcasts: number }>>('/api/emergency/stop-broadcasts', { method: 'POST' }),
+    resumeBroadcasts: () => fetchApi<ApiResponse<{ paused: boolean }>>('/api/emergency/resume-broadcasts', { method: 'POST' }),
   },
   friends: {
     list: (params?: FriendListParams) => {

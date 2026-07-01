@@ -9,6 +9,7 @@ import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js'
 import { buildSegmentQuery } from './segment-query.js';
 // multi タイプを含む全タイプを正しく Message[] に展開するため、broadcast.ts の buildMessages を使う
 import { buildMessages, isSendableLineUserId } from './broadcast.js';
+import { assertLineBroadcastAllowed } from './delivery-safety.js';
 import type { SegmentCondition } from './segment-query.js';
 
 const MULTICAST_BATCH_SIZE = 500;
@@ -34,6 +35,7 @@ export async function processSegmentSend(
   if (broadcast.status === 'sent') {
     throw new Error(`Broadcast ${broadcastId} has already been sent`);
   }
+  await assertLineBroadcastAllowed(db, broadcast.line_account_id);
 
   // 古いsend-segment経路でも、同じ配信を複数プロセスが同時に掴めないようにする。
   const claim = await db

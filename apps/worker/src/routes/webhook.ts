@@ -15,6 +15,7 @@ import {
   jstNow,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
+import { recordLineFollowEvent } from '../services/delivery-safety.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
@@ -123,6 +124,12 @@ async function handleEvent(
       await db.prepare('UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL')
         .bind(lineAccountId, friend.id).run();
     }
+    await recordLineFollowEvent(db, {
+      lineUserId: userId,
+      lineAccountId,
+      friendId: friend.id,
+      eventType: 'follow',
+    });
 
     // friend_add シナリオに登録（このアカウントのシナリオのみ）
     const scenarios = await getScenarios(db);
@@ -194,7 +201,14 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
+    const friend = await getFriendByLineUserId(db, userId);
     await updateFriendFollowStatus(db, userId, false);
+    await recordLineFollowEvent(db, {
+      lineUserId: userId,
+      lineAccountId,
+      friendId: friend?.id ?? null,
+      eventType: 'unfollow',
+    });
     return;
   }
 

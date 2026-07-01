@@ -9,6 +9,7 @@ import {
   getLineAccounts,
   createAccountHealthLog,
 } from '@line-crm/db';
+import { countRecentUnfollows } from './delivery-safety.js';
 
 export async function checkAccountHealth(
   db: D1Database,
@@ -47,6 +48,7 @@ async function checkSingleAccount(
     .first<{ count: number }>();
 
   const totalSent = sentMessages?.count ?? 0;
+  const recentUnfollows = await countRecentUnfollows(db, account.id);
 
   // LINE APIにヘルスチェックリクエスト
   let errorCode: number | null = null;
@@ -68,9 +70,9 @@ async function checkSingleAccount(
 
   // リスクレベル判定
   let riskLevel = 'normal';
-  if (errorCode === 403) {
+  if (errorCode === 403 || recentUnfollows >= 30) {
     riskLevel = 'danger'; // BAN の可能性
-  } else if (errorCode === 429) {
+  } else if (errorCode === 429 || recentUnfollows >= 10) {
     riskLevel = 'warning'; // レート制限
   } else if (totalSent > 5000) {
     riskLevel = 'warning'; // 大量送信の警告
