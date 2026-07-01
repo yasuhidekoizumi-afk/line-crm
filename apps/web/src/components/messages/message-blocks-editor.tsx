@@ -28,7 +28,7 @@ import CardMessageEditor, {
 
 export type Block =
   | { id: string; type: 'text'; text: string }
-  // image: linkUrl が入っていれば、送信時に裏でFlexに変換して画像タップで遷移できるようにする
+  // image: linkUrl が入っていれば、送信時に裏でリッチメッセージまたはFlexに変換して画像タップで遷移できるようにする
   | { id: string; type: 'image'; originalContentUrl: string; previewImageUrl: string; linkUrl?: string }
   | { id: string; type: 'flex'; contents: string; altText?: string } // contents は JSON 文字列
   // imagemap: 公式LINE「リッチメッセージ」相当。
@@ -62,7 +62,7 @@ export function blocksToPayload(blocks: Block[]): {
     if (b.type === 'image') {
       return {
         messageType: 'image',
-        // linkUrl を JSON に含める（Worker側がリンク有無で Flex 変換するかを判断）
+        // linkUrl を JSON に含める（Worker側がリンク有無でリッチ/Flex変換するかを判断）
         messageContent: JSON.stringify({
           originalContentUrl: b.originalContentUrl,
           previewImageUrl: b.previewImageUrl || b.originalContentUrl,
@@ -299,7 +299,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                         />
                         {b.linkUrl?.trim() && (
                           <p className="text-[11px] text-gray-400 mt-1">
-                            ※ リンク付き画像はLINE仕様上Flexメッセージとして送信されます（動作は同じ）
+                            ※ アップロード画像は大きく表示されるリッチメッセージとして送信されます。外部URLの場合のみFlexに変換されます。
                           </p>
                         )}
                       </div>
