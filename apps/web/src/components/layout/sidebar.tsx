@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAccount } from '@/contexts/account-context'
 import type { AccountWithStats } from '@/contexts/account-context'
+import { api, type SystemStatus } from '@/lib/api'
 
 type RoleMode = 'cs' | 'marketing' | 'admin'
 
@@ -230,6 +231,7 @@ export default function Sidebar() {
   const [showHelp, setShowHelp] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [roleMode, setRoleMode] = useState<RoleMode>('admin')
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -246,6 +248,19 @@ export default function Sidebar() {
   }, [roleMode])
 
   useEffect(() => { setIsOpen(false) }, [pathname])
+
+  useEffect(() => {
+    let cancelled = false
+    api.system.status()
+      .then((res) => {
+        if (!cancelled && res.success && res.data) setSystemStatus(res.data)
+      })
+      .catch(() => {
+        if (!cancelled) setSystemStatus(null)
+      })
+    return () => { cancelled = true }
+  }, [])
+
   useEffect(() => {
     document.body.style.overflow = isOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
@@ -334,7 +349,13 @@ export default function Sidebar() {
           </div>
         )}
         <div className="px-6 py-4 space-y-3">
-          <p className="text-xs text-gray-400">LINE Harness v{process.env.APP_VERSION || '0.0.0'}</p>
+          <div className="text-xs text-gray-400" title={systemStatus ? `ビルド日時: ${systemStatus.buildTime}` : '稼働バージョンを確認できません'}>
+            <p>LINE Harness v{systemStatus?.version ?? '確認中'}</p>
+            <p className="mt-0.5 text-[10px]">
+              稼働中: {systemStatus?.commit ?? '未確認'}
+              {systemStatus?.buildTime ? ` / ${new Date(systemStatus.buildTime).toLocaleString('ja-JP')}` : ''}
+            </p>
+          </div>
           <button onClick={() => setShowHelp(true)} className="flex items-center gap-2 text-xs text-gray-500 hover:text-green-600 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             使い方

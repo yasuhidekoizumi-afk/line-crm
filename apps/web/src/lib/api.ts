@@ -72,6 +72,23 @@ export interface ClickedNonBuyerParams {
   offset?: number
 }
 
+export interface SystemDeployment {
+  app: string
+  version: string
+  commit: string
+  buildTime: string
+  deployedAt: string
+  note: string | null
+}
+
+export interface SystemStatus {
+  app: string
+  version: string
+  commit: string
+  buildTime: string
+  deployments: SystemDeployment[]
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 if (!API_URL) {
   throw new Error(
@@ -173,6 +190,9 @@ export type FriendListParams = {
 export type FriendWithTags = Friend & { tags: Tag[] }
 
 export const api = {
+  system: {
+    status: () => fetchApi<ApiResponse<SystemStatus>>('/api/system/status'),
+  },
   friends: {
     list: (params?: FriendListParams) => {
       const query: Record<string, string> = {}

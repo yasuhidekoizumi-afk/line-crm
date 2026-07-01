@@ -105,6 +105,10 @@ import { recomputeAllSegments } from './ferment/cron-segments.js';
 import { sendDailySummary } from './ferment/cron-daily-summary.js';
 import { processBirthdayCoupons } from './services/birthday-coupon.js';
 
+declare const __APP_VERSION__: string;
+declare const __GIT_SHA__: string;
+declare const __BUILD_TIME__: string;
+
 export type Env = {
   Bindings: {
     DB: D1Database;
@@ -162,10 +166,88 @@ export type Env = {
 };
 
 const app = new Hono<Env>();
+const buildInfo = {
+  app: 'worker',
+  version: __APP_VERSION__,
+  commit: __GIT_SHA__,
+  buildTime: __BUILD_TIME__,
+};
+
+async function ensureSystemDeploymentsTable(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS system_deployments (
+        id TEXT PRIMARY KEY,
+        app TEXT NOT NULL,
+        version TEXT NOT NULL,
+        commit_sha TEXT NOT NULL,
+        build_time TEXT NOT NULL,
+        deployed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+        note TEXT
+      )`,
+    )
+    .run();
+  await db
+    .prepare(
+      `CREATE INDEX IF NOT EXISTS idx_system_deployments_deployed_at
+       ON system_deployments (deployed_at DESC)`,
+    )
+    .run();
+}
+
+async function recordCurrentDeployment(db: D1Database): Promise<void> {
+  await ensureSystemDeploymentsTable(db);
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO system_deployments
+         (id, app, version, commit_sha, build_time, note)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      `${buildInfo.app}:${buildInfo.commit}:${buildInfo.buildTime}`,
+      buildInfo.app,
+      buildInfo.version,
+      buildInfo.commit,
+      buildInfo.buildTime,
+      '管理画面またはAPIから稼働確認',
+    )
+    .run();
+}
 
 app.use('*', cors({ origin: '*' }));
 app.use('*', rateLimitMiddleware);
 app.use('*', authMiddleware);
+
+app.get('/api/system/status', async (c) => {
+  try {
+    await recordCurrentDeployment(c.env.DB);
+    const deployments = await c.env.DB
+      .prepare(
+        `SELECT app, version, commit_sha AS commit, build_time AS buildTime, deployed_at AS deployedAt, note
+         FROM system_deployments
+         ORDER BY deployed_at DESC
+         LIMIT 10`,
+      )
+      .all<{
+        app: string;
+        version: string;
+        commit: string;
+        buildTime: string;
+        deployedAt: string;
+        note: string | null;
+      }>();
+    return c.json({
+      success: true,
+      data: {
+        ...buildInfo,
+        deployments: deployments.results,
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/system/status error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
 
 // MVP & Round 2
 app.route('/', webhook);

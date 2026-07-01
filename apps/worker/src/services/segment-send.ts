@@ -24,12 +24,24 @@ export async function processSegmentSend(
   broadcastId: string,
   condition: SegmentCondition,
 ): Promise<Broadcast> {
-  // Mark as sending
-  await updateBroadcastStatus(db, broadcastId, 'sending');
-
   const broadcast = await getBroadcastById(db, broadcastId);
   if (!broadcast) {
     throw new Error(`Broadcast ${broadcastId} not found`);
+  }
+  if (broadcast.status === 'sending') {
+    throw new Error(`Broadcast ${broadcastId} is already sending`);
+  }
+  if (broadcast.status === 'sent') {
+    throw new Error(`Broadcast ${broadcastId} has already been sent`);
+  }
+
+  // 古いsend-segment経路でも、同じ配信を複数プロセスが同時に掴めないようにする。
+  const claim = await db
+    .prepare(`UPDATE broadcasts SET status = 'sending' WHERE id = ? AND status IN ('draft', 'scheduled')`)
+    .bind(broadcastId)
+    .run();
+  if ((claim.meta?.changes ?? 0) !== 1) {
+    throw new Error(`Broadcast ${broadcastId} was claimed by another process`);
   }
 
   // multi タイプも正しく処理するため buildMessages(配列)を使う
@@ -101,8 +113,13 @@ export async function processSegmentSend(
 
     await updateBroadcastStatus(db, broadcastId, 'sent', { totalCount, successCount });
   } catch (err) {
-    // On failure, reset to draft so it can be retried
-    await updateBroadcastStatus(db, broadcastId, 'draft');
+    // LINE送信後の失敗でdraftへ戻すと再送事故につながるため、送信完了扱いでエラーを残す。
+    await updateBroadcastStatus(db, broadcastId, 'sent', {
+      totalCount,
+      successCount,
+      failedCount: Math.max(totalCount - successCount, 0),
+      errorSummary: (err instanceof Error ? err.message : String(err)).slice(0, 500),
+    });
     throw err;
   }
 
