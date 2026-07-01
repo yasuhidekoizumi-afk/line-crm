@@ -152,6 +152,83 @@ async function recordBroadcastRecipientSends(
   );
 }
 
+async function recordFriendMessageLogs(
+  db: D1Database,
+  broadcast: Pick<Broadcast, 'id' | 'message_type' | 'message_content'>,
+  friends: Array<{ id: string }>,
+  createdAt: string,
+): Promise<void> {
+  if (friends.length === 0) return;
+
+  try {
+    await db.batch(
+      friends.map((friend) =>
+        db
+          .prepare(
+            `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+             VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
+          )
+          .bind(crypto.randomUUID(), friend.id, broadcast.message_type, broadcast.message_content, broadcast.id, createdAt),
+      ),
+    );
+  } catch (logErr) {
+    console.warn(`messages_log batch INSERT failed (LINE送信は成功済み):`, logErr);
+  }
+}
+
+async function recordSegmentMessageLogs(
+  db: D1Database,
+  broadcast: Pick<Broadcast, 'id' | 'message_type' | 'message_content'>,
+  lineUserIds: string[],
+  createdAt: string,
+): Promise<void> {
+  if (lineUserIds.length === 0) return;
+
+  try {
+    await db.batch(
+      lineUserIds.map(() =>
+        db
+          .prepare(
+            `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+             VALUES (?, '', 'outgoing', ?, ?, ?, NULL, ?)`,
+          )
+          .bind(crypto.randomUUID(), broadcast.message_type, broadcast.message_content, broadcast.id, createdAt),
+      ),
+    );
+  } catch (logErr) {
+    console.warn(`messages_log batch INSERT failed (LINE送信は成功済み):`, logErr);
+  }
+}
+
+async function claimBroadcastForSending(db: D1Database, broadcastId: string): Promise<Broadcast> {
+  const existing = await getBroadcastById(db, broadcastId);
+  if (!existing) {
+    throw new Error(`Broadcast ${broadcastId} not found`);
+  }
+  if (existing.status === 'sending') {
+    throw new Error(`Broadcast ${broadcastId} is already sending`);
+  }
+  if (existing.status === 'sent') {
+    throw new Error(`Broadcast ${broadcastId} has already been sent`);
+  }
+
+  // 複数のcron/手動実行が同じ予約配信を同時に拾っても、1つだけが送信権を取れるようにする。
+  const result = await db
+    .prepare(`UPDATE broadcasts SET status = 'sending' WHERE id = ? AND status IN ('draft', 'scheduled')`)
+    .bind(broadcastId)
+    .run();
+  const changes = result.meta?.changes ?? 0;
+  if (changes !== 1) {
+    throw new Error(`Broadcast ${broadcastId} was claimed by another process`);
+  }
+
+  const claimed = await getBroadcastById(db, broadcastId);
+  if (!claimed) {
+    throw new Error(`Broadcast ${broadcastId} not found after claim`);
+  }
+  return claimed;
+}
+
 export async function resolveBroadcastLineClient(
   db: D1Database,
   defaultAccessToken: string,
@@ -175,13 +252,7 @@ export async function processBroadcastSend(
   workerUrl?: string,
   dedupeContext?: BroadcastDedupeContext,
 ): Promise<Broadcast> {
-  // Mark as sending
-  await updateBroadcastStatus(db, broadcastId, 'sending');
-
-  const broadcast = await getBroadcastById(db, broadcastId);
-  if (!broadcast) {
-    throw new Error(`Broadcast ${broadcastId} not found`);
-  }
+  const broadcast = await claimBroadcastForSending(db, broadcastId);
   const dedupeDate = getBroadcastDedupeDate(broadcast);
   const activeDedupeContext =
     dedupeContext ?? {
@@ -286,20 +357,7 @@ export async function processBroadcastSend(
         }
 
         // ログ書き込みエラーは LINE 配信失敗とは別扱い（ログ失敗で「配信失敗」と誤表示しない）
-        for (const friend of batch) {
-          try {
-            const logId = crypto.randomUUID();
-            await db
-              .prepare(
-                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-                 VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
-              )
-              .bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now)
-              .run();
-          } catch (logErr) {
-            console.warn(`messages_log INSERT failed (LINE送信は成功済み):`, logErr);
-          }
-        }
+        await recordFriendMessageLogs(db, broadcast, batch, now);
       }
     } else if (broadcast.target_type === 'individual') {
       const raw = (broadcast as unknown as Record<string, unknown>).target_friend_ids as string | null;
@@ -354,20 +412,7 @@ export async function processBroadcastSend(
           errorMessages.push(err instanceof Error ? err.message : String(err));
           continue;
         }
-        for (const friend of batch) {
-          try {
-            const logId = crypto.randomUUID();
-            await db
-              .prepare(
-                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-                 VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
-              )
-              .bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now)
-              .run();
-          } catch (logErr) {
-            console.warn(`messages_log INSERT failed (LINE送信は成功済み):`, logErr);
-          }
-        }
+        await recordFriendMessageLogs(db, broadcast, batch, now);
       }
     } else if (broadcast.target_type === 'segment') {
       if (!broadcast.target_segment_id) {
@@ -430,20 +475,7 @@ export async function processBroadcastSend(
           continue;
         }
         // ログ書き込みエラーは LINE 配信失敗とは別扱い
-        for (const lineUserId of batch) {
-          try {
-            const logId = crypto.randomUUID();
-            await db
-              .prepare(
-                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-                 VALUES (?, '', 'outgoing', ?, ?, ?, NULL, ?)`,
-              )
-              .bind(logId, broadcast.message_type, broadcast.message_content, broadcastId, now)
-              .run();
-          } catch (logErr) {
-            console.warn(`messages_log INSERT failed (LINE送信は成功済み):`, logErr);
-          }
-        }
+        await recordSegmentMessageLogs(db, broadcast, batch, now);
       }
     }
 
@@ -459,8 +491,13 @@ export async function processBroadcastSend(
       errorSummary,
     });
   } catch (err) {
-    // On failure, reset to draft so it can be retried
-    await updateBroadcastStatus(db, broadcastId, 'draft');
+    // LINE送信後にWorkerが落ちると再送が最も危険なため、自動でdraftへ戻さない。
+    await updateBroadcastStatus(db, broadcastId, 'sent', {
+      totalCount,
+      successCount,
+      failedCount: failedCount || Math.max(totalCount - successCount, 0),
+      errorSummary: (err instanceof Error ? err.message : String(err)).slice(0, 500),
+    });
     throw err;
   }
 
@@ -475,12 +512,11 @@ export async function processScheduledBroadcasts(
   const allBroadcasts = await getBroadcasts(db);
   const nowMs = Date.now();
 
-  // cron が起動した時点で "sending" の配信 = 前回の cron が Cloudflare に強制終了された証拠。
-  // ドラフトに戻して再送できる状態にする。
+  // sending を自動で draft に戻すと、LINE送信済みなのに再送される危険がある。
+  // 復旧が必要な場合は、DB上の送信証跡を確認してから手動で判断する。
   const stuck = allBroadcasts.filter((b) => b.status === 'sending');
   for (const b of stuck) {
-    console.warn(`Auto-recovering stuck broadcast ${b.id} (was sending)`);
-    await updateBroadcastStatus(db, b.id, 'draft');
+    console.warn(`Broadcast ${b.id} is still sending; skipping automatic retry`);
   }
 
   const scheduled = allBroadcasts
