@@ -12,7 +12,7 @@
 -- - 直近30日購入者には2行作る
 --   - monthly_osusowake_202507_pilot: 100pt
 --   - active_thanks_202507_pilot: 200pt
--- - 直近30日購入なし会員は deterministic に20%を配布、80%をholdout
+-- - 直近30日購入なし会員は deterministic に20%を配布、80%を検証用の非配布群にする
 -- - 実行をやり直しても idempotency_key で二重作成しない
 
 WITH eligible AS (
@@ -72,7 +72,7 @@ grant_rows AS (
     'monthly_202507:' || e.customer_id AS source_event_id,
     0 AS holdout,
     'planned' AS status,
-    '7月おすそわけ先行' AS reason
+    '毎月のおすそわけポイント ※マイページとLINEの連携をされている方にお送りします' AS reason
   FROM eligible e
   JOIN recent_orders r ON r.customer_id = e.customer_id
 
@@ -92,7 +92,7 @@ grant_rows AS (
     COALESCE(roi.shopify_order_id, 'active_30d:' || e.customer_id) AS source_event_id,
     0 AS holdout,
     'planned' AS status,
-    '7月ありがとう先行' AS reason
+    'いつもありがとうポイント ※前月にオリゼ商品をご購入の方にお送りします' AS reason
   FROM eligible e
   JOIN recent_orders r ON r.customer_id = e.customer_id
   LEFT JOIN recent_order_ids roi ON roi.customer_id = e.customer_id
@@ -106,14 +106,14 @@ grant_rows AS (
     i.friend_id,
     i.line_user_id,
     i.shopify_customer_id,
-    'inactive_30d_treatment' AS segment,
+    'no_recent_purchase_30d_treatment' AS segment,
     100 AS points,
     '2026-07-08T23:59:59.000+09:00' AS expires_at,
     'monthly_osusowake_202507_pilot:' || i.customer_id AS idempotency_key,
     'monthly_202507:' || i.customer_id AS source_event_id,
     0 AS holdout,
     'planned' AS status,
-    '7月おすそわけ先行 非アクティブ20%' AS reason
+    '毎月のおすそわけポイント ※マイページとLINEの連携をされている方にお送りします' AS reason
   FROM inactive_ranked i
   WHERE i.rn <= CAST((i.total_count + 4) / 5 AS INTEGER)
 
@@ -126,14 +126,14 @@ grant_rows AS (
     i.friend_id,
     i.line_user_id,
     i.shopify_customer_id,
-    'inactive_30d_holdout' AS segment,
+    'no_recent_purchase_30d_holdout' AS segment,
     0 AS points,
     NULL AS expires_at,
     'monthly_osusowake_202507_pilot_holdout:' || i.customer_id AS idempotency_key,
     'monthly_202507:' || i.customer_id AS source_event_id,
     1 AS holdout,
     'skipped' AS status,
-    '7月おすそわけ先行 holdout' AS reason
+    '毎月のおすそわけポイント 検証用非配布群' AS reason
   FROM inactive_ranked i
   WHERE i.rn > CAST((i.total_count + 4) / 5 AS INTEGER)
 )

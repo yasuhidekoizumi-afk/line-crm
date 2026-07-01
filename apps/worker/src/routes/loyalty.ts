@@ -2017,7 +2017,7 @@ loyalty.post('/api/loyalty/admin/points-pilot/award', async (c) => {
           limitedExpiresAt: grant.expires_at,
           expiryPolicy: 'replace',
           txType: 'award',
-          reason: `${grant.reason ?? grant.campaign_key}: +${grant.points}pt（7日期限）`,
+          reason: grant.reason ?? grant.campaign_key,
           orderId: grant.idempotency_key,
           staffId,
           shopifyCustomerId: grant.shopify_customer_id,
