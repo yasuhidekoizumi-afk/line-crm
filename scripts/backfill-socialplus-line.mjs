@@ -109,7 +109,9 @@ async function postChunk(workerUrl, apiKey, items, lineAccountId) {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': apiKey,
+      // authMiddleware は `Authorization: Bearer <API_KEY>` 形式しか通さない。
+      // x-api-key ヘッダにすると 401 になるので注意。
+      authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
   });

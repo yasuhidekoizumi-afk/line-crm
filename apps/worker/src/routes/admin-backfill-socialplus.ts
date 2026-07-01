@@ -239,35 +239,42 @@ adminBackfillSocialplus.post('/api/admin/backfill/socialplus-line', async (c) =>
         .first<{ customer_id: string; line_user_id: string | null }>();
 
       if (byShop) {
-        const isCurrentSynthetic =
-          !byShop.line_user_id || byShop.line_user_id.startsWith('shopify:') || byShop.line_user_id !== uid;
         if (byShop.line_user_id === uid) {
-          customerAction = 'linked'; // 既に本物で紐付き済み
+          // 既に本物のUIDで紐付き済み
+          customerAction = 'linked';
           stats.customersLinked++;
-        } else if (isCurrentSynthetic) {
-          // 別の customers 行が同じ uid を占有していないか（UNIQUE制約回避）
-          const other = await db
-            .prepare('SELECT customer_id FROM customers WHERE line_user_id = ? AND customer_id != ? LIMIT 1')
-            .bind(uid, byShop.customer_id)
-            .first<{ customer_id: string }>();
-          if (other) {
-            // 別行が既に本物のUIDを持っている: マージは複雑なので今回は skip 記録して手動対応に回す
+        } else {
+          // 上書き可否: 既存値が null または `shopify:<id>` 合成値のときだけ上書きする。
+          // 別の本物UID（別のU始まり33文字）が入っている場合は絶対に上書きしない — 別人と誤結合するリスク。
+          const isNullOrSynthetic =
+            !byShop.line_user_id || byShop.line_user_id.startsWith('shopify:');
+          if (!isNullOrSynthetic) {
             stats.conflicts++;
             customerAction = 'conflict';
           } else {
-            await db
-              .prepare(
-                `UPDATE customers
-                   SET line_user_id = ?,
-                       display_name = COALESCE(?, display_name),
-                       email = COALESCE(email, ?),
-                       updated_at = ?
-                 WHERE customer_id = ?`,
-              )
-              .bind(uid, displayName ?? null, email ?? null, now, byShop.customer_id)
-              .run();
-            stats.customersLinked++;
-            customerAction = 'linked';
+            // UNIQUE制約回避: 同じ uid が別行にあるかチェック
+            const other = await db
+              .prepare('SELECT customer_id FROM customers WHERE line_user_id = ? AND customer_id != ? LIMIT 1')
+              .bind(uid, byShop.customer_id)
+              .first<{ customer_id: string }>();
+            if (other) {
+              stats.conflicts++;
+              customerAction = 'conflict';
+            } else {
+              await db
+                .prepare(
+                  `UPDATE customers
+                     SET line_user_id = ?,
+                         display_name = COALESCE(?, display_name),
+                         email = COALESCE(email, ?),
+                         updated_at = ?
+                   WHERE customer_id = ?`,
+                )
+                .bind(uid, displayName ?? null, email ?? null, now, byShop.customer_id)
+                .run();
+              stats.customersLinked++;
+              customerAction = 'linked';
+            }
           }
         }
       } else {
