@@ -21,6 +21,7 @@ import {
   getExpiringSoonPoints,
   upsertLoyaltyPoint,
   addLoyaltyTransaction,
+  mutateLoyaltyPoint,
   determineRank,
   calculatePoints,
   RANK_THRESHOLDS,
@@ -1869,6 +1870,193 @@ loyalty.post('/api/loyalty/admin/birthday-backfill', async (c) => {
     return c.json({ success: true, data: { candidates: candidates.length, updated, noBirthday, errors, errorSamples } });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'birthday-backfill failed' }, 500);
+  }
+});
+
+type PointsPilotGrantRow = {
+  id: string;
+  campaign_key: string;
+  customer_id: string | null;
+  friend_id: string | null;
+  line_user_id: string;
+  shopify_customer_id: string;
+  segment: string;
+  points: number;
+  expires_at: string | null;
+  idempotency_key: string;
+  source_event_id: string;
+  reason: string | null;
+};
+
+// ────────────────────────────────────────────────────────────────────
+// POST /api/loyalty/admin/points-pilot/award — 7月先行検証の小分け付与
+//
+// body: { dryRun?: boolean, limit?: number, campaignKeys?: string[] }
+// - loyalty_campaign_grants の planned 行だけを処理する。
+// - order_id = idempotency_key で二重付与を防ぐ。
+// - 期間限定ポイントとして limited_balance に加算し、expires_at はスナップショットの固定値を使う。
+// ────────────────────────────────────────────────────────────────────
+loyalty.post('/api/loyalty/admin/points-pilot/award', async (c) => {
+  try {
+    const body = await c.req.json<{
+      dryRun?: boolean;
+      limit?: number;
+      campaignKeys?: string[];
+    }>().catch(() => ({
+      dryRun: undefined,
+      limit: undefined,
+      campaignKeys: undefined,
+    }));
+
+    const dryRun = body.dryRun !== false;
+    const limit = Math.max(1, Math.min(Number.isFinite(body.limit) ? Number(body.limit) : 50, 100));
+    const campaignKeys = (body.campaignKeys?.length
+      ? body.campaignKeys
+      : ['monthly_osusowake_202507_pilot', 'active_thanks_202507_pilot'])
+      .map((key: string) => key.trim())
+      .filter(Boolean);
+
+    if (campaignKeys.length === 0) {
+      return c.json({ success: false, error: 'campaignKeys が空です' }, 400);
+    }
+
+    const placeholders = campaignKeys.map(() => '?').join(', ');
+    const rows = await c.env.DB
+      .prepare(
+        `SELECT id, campaign_key, customer_id, friend_id, line_user_id, shopify_customer_id,
+                segment, points, expires_at, idempotency_key, source_event_id, reason
+         FROM loyalty_campaign_grants
+         WHERE campaign_key IN (${placeholders})
+           AND status = 'planned'
+           AND holdout = 0
+           AND points > 0
+           AND loyalty_transaction_id IS NULL
+         ORDER BY campaign_key, segment, id
+         LIMIT ?`,
+      )
+      .bind(...campaignKeys, limit)
+      .all<PointsPilotGrantRow>();
+
+    const grants = rows.results ?? [];
+    if (dryRun) {
+      const remaining = await c.env.DB
+        .prepare(
+          `SELECT campaign_key, segment, COUNT(*) AS rows, COALESCE(SUM(points), 0) AS points
+           FROM loyalty_campaign_grants
+           WHERE campaign_key IN (${placeholders})
+             AND status = 'planned'
+             AND holdout = 0
+             AND points > 0
+             AND loyalty_transaction_id IS NULL
+           GROUP BY campaign_key, segment
+           ORDER BY campaign_key, segment`,
+        )
+        .bind(...campaignKeys)
+        .all<{ campaign_key: string; segment: string; rows: number; points: number }>();
+
+      return c.json({
+        success: true,
+        data: {
+          dryRun: true,
+          limit,
+          campaignKeys,
+          nextBatch: grants.length,
+          remaining: remaining.results ?? [],
+        },
+      });
+    }
+
+    const staff = c.get('staff');
+    const staffId = staff?.id && staff.id !== 'env-owner' ? staff.id : undefined;
+    const createdBy = staff?.id ?? 'system';
+    const result = {
+      processed: grants.length,
+      awarded: 0,
+      alreadyAwarded: 0,
+      failed: 0,
+      totalPoints: 0,
+      errors: [] as Array<{ grantId: string; error: string }>,
+    };
+
+    for (const grant of grants) {
+      try {
+        if (!grant.friend_id) {
+          await c.env.DB
+            .prepare(
+              `UPDATE loyalty_campaign_grants
+               SET status = 'failed', error = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+               WHERE id = ?`,
+            )
+            .bind('friend_id がありません', grant.id)
+            .run();
+          result.failed++;
+          continue;
+        }
+
+        const existing = await c.env.DB
+          .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? LIMIT 1`)
+          .bind(grant.idempotency_key)
+          .first<{ id: string }>();
+        if (existing) {
+          await c.env.DB
+            .prepare(
+              `UPDATE loyalty_campaign_grants
+               SET status = 'awarded', loyalty_transaction_id = ?, error = NULL,
+                   updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+               WHERE id = ?`,
+            )
+            .bind(existing.id, grant.id)
+            .run();
+          result.alreadyAwarded++;
+          continue;
+        }
+
+        const mutation = await mutateLoyaltyPoint(c.env.DB, {
+          friendId: grant.friend_id,
+          deltaLimited: grant.points,
+          limitedExpiresAt: grant.expires_at,
+          expiryPolicy: 'replace',
+          txType: 'award',
+          reason: grant.reason ?? grant.campaign_key,
+          orderId: grant.idempotency_key,
+          staffId,
+          shopifyCustomerId: grant.shopify_customer_id,
+          sourceTxId: grant.source_event_id,
+          txExpiresAt: grant.expires_at,
+        });
+
+        await c.env.DB
+          .prepare(
+            `UPDATE loyalty_campaign_grants
+             SET status = 'awarded', loyalty_transaction_id = ?, error = NULL, created_by = ?,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+             WHERE id = ?`,
+          )
+          .bind(mutation.txId, createdBy, grant.id)
+          .run();
+
+        result.awarded++;
+        result.totalPoints += grant.points;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown error';
+        await c.env.DB
+          .prepare(
+            `UPDATE loyalty_campaign_grants
+             SET status = 'failed', error = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+             WHERE id = ?`,
+          )
+          .bind(message, grant.id)
+          .run()
+          .catch(() => undefined);
+        result.failed++;
+        if (result.errors.length < 10) result.errors.push({ grantId: grant.id, error: message });
+      }
+    }
+
+    return c.json({ success: true, data: { dryRun: false, limit, campaignKeys, ...result } });
+  } catch (err) {
+    console.error('POST /api/loyalty/admin/points-pilot/award error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
 
