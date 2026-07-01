@@ -13,3 +13,7 @@ dist/
 .env.staging
 apps/web/out/
 apps/worker/dist/
+
+# バックフィルドライバの進捗/結果ファイル
+scripts/.backfill-progress.json
+scripts/.backfill-results.jsonl
