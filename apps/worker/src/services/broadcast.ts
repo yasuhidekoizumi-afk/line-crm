@@ -16,6 +16,11 @@ import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js'
 
 const MULTICAST_BATCH_SIZE = 500;
 
+interface BroadcastDedupeContext {
+  date: string;
+  sentLineUserIds: Set<string>;
+}
+
 export function isSendableLineUserId(lineUserId: string | null | undefined): lineUserId is string {
   return /^U[0-9a-f]{32}$/i.test(lineUserId?.trim() ?? '');
 }
@@ -26,14 +31,14 @@ function normalizeSendableLineUserId(lineUserId: string): string {
 
 function uniqueBySendableLineUserId<T extends { line_user_id: string }>(
   items: T[],
-  sentLineUserIds?: Set<string>,
+  dedupeContext?: BroadcastDedupeContext,
 ): T[] {
   const seen = new Set<string>();
   const uniqueItems: T[] = [];
 
   for (const item of items) {
     const lineUserId = normalizeSendableLineUserId(item.line_user_id);
-    if (sentLineUserIds?.has(lineUserId)) continue;
+    if (dedupeContext?.sentLineUserIds.has(lineUserId)) continue;
     if (seen.has(lineUserId)) continue;
     seen.add(lineUserId);
     uniqueItems.push({ ...item, line_user_id: lineUserId });
@@ -42,19 +47,90 @@ function uniqueBySendableLineUserId<T extends { line_user_id: string }>(
   return uniqueItems;
 }
 
-function uniqueSendableLineUserIds(lineUserIds: string[], sentLineUserIds?: Set<string>): string[] {
+function uniqueSendableLineUserIds(lineUserIds: string[], dedupeContext?: BroadcastDedupeContext): string[] {
   const seen = new Set<string>();
   const uniqueIds: string[] = [];
 
   for (const rawLineUserId of lineUserIds) {
     const lineUserId = normalizeSendableLineUserId(rawLineUserId);
-    if (sentLineUserIds?.has(lineUserId)) continue;
+    if (dedupeContext?.sentLineUserIds.has(lineUserId)) continue;
     if (seen.has(lineUserId)) continue;
     seen.add(lineUserId);
     uniqueIds.push(lineUserId);
   }
 
   return uniqueIds;
+}
+
+function getBroadcastDedupeDate(broadcast: Pick<Broadcast, 'scheduled_at'>): string {
+  return (broadcast.scheduled_at ?? jstNow()).slice(0, 10);
+}
+
+async function ensureBroadcastRecipientSendsTable(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS broadcast_recipient_sends (
+        id TEXT PRIMARY KEY,
+        broadcast_id TEXT NOT NULL,
+        line_user_id TEXT NOT NULL,
+        line_account_id TEXT,
+        sent_date TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+        UNIQUE (broadcast_id, line_user_id)
+      )`,
+    )
+    .run();
+
+  await db
+    .prepare(
+      `CREATE INDEX IF NOT EXISTS idx_broadcast_recipient_sends_date_account_user
+       ON broadcast_recipient_sends (sent_date, line_account_id, line_user_id)`,
+    )
+    .run();
+}
+
+async function getSentLineUserIdsForDate(
+  db: D1Database,
+  date: string,
+  lineAccountId: string | null,
+): Promise<Set<string>> {
+  await ensureBroadcastRecipientSendsTable(db);
+
+  const result = await db
+    .prepare(
+      `SELECT DISTINCT line_user_id
+       FROM broadcast_recipient_sends
+       WHERE sent_date = ?
+         AND COALESCE(line_account_id, '') = COALESCE(?, '')`,
+    )
+    .bind(date, lineAccountId)
+    .all<{ line_user_id: string }>();
+
+  return new Set(result.results.map((r) => r.line_user_id));
+}
+
+async function recordBroadcastRecipientSends(
+  db: D1Database,
+  broadcast: Pick<Broadcast, 'id' | 'line_account_id'>,
+  date: string,
+  lineUserIds: string[],
+  sentAt: string,
+): Promise<void> {
+  if (lineUserIds.length === 0) return;
+
+  await ensureBroadcastRecipientSendsTable(db);
+  await db.batch(
+    lineUserIds.map((lineUserId) =>
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO broadcast_recipient_sends
+             (id, broadcast_id, line_user_id, line_account_id, sent_date, sent_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(`${broadcast.id}:${lineUserId}`, broadcast.id, lineUserId, broadcast.line_account_id, date, sentAt),
+    ),
+  );
 }
 
 export async function resolveBroadcastLineClient(
@@ -78,7 +154,7 @@ export async function processBroadcastSend(
   lineClient: LineClient,
   broadcastId: string,
   workerUrl?: string,
-  sentLineUserIds?: Set<string>,
+  dedupeContext?: BroadcastDedupeContext,
 ): Promise<Broadcast> {
   // Mark as sending
   await updateBroadcastStatus(db, broadcastId, 'sending');
@@ -87,6 +163,12 @@ export async function processBroadcastSend(
   if (!broadcast) {
     throw new Error(`Broadcast ${broadcastId} not found`);
   }
+  const dedupeDate = getBroadcastDedupeDate(broadcast);
+  const activeDedupeContext =
+    dedupeContext ?? {
+      date: dedupeDate,
+      sentLineUserIds: await getSentLineUserIdsForDate(db, dedupeDate, broadcast.line_account_id),
+    };
 
   // Auto-wrap URLs with tracking links (text with URLs → Flex with button)
   let finalType: string = broadcast.message_type;
@@ -132,7 +214,7 @@ export async function processBroadcastSend(
       );
       const followingFriends = uniqueBySendableLineUserId(
         rawFollowingFriends,
-        sentLineUserIds,
+        activeDedupeContext,
       );
       if (followingFriends.length !== rawFollowingFriends.length) {
         console.warn(
@@ -167,8 +249,13 @@ export async function processBroadcastSend(
 
         try {
           await lineClient.multicast(lineUserIds, batchMessages);
+          try {
+            await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, lineUserIds, now);
+          } catch (dedupeLogErr) {
+            console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
+          }
           for (const lineUserId of lineUserIds) {
-            sentLineUserIds?.add(lineUserId);
+            activeDedupeContext.sentLineUserIds.add(lineUserId);
           }
           successCount += batch.length;
         } catch (err) {
@@ -218,7 +305,7 @@ export async function processBroadcastSend(
       const rawValidFriends = friends.filter((f): f is { id: string; line_user_id: string } =>
         isSendableLineUserId(f.line_user_id),
       );
-      const validFriends = uniqueBySendableLineUserId(rawValidFriends, sentLineUserIds);
+      const validFriends = uniqueBySendableLineUserId(rawValidFriends, activeDedupeContext);
       if (validFriends.length !== rawValidFriends.length) {
         console.warn(
           `Broadcast ${broadcastId} skipped ${rawValidFriends.length - validFriends.length} duplicate line_user_id recipients`,
@@ -233,8 +320,13 @@ export async function processBroadcastSend(
         const batchUserIds = batch.map((f) => normalizeSendableLineUserId(f.line_user_id));
         try {
           await lineClient.multicast(batchUserIds, messages);
+          try {
+            await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batchUserIds, now);
+          } catch (dedupeLogErr) {
+            console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
+          }
           for (const lineUserId of batchUserIds) {
-            sentLineUserIds?.add(lineUserId);
+            activeDedupeContext.sentLineUserIds.add(lineUserId);
           }
           successCount += batch.length;
         } catch (err) {
@@ -270,7 +362,7 @@ export async function processBroadcastSend(
       ))
         .filter(isSendableLineUserId)
         .map(normalizeSendableLineUserId);
-      const uniqueLineUserIds = uniqueSendableLineUserIds(lineUserIds, sentLineUserIds);
+      const uniqueLineUserIds = uniqueSendableLineUserIds(lineUserIds, activeDedupeContext);
       if (uniqueLineUserIds.length !== lineUserIds.length) {
         console.warn(
           `Broadcast ${broadcastId} skipped ${lineUserIds.length - uniqueLineUserIds.length} duplicate line_user_id recipients`,
@@ -303,8 +395,13 @@ export async function processBroadcastSend(
 
         try {
           await lineClient.multicast(batch, batchMessages);
+          try {
+            await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batch, now);
+          } catch (dedupeLogErr) {
+            console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
+          }
           for (const lineUserId of batch) {
-            sentLineUserIds?.add(lineUserId);
+            activeDedupeContext.sentLineUserIds.add(lineUserId);
           }
           successCount += batch.length;
         } catch (err) {
@@ -381,18 +478,22 @@ export async function processScheduledBroadcasts(
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
 
-  const sentLineUserIdsByScheduledAt = new Map<string, Set<string>>();
+  const dedupeContextsByDateAndAccount = new Map<string, BroadcastDedupeContext>();
 
   for (const broadcast of scheduled) {
     try {
       const lineClient = await resolveBroadcastLineClient(db, defaultAccessToken, broadcast);
-      const scheduledAt = broadcast.scheduled_at ?? '';
-      let sentLineUserIds = sentLineUserIdsByScheduledAt.get(scheduledAt);
-      if (!sentLineUserIds) {
-        sentLineUserIds = new Set<string>();
-        sentLineUserIdsByScheduledAt.set(scheduledAt, sentLineUserIds);
+      const dedupeDate = getBroadcastDedupeDate(broadcast);
+      const dedupeKey = `${dedupeDate}:${broadcast.line_account_id ?? ''}`;
+      let dedupeContext = dedupeContextsByDateAndAccount.get(dedupeKey);
+      if (!dedupeContext) {
+        dedupeContext = {
+          date: dedupeDate,
+          sentLineUserIds: await getSentLineUserIdsForDate(db, dedupeDate, broadcast.line_account_id),
+        };
+        dedupeContextsByDateAndAccount.set(dedupeKey, dedupeContext);
       }
-      await processBroadcastSend(db, lineClient, broadcast.id, workerUrl, sentLineUserIds);
+      await processBroadcastSend(db, lineClient, broadcast.id, workerUrl, dedupeContext);
     } catch (err) {
       console.error(`Failed to send scheduled broadcast ${broadcast.id}:`, err);
       // Continue with next broadcast
