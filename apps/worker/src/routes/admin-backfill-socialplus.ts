@@ -83,20 +83,45 @@ adminBackfillSocialplus.post('/api/admin/backfill/socialplus-line', async (c) =>
     return c.json({ success: false, error: 'items は必須です（配列）' }, 400);
   }
 
-  // ── LINE Client 準備（アカウント指定 > active最古 > env フォールバック） ──
+  // ── LINE Client 準備 ──
+  // 重要: LINEアカウントが複数ある場合、間違ったチャネルで getProfile すると
+  // 本来フォロー中の人も 404 扱いになり is_following=0 で誤取り込みされる。
+  // そのため:
+  //   - lineAccountId 明示指定 → その口
+  //   - 未指定 + active が1つだけ → その口を使う
+  //   - 未指定 + active が2つ以上 → 400 で拒否（人手で明示させる）
+  //   - 未指定 + active が0 → env フォールバック（dev想定）
   let accountId: string | null = body.lineAccountId ?? null;
   let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (accountId) {
     const acc = await getLineAccountById(db, accountId).catch(() => null);
-    if (acc?.channel_access_token) accessToken = acc.channel_access_token;
-  } else {
-    const acc = await db
-      .prepare("SELECT id, channel_access_token FROM line_accounts WHERE is_active = 1 ORDER BY created_at ASC LIMIT 1")
-      .first<{ id: string; channel_access_token: string }>();
-    if (acc) {
-      accountId = acc.id;
-      accessToken = acc.channel_access_token;
+    if (!acc?.channel_access_token) {
+      return c.json({ success: false, error: `指定された lineAccountId=${accountId} が見つからないか、channel_access_token が未設定です` }, 400);
     }
+    accessToken = acc.channel_access_token;
+  } else {
+    const accs = await db
+      .prepare('SELECT id, name, channel_access_token FROM line_accounts WHERE is_active = 1 ORDER BY created_at ASC')
+      .all<{ id: string; name: string; channel_access_token: string }>();
+    const rows = accs.results ?? [];
+    if (rows.length > 1) {
+      return c.json(
+        {
+          success: false,
+          error:
+            'lineAccountId 未指定ですが active な LINEアカウントが2つ以上あります。' +
+            '誤ったチャネルで getProfile すると本来フォロー中の人も 404 扱いになり ' +
+            'is_following=0 で誤取り込みされるため、明示指定してください。',
+          availableAccounts: rows.map((r) => ({ id: r.id, name: r.name })),
+        },
+        400,
+      );
+    }
+    if (rows.length === 1) {
+      accountId = rows[0].id;
+      accessToken = rows[0].channel_access_token;
+    }
+    // rows.length === 0 の場合は env のトークンで動く（dev 想定）
   }
   const lineClient = new LineClient(accessToken);
 

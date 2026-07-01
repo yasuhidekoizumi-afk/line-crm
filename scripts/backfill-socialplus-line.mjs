@@ -30,6 +30,9 @@ import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROGRESS_PATH = join(__dirname, '.backfill-progress.json');
 const RESULTS_PATH = join(__dirname, '.backfill-results.jsonl');
+// LINE API の一時エラー（429/5xx/network）や db_error などで未処理になった item を保存。
+// 進捗ファイルには入れないため、次回実行時に再挑戦される。
+const FAILURES_PATH = join(__dirname, '.backfill-failures.jsonl');
 
 /** コマンドライン引数を key/value に */
 function parseArgs(argv) {
@@ -148,9 +151,27 @@ async function main() {
   const reset = Boolean(args.reset);
   const lineAccountId = args['line-account-id'] || null;
 
+  // ── LINEアカウントID 未指定チェック ──
+  // 本番はLINEアカウントが2つ以上ある想定。socialplus.line メタフィールドには
+  // どのチャネル(=どのアカウント)で友だち登録した userId かの情報がない。
+  // 間違った accessToken で getProfile を叩くと本来フォロー中の人も 404 扱いになり
+  // is_following=0 で誤取り込みされる。dry-run 以外では明示指定を必須にする。
+  if (!lineAccountId && !dryRun) {
+    console.error(
+      '❌ --line-account-id が未指定です。\n' +
+        '   本番はLINEアカウントが複数あり、誤ったチャネルで getProfile すると\n' +
+        '   本来フォロー中の人も 404 扱いになり is_following=0 で誤取り込みされます。\n' +
+        '   アカウントIDは以下で確認してください:\n' +
+        '     cd apps/worker && npx wrangler d1 execute oryzae-line-crm --remote \\\n' +
+        '       --command "SELECT id, name FROM line_accounts WHERE is_active=1"',
+    );
+    process.exit(1);
+  }
+
   console.log(`📥 入力: ${inputPath}`);
   console.log(`🎯 送信先: ${workerUrl}`);
   console.log(`📦 チャンク: ${chunkSize}件/リクエスト`);
+  console.log(`📞 LINEアカウント: ${lineAccountId ?? '(dry-run のため未指定OK)'}`);
   if (limit !== Infinity) console.log(`🔢 上限: ${limit}件`);
   if (dryRun) console.log(`🧪 dry-run: 実際のPOSTはしません`);
 
@@ -228,17 +249,44 @@ async function main() {
       totalStats[k] += data[k] ?? 0;
     }
 
-    // 進捗保存
-    for (const item of slice) done.add(item.shopifyCustomerId);
+    // per-item 結果を分類:
+    //   - 一時失敗（getProfile 429/5xx/network, db_error）→ done に入れず failures.jsonl に退避
+    //     → 次回実行で自動リトライされる
+    //   - 成功 or 恒久的スキップ（invalid_input, conflict, 404=not_friend）→ done に入れる
+    const results = data.results ?? [];
+    const resultByShopifyId = new Map(
+      results.map((r) => [String(r.shopifyCustomerId), r]),
+    );
+    let chunkRetries = 0;
+    for (const item of slice) {
+      const r = resultByShopifyId.get(String(item.shopifyCustomerId));
+      const isTransient =
+        r &&
+        (r.friendAction === 'skipped' || r.customerAction === 'skipped') &&
+        typeof r.error === 'string' &&
+        (r.error.startsWith('getProfile_failed:') || r.error.startsWith('db_error:'));
+      if (isTransient) {
+        chunkRetries++;
+        // 元の item + endpoint の結果を退避（次回リトライ時に元の入力形式で読み戻せるように）
+        await appendFile(
+          FAILURES_PATH,
+          JSON.stringify({ item, result: r, at: new Date().toISOString() }) + '\n',
+          'utf-8',
+        );
+        // done には入れない → 次回実行で再送される
+      } else {
+        done.add(item.shopifyCustomerId);
+      }
+    }
     await saveProgress(done);
 
     // per-item 結果を追記
-    const lines = (data.results ?? []).map((r) => JSON.stringify(r)).join('\n');
-    if (lines) await appendFile(RESULTS_PATH, lines + '\n', 'utf-8');
+    const resultLines = results.map((r) => JSON.stringify(r)).join('\n');
+    if (resultLines) await appendFile(RESULTS_PATH, resultLines + '\n', 'utf-8');
 
     const chunkMs = Date.now() - chunkStart;
     console.log(
-      `  ✓ chunk ${chunkIdx}/${totalChunks} (${slice.length}件, ${chunkMs}ms): ok=${data.profilesOk} notFriend=${data.profilesNotFriend} err=${data.profileErrors} linked=${data.customersLinked} created=${data.customersCreated}`,
+      `  ✓ chunk ${chunkIdx}/${totalChunks} (${slice.length}件, ${chunkMs}ms): ok=${data.profilesOk} notFriend=${data.profilesNotFriend} linked=${data.customersLinked} created=${data.customersCreated} conflicts=${data.conflicts} retry=${chunkRetries}`,
     );
 
     // レート抑制
