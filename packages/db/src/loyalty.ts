@@ -552,10 +552,14 @@ export type MutateLoyaltyInput = {
   orderId?: string;
   /** トランザクションログの staff_id (任意) */
   staffId?: string;
+  /** トランザクションログの source_tx_id (任意) */
+  sourceTxId?: string;
   /** Shopify 顧客ID (まだ紐付けされていない friend なら必須) */
   shopifyCustomerId?: string;
   /** award の場合の有効期限日数 (loyalty_transactions.expires_at 用、UI表示専用) */
   expiryDays?: number;
+  /** award の有効期限を日数ではなく固定日時で記録したい場合に使う。 */
+  txExpiresAt?: string | null;
 };
 
 export type MutateLoyaltyResult = {
@@ -609,7 +613,9 @@ export async function mutateLoyaltyPoint(
   const days = input.expiryDays ?? 365;
   const txExpiresAt =
     input.txType === 'award'
-      ? new Date(new Date(now).getTime() + days * 24 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '.000')
+      ? input.txExpiresAt !== undefined
+        ? input.txExpiresAt
+        : new Date(new Date(now).getTime() + days * 24 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00').replace(/\.\d{3}/, '.000')
       : null;
   const lpId = current ? null : crypto.randomUUID();
 
@@ -652,7 +658,7 @@ export async function mutateLoyaltyPoint(
       input.staffId ?? null,
       now,
       txExpiresAt,
-      null,
+      input.sourceTxId ?? null,
     ),
   ];
 
