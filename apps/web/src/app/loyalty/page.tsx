@@ -12,6 +12,8 @@ interface LoyaltyPoint {
   id: string
   friend_id: string
   balance: number
+  limited_balance: number
+  limited_expires_at: string | null
   total_spent: number
   rank: LoyaltyRank
   shopify_customer_id: string | null
@@ -96,6 +98,10 @@ const COMPARE_LABELS: Record<string, string> = {
   none: '比較なし',
 }
 
+function totalBalance(point: Pick<LoyaltyPoint, 'balance' | 'limited_balance'>) {
+  return point.balance + point.limited_balance
+}
+
 function RankBadge({ rank }: { rank: LoyaltyRank }) {
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${RANK_COLORS[rank]}`}>
@@ -159,6 +165,7 @@ function DetailModal({ point, onClose, onAdjusted }: {
   const [adjustLoading, setAdjustLoading] = useState(false)
   const [adjustError, setAdjustError] = useState('')
   const [adjustSuccess, setAdjustSuccess] = useState('')
+  const total = totalBalance(point)
 
   useEffect(() => {
     const load = async () => {
@@ -207,8 +214,13 @@ function DetailModal({ point, onClose, onAdjusted }: {
             </div>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-2xl font-bold text-gray-900">{point.balance.toLocaleString('ja-JP')}</p>
+            <p className="text-2xl font-bold text-gray-900">{total.toLocaleString('ja-JP')}</p>
             <p className="text-xs text-gray-400">pt</p>
+            {point.limited_balance > 0 && (
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                通常 {point.balance.toLocaleString('ja-JP')} / 期間限定 {point.limited_balance.toLocaleString('ja-JP')}
+              </p>
+            )}
           </div>
           <button onClick={onClose}
             className="ml-2 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 shrink-0">
@@ -505,7 +517,9 @@ function MembersTab({ onOpenDetail }: { onOpenDetail: (p: LoyaltyPoint) => void 
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {items.map((item) => (
+              {items.map((item) => {
+                const total = totalBalance(item)
+                return (
                 <tr key={item.id} className="hover:bg-gray-50 transition-colors cursor-pointer"
                   onClick={() => onOpenDetail(item)}>
                   <td className="px-4 py-3">
@@ -518,7 +532,12 @@ function MembersTab({ onOpenDetail }: { onOpenDetail: (p: LoyaltyPoint) => void 
                   </td>
                   <td className="px-4 py-3"><RankBadge rank={item.rank} /></td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900">
-                    {item.balance.toLocaleString('ja-JP')} pt
+                    <div>{total.toLocaleString('ja-JP')} pt</div>
+                    {item.limited_balance > 0 && (
+                      <div className="text-[11px] font-normal text-gray-400">
+                        通常 {item.balance.toLocaleString('ja-JP')} / 限定 {item.limited_balance.toLocaleString('ja-JP')}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-500 hidden sm:table-cell">
                     ¥{item.total_spent.toLocaleString('ja-JP')}
@@ -531,7 +550,8 @@ function MembersTab({ onOpenDetail }: { onOpenDetail: (p: LoyaltyPoint) => void 
                     </button>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
