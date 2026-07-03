@@ -6,7 +6,7 @@ import { autoTrackUrls } from "./auto-track-urls.js";
 export function registerBroadcast(server: McpServer): void {
   server.tool(
     "broadcast",
-    "Send a broadcast message to all friends, a specific tag group, or a filtered segment. Creates and immediately sends the broadcast.",
+    "Send a broadcast message to all friends, a specific tag group, or a saved segment. Creates and immediately sends the broadcast.",
     {
       title: z
         .string()
@@ -21,18 +21,16 @@ export function registerBroadcast(server: McpServer): void {
         .enum(["all", "tag", "segment"])
         .default("all")
         .describe(
-          "Target audience: 'all' for everyone, 'tag' for a tag group, 'segment' for filtered conditions",
+          "Target audience: 'all' for everyone, 'tag' for a tag group, or 'segment' for a saved segment",
         ),
       targetTagId: z
         .string()
         .optional()
         .describe("Tag ID when targetType is 'tag'"),
-      segmentConditions: z
+      targetSegmentId: z
         .string()
         .optional()
-        .describe(
-          "JSON string of segment conditions when targetType is 'segment'. Format: { operator: 'AND'|'OR', rules: [{ type: 'tag_exists'|'tag_not_exists'|'metadata_equals'|'metadata_not_equals'|'ref_code'|'is_following', value: string|boolean|{key,value} }] }",
-        ),
+        .describe("Saved segment ID when targetType is 'segment'"),
       scheduledAt: z
         .string()
         .optional()
@@ -54,7 +52,7 @@ export function registerBroadcast(server: McpServer): void {
       messageContent,
       targetType,
       targetTagId,
-      segmentConditions,
+      targetSegmentId,
       scheduledAt,
       altText,
       accountId,
@@ -62,7 +60,7 @@ export function registerBroadcast(server: McpServer): void {
       try {
         const client = getClient();
 
-        if (targetType === "segment" && !segmentConditions) {
+        if (targetType === "segment" && !targetSegmentId) {
           return {
             content: [
               {
@@ -70,8 +68,7 @@ export function registerBroadcast(server: McpServer): void {
                 text: JSON.stringify(
                   {
                     success: false,
-                    error:
-                      "segmentConditions is required when targetType is 'segment'",
+                    error: "targetSegmentId is required when targetType is 'segment'",
                   },
                   null,
                   2,
@@ -80,88 +77,6 @@ export function registerBroadcast(server: McpServer): void {
             ],
             isError: true,
           };
-        }
-
-        if (targetType === "segment" && scheduledAt) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify(
-                  {
-                    success: false,
-                    error:
-                      "Scheduled segment broadcasts are not supported. Use scheduledAt only with targetType 'all' or 'tag'.",
-                  },
-                  null,
-                  2,
-                ),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        if (targetType === "segment" && segmentConditions) {
-          let parsedConditions;
-          try {
-            parsedConditions = JSON.parse(segmentConditions);
-          } catch {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify(
-                    {
-                      success: false,
-                      error: "segmentConditions must be valid JSON",
-                    },
-                    null,
-                    2,
-                  ),
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          const { content: trackedContent } = await autoTrackUrls(
-            client,
-            messageContent,
-            messageType,
-            title,
-          );
-
-          const broadcast = await client.broadcasts.create({
-            title: `[SEGMENT] ${title}`,
-            messageType,
-            messageContent: trackedContent,
-            targetType: "all",
-            lineAccountId: accountId,
-            altText,
-          });
-
-          try {
-            const result = await client.broadcasts.sendToSegment(
-              broadcast.id,
-              parsedConditions,
-            );
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify(
-                    { success: true, broadcast: result },
-                    null,
-                    2,
-                  ),
-                },
-              ],
-            };
-          } catch (sendError) {
-            await client.broadcasts.delete(broadcast.id).catch(() => {});
-            throw sendError;
-          }
         }
 
         // Auto-track URLs in flex messages
@@ -172,13 +87,13 @@ export function registerBroadcast(server: McpServer): void {
           title,
         );
 
-        // At this point targetType is guaranteed to be 'all' or 'tag' (segment handled above)
         const broadcast = await client.broadcasts.create({
           title,
           messageType,
           messageContent: trackedContent,
-          targetType: targetType as "all" | "tag",
+          targetType,
           targetTagId,
+          targetSegmentId,
           scheduledAt,
           lineAccountId: accountId,
           altText,

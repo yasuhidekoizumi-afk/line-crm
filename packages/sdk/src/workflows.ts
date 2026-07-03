@@ -1,7 +1,7 @@
 import type { FriendsResource } from './resources/friends.js'
 import type { ScenariosResource } from './resources/scenarios.js'
 import type { BroadcastsResource } from './resources/broadcasts.js'
-import type { StepDefinition, ScenarioTriggerType, ScenarioWithSteps, Broadcast, MessageType, SegmentCondition } from './types.js'
+import type { StepDefinition, ScenarioTriggerType, ScenarioWithSteps, Broadcast, MessageType } from './types.js'
 import { parseDelay } from './delay.js'
 
 export class Workflows {
@@ -54,20 +54,6 @@ export class Workflows {
       targetTagId: tagId,
     })
     return this.broadcasts.send(broadcast.id)
-  }
-
-  async broadcastToSegment(
-    messageType: MessageType,
-    content: string,
-    conditions: SegmentCondition,
-  ): Promise<Broadcast> {
-    const broadcast = await this.broadcasts.create({
-      title: content.slice(0, 50),
-      messageType,
-      messageContent: content,
-      targetType: 'all',
-    })
-    return this.broadcasts.sendToSegment(broadcast.id, conditions)
   }
 
   async sendTextToFriend(friendId: string, text: string): Promise<{ messageId: string }> {

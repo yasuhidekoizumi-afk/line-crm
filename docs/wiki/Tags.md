@@ -70,22 +70,12 @@ curl -X POST .../api/scenarios \
   }'
 ```
 
-### 3. セグメント配信の条件
+### 3. セグメント配信
 
 ```bash
-# タグ存在/不在をセグメント条件に使用
-curl -X POST .../api/broadcasts/BROADCAST_UUID/send-segment \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "conditions": {
-      "operator": "AND",
-      "rules": [
-        { "type": "tag_exists", "value": "ACTIVE_TAG_UUID" },
-        { "type": "tag_not_exists", "value": "PURCHASED_TAG_UUID" }
-      ]
-    }
-  }'
+# 保存済みセグメントIDを配信作成時に指定し、通常の送信APIで送る
+curl -X POST .../api/broadcasts/BROADCAST_UUID/send \
+  -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
 ### 4. ステップ配信の条件分岐

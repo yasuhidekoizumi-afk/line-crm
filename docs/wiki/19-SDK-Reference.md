@@ -325,30 +325,6 @@ await lh.broadcasts.delete('broadcast-uuid')
 const result = await lh.broadcasts.send('broadcast-uuid')
 ```
 
-#### sendToSegment(id, conditions)
-
-セグメント条件に基づく配信。
-
-```typescript
-const result = await lh.broadcasts.sendToSegment('broadcast-uuid', {
-  operator: 'AND',
-  rules: [
-    { type: 'tag_exists', value: 'tag-uuid' },
-    { type: 'is_following', value: true }
-  ]
-})
-```
-
-SegmentRule の type:
-- `tag_exists` -- 指定タグを持つ
-- `tag_not_exists` -- 指定タグを持たない
-- `metadata_equals` -- メタデータ一致 (`value: { key: 'plan', value: 'premium' }`)
-- `metadata_not_equals` -- メタデータ不一致
-- `ref_code` -- 流入経路コード
-- `is_following` -- フォロー中かどうか
-
----
-
 ### richMenus (RichMenusResource)
 
 ```typescript
@@ -547,7 +523,6 @@ Scenario, ScenarioListItem, ScenarioWithSteps, ScenarioStep
 CreateScenarioInput, CreateStepInput, UpdateScenarioInput, UpdateStepInput
 FriendScenarioEnrollment
 Broadcast, CreateBroadcastInput, UpdateBroadcastInput
-SegmentRule, SegmentCondition
 RichMenu, RichMenuBounds, RichMenuAction, RichMenuArea, CreateRichMenuInput
 TrackedLink, LinkClick, TrackedLinkWithClicks, CreateTrackedLinkInput
 Form, FormField, CreateFormInput, UpdateFormInput, FormSubmission

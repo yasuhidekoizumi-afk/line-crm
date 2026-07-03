@@ -74,8 +74,6 @@ line-harness/
 │   │   │       ├── ban-monitor.ts        # BAN監視
 │   │   │       ├── stealth.ts            # ジッター・レート制御
 │   │   │       ├── event-bus.ts          # イベントバス
-│   │   │       ├── segment-query.ts      # セグメントSQL生成
-│   │   │       ├── segment-send.ts       # セグメント配信
 │   │   │       └── google-calendar.ts    # GCal API
 │   │   └── wrangler.toml
 │   ├── web/              # Next.js 15 管理画面

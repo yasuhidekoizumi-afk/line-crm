@@ -5,22 +5,22 @@ import { getClient } from "../client.js";
 export function registerManageBroadcasts(server: McpServer): void {
   server.tool(
     "manage_broadcasts",
-    "配信の管理操作。list: 一覧、get: 詳細、create_draft: 下書き作成（送信しない）、update: 更新、send: 送信、send_to_segment: セグメント配信。",
+    "配信の管理操作。list: 一覧、get: 詳細、create_draft: 下書き作成（送信しない）、update: 更新、send: 送信。",
     {
       action: z
-        .enum(["list", "get", "create_draft", "update", "send", "send_to_segment"])
+        .enum(["list", "get", "create_draft", "update", "send"])
         .describe("Action to perform"),
-      broadcastId: z.string().optional().describe("Broadcast ID (required for get, update, send, send_to_segment)"),
+      broadcastId: z.string().optional().describe("Broadcast ID (required for get, update, send)"),
       title: z.string().optional().describe("Broadcast title (for create_draft, update)"),
       messageType: z.enum(["text", "image", "flex"]).optional().describe("Message type (for create_draft, update)"),
       messageContent: z.string().optional().describe("Message content (for create_draft, update)"),
-      targetType: z.enum(["all", "tag"]).optional().describe("Target type (for create_draft, update)"),
+      targetType: z.enum(["all", "tag", "segment"]).optional().describe("Target type (for create_draft, update)"),
       targetTagId: z.string().nullable().optional().describe("Target tag ID (for create_draft, update)"),
+      targetSegmentId: z.string().nullable().optional().describe("Saved segment ID when targetType is 'segment' (for create_draft, update)"),
       scheduledAt: z.string().nullable().optional().describe("ISO 8601 datetime to schedule (for create_draft, update)"),
-      segmentConditions: z.string().optional().describe("JSON string of segment conditions: {operator: 'AND'|'OR', rules: [{type, value}]} (for send_to_segment)"),
       accountId: z.string().optional().describe("LINE account ID (uses default if omitted)"),
     },
-    async ({ action, broadcastId, title, messageType, messageContent, targetType, targetTagId, scheduledAt, segmentConditions, accountId }) => {
+    async ({ action, broadcastId, title, messageType, messageContent, targetType, targetTagId, targetSegmentId, scheduledAt, accountId }) => {
       try {
         const client = getClient();
 
@@ -35,6 +35,7 @@ export function registerManageBroadcasts(server: McpServer): void {
           }
           const input: Record<string, unknown> = { title, messageType, messageContent, targetType: targetType ?? "all" };
           if (targetTagId) input.targetTagId = targetTagId;
+          if (targetSegmentId) input.targetSegmentId = targetSegmentId;
           if (scheduledAt) input.scheduledAt = scheduledAt;
           if (accountId) input.lineAccountId = accountId;
           const broadcast = await client.broadcasts.create(input as never);
@@ -55,6 +56,7 @@ export function registerManageBroadcasts(server: McpServer): void {
           if (messageContent !== undefined) input.messageContent = messageContent;
           if (targetType !== undefined) input.targetType = targetType;
           if (targetTagId !== undefined) input.targetTagId = targetTagId;
+          if (targetSegmentId !== undefined) input.targetSegmentId = targetSegmentId;
           if (scheduledAt !== undefined) input.scheduledAt = scheduledAt;
           const broadcast = await client.broadcasts.update(broadcastId, input);
           return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, broadcast }, null, 2) }] };
@@ -62,13 +64,6 @@ export function registerManageBroadcasts(server: McpServer): void {
 
         if (action === "send") {
           const broadcast = await client.broadcasts.send(broadcastId);
-          return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, broadcast }, null, 2) }] };
-        }
-
-        if (action === "send_to_segment") {
-          if (!segmentConditions) throw new Error("segmentConditions (JSON string) is required for send_to_segment");
-          const conditions = JSON.parse(segmentConditions);
-          const broadcast = await client.broadcasts.sendToSegment(broadcastId, conditions);
           return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, broadcast }, null, 2) }] };
         }
 

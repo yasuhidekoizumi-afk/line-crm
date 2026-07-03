@@ -38,8 +38,6 @@ export type {
   Broadcast,
   CreateBroadcastInput,
   UpdateBroadcastInput,
-  SegmentRule,
-  SegmentCondition,
   StepDefinition,
   RichMenu,
   RichMenuBounds,

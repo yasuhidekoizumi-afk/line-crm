@@ -122,6 +122,6 @@ Claude が配信結果（到達・クリック・コンバージョン）を報�
 - API ベースURL: `https://oryzae-line-crm.oryzae.workers.dev`
 - 認証: `Authorization: Bearer <API_KEY>`（`.mcp.json` に設定済み、git追跡外）
 - ⚠️ **Worker本体（`apps/worker/`）は🔴絶対保護ゾーン。配信運用はAPI/MCP経由のみで、コードは触らない。**
-- 配信投入: `POST /api/broadcasts` → `POST /api/broadcasts/:id/send`（or `/send-segment`）
+- 配信投入: `POST /api/broadcasts` → `POST /api/broadcasts/:id/send`
 - 既存タグID: VIP / リピーター / 新規顧客 / 購入済み / 388pt_campaign / テスト送信
 - ポイント設定: 還元率1% / 1pt=1円 / 有効期限365日 / 新規登録ボーナス300pt

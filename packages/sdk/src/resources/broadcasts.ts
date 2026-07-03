@@ -1,5 +1,5 @@
 import type { HttpClient } from '../http.js'
-import type { ApiResponse, Broadcast, CreateBroadcastInput, UpdateBroadcastInput, SegmentCondition } from '../types.js'
+import type { ApiResponse, Broadcast, CreateBroadcastInput, UpdateBroadcastInput } from '../types.js'
 
 export class BroadcastsResource {
   constructor(
@@ -39,14 +39,6 @@ export class BroadcastsResource {
 
   async send(id: string): Promise<Broadcast> {
     const res = await this.http.post<ApiResponse<Broadcast>>(`/api/broadcasts/${id}/send`)
-    return res.data
-  }
-
-  async sendToSegment(id: string, conditions: SegmentCondition): Promise<Broadcast> {
-    const res = await this.http.post<ApiResponse<Broadcast>>(
-      `/api/broadcasts/${id}/send-segment`,
-      { conditions },
-    )
     return res.data
   }
 }

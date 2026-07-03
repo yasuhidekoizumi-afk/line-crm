@@ -120,13 +120,12 @@ messageType: `text`, `image`, `flex`
 |---------|------|------|----------------|
 | GET | `/api/broadcasts` | 配信一覧 | - |
 | GET | `/api/broadcasts/:id` | 配信詳細 | - |
-| POST | `/api/broadcasts` | 配信作成 | `{ title, messageType, messageContent, targetType, targetTagId?, scheduledAt? }` |
+| POST | `/api/broadcasts` | 配信作成 | `{ title, messageType, messageContent, targetType, targetTagId?, targetSegmentId?, scheduledAt? }` |
 | PUT | `/api/broadcasts/:id` | 配信更新 (draft/scheduled のみ) | 同上 (全フィールドオプション) |
 | DELETE | `/api/broadcasts/:id` | 配信削除 | - |
 | POST | `/api/broadcasts/:id/send` | 即時配信 | - |
-| POST | `/api/broadcasts/:id/send-segment` | セグメント配信 | `{ conditions: { operator, rules[] } }` |
 
-targetType: `all`, `tag`
+targetType: `all`, `tag`, `segment`
 status: `draft`, `scheduled`, `sending`, `sent`
 
 ### /api/rich-menus/*
