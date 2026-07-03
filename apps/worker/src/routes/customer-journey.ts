@@ -43,23 +43,43 @@ customerJourney.get('/api/customer-journey/funnel', async (c) => {
 
   const stats = await c.env.DB
     .prepare(
-      `WITH customer_line AS (
+      `WITH customer_line_by_shopify AS (
          SELECT
-           shopify_customer_id_jp,
-           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
+           shopify_customer_id_jp AS shopify_customer_id,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE shopify_customer_id_jp IS NOT NULL
          GROUP BY shopify_customer_id_jp
+       ), customer_line_by_customer AS (
+         SELECT
+           customer_id,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE customer_id IS NOT NULL
+         GROUP BY customer_id
+       ), customer_line_by_email AS (
+         SELECT
+           LOWER(email) AS email_norm,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE email IS NOT NULL AND email <> ''
+         GROUP BY LOWER(email)
        ), base AS (
          SELECT
            customer_journey.*,
            CASE
-             WHEN f.line_user_id LIKE 'U%' OR COALESCE(cl.has_customer_line, 0) = 1 THEN 1
+             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+               OR COALESCE(cls.has_customer_line, 0) = 1
+               OR COALESCE(clc.has_customer_line, 0) = 1
+               OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1
              ELSE 0
            END AS has_line_link
          FROM customer_journey
+         LEFT JOIN shopify_orders first_order ON first_order.shopify_order_id = customer_journey.first_order_id
          LEFT JOIN friends f ON f.id = customer_journey.friend_id
-         LEFT JOIN customer_line cl ON cl.shopify_customer_id_jp = customer_journey.shopify_customer_id
+         LEFT JOIN customer_line_by_shopify cls ON cls.shopify_customer_id = customer_journey.shopify_customer_id
+         LEFT JOIN customer_line_by_customer clc ON clc.customer_id = customer_journey.customer_id
+         LEFT JOIN customer_line_by_email cle ON cle.email_norm = LOWER(first_order.email)
          WHERE ${where}
        )
        SELECT
@@ -94,23 +114,43 @@ customerJourney.get('/api/customer-journey/cohort', async (c) => {
 
   const cohorts = await c.env.DB
     .prepare(
-      `WITH customer_line AS (
+      `WITH customer_line_by_shopify AS (
          SELECT
-           shopify_customer_id_jp,
-           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
+           shopify_customer_id_jp AS shopify_customer_id,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE shopify_customer_id_jp IS NOT NULL
          GROUP BY shopify_customer_id_jp
+       ), customer_line_by_customer AS (
+         SELECT
+           customer_id,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE customer_id IS NOT NULL
+         GROUP BY customer_id
+       ), customer_line_by_email AS (
+         SELECT
+           LOWER(email) AS email_norm,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE email IS NOT NULL AND email <> ''
+         GROUP BY LOWER(email)
        ), base AS (
          SELECT
            customer_journey.*,
            CASE
-             WHEN f.line_user_id LIKE 'U%' OR COALESCE(cl.has_customer_line, 0) = 1 THEN 1
+             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+               OR COALESCE(cls.has_customer_line, 0) = 1
+               OR COALESCE(clc.has_customer_line, 0) = 1
+               OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1
              ELSE 0
            END AS has_line_link
          FROM customer_journey
+         LEFT JOIN shopify_orders first_order ON first_order.shopify_order_id = customer_journey.first_order_id
          LEFT JOIN friends f ON f.id = customer_journey.friend_id
-         LEFT JOIN customer_line cl ON cl.shopify_customer_id_jp = customer_journey.shopify_customer_id
+         LEFT JOIN customer_line_by_shopify cls ON cls.shopify_customer_id = customer_journey.shopify_customer_id
+         LEFT JOIN customer_line_by_customer clc ON clc.customer_id = customer_journey.customer_id
+         LEFT JOIN customer_line_by_email cle ON cle.email_norm = LOWER(first_order.email)
          WHERE ${where}
        )
        SELECT
