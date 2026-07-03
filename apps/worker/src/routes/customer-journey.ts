@@ -46,21 +46,21 @@ customerJourney.get('/api/customer-journey/funnel', async (c) => {
       `WITH customer_line_by_shopify AS (
          SELECT
            shopify_customer_id_jp AS shopify_customer_id,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE shopify_customer_id_jp IS NOT NULL
          GROUP BY shopify_customer_id_jp
        ), customer_line_by_customer AS (
          SELECT
            customer_id,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE customer_id IS NOT NULL
          GROUP BY customer_id
        ), customer_line_by_email AS (
          SELECT
            LOWER(email) AS email_norm,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE email IS NOT NULL AND email <> ''
          GROUP BY LOWER(email)
@@ -68,7 +68,7 @@ customerJourney.get('/api/customer-journey/funnel', async (c) => {
          SELECT
            customer_journey.*,
            CASE
-             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+             WHEN (f.line_user_id LIKE 'U%')
                OR COALESCE(cls.has_customer_line, 0) = 1
                OR COALESCE(clc.has_customer_line, 0) = 1
                OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1
@@ -126,26 +126,26 @@ customerJourney.get('/api/customer-journey/line-overview', async (c) => {
       `WITH customer_totals AS (
          SELECT
            COUNT(*) AS total_customers,
-           SUM(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS total_line_customers
+           SUM(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS total_line_customers
          FROM customers
        ), customer_line_by_shopify AS (
          SELECT
            shopify_customer_id_jp AS shopify_customer_id,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE shopify_customer_id_jp IS NOT NULL
          GROUP BY shopify_customer_id_jp
        ), customer_line_by_customer AS (
          SELECT
            customer_id,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE customer_id IS NOT NULL
          GROUP BY customer_id
        ), customer_line_by_email AS (
          SELECT
            LOWER(email) AS email_norm,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE email IS NOT NULL AND email <> ''
          GROUP BY LOWER(email)
@@ -163,7 +163,7 @@ customerJourney.get('/api/customer-journey/line-overview', async (c) => {
          SELECT
            p.*,
            CASE
-             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+             WHEN (f.line_user_id LIKE 'U%')
                OR COALESCE(cls.has_customer_line, 0) = 1
                OR COALESCE(clc.has_customer_line, 0) = 1
                OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1
@@ -188,7 +188,7 @@ customerJourney.get('/api/customer-journey/line-overview', async (c) => {
          SELECT
            fb.*,
            CASE
-             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+             WHEN (f.line_user_id LIKE 'U%')
                OR COALESCE(cls.has_customer_line, 0) = 1
                OR COALESCE(clc.has_customer_line, 0) = 1
                OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1
@@ -236,21 +236,21 @@ customerJourney.get('/api/customer-journey/cohort', async (c) => {
       `WITH customer_line_by_shopify AS (
          SELECT
            shopify_customer_id_jp AS shopify_customer_id,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE shopify_customer_id_jp IS NOT NULL
          GROUP BY shopify_customer_id_jp
        ), customer_line_by_customer AS (
          SELECT
            customer_id,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE customer_id IS NOT NULL
          GROUP BY customer_id
        ), customer_line_by_email AS (
          SELECT
            LOWER(email) AS email_norm,
-           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
          FROM customers
          WHERE email IS NOT NULL AND email <> ''
          GROUP BY LOWER(email)
@@ -258,7 +258,7 @@ customerJourney.get('/api/customer-journey/cohort', async (c) => {
          SELECT
            customer_journey.*,
            CASE
-             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+             WHEN (f.line_user_id LIKE 'U%')
                OR COALESCE(cls.has_customer_line, 0) = 1
                OR COALESCE(clc.has_customer_line, 0) = 1
                OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1

@@ -97,7 +97,7 @@ async function resolveLinkedIds(
        UNION ALL
        SELECT 'friend' AS kind, f.id AS id FROM customers c
          JOIN friends f ON f.line_user_id = c.line_user_id
-         WHERE c.line_user_id IS NOT NULL
+         WHERE c.line_user_id LIKE 'U%'
            AND ((?1 IS NOT NULL AND (c.shopify_customer_id_jp = ?1 OR c.shopify_customer_id_us = ?1))
                 OR (?2 IS NOT NULL AND c.email = ?2))`,
     )

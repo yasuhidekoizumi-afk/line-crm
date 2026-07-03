@@ -19,7 +19,7 @@ const LINE_LINK_CTES = `
   customer_line_by_shopify AS (
     SELECT
       shopify_customer_id_jp AS shopify_customer_id,
-      MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_line
+      MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_line
     FROM customers
     WHERE shopify_customer_id_jp IS NOT NULL
     GROUP BY shopify_customer_id_jp
@@ -27,7 +27,7 @@ const LINE_LINK_CTES = `
   customer_line_by_customer AS (
     SELECT
       customer_id,
-      MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_line
+      MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_line
     FROM customers
     WHERE customer_id IS NOT NULL
     GROUP BY customer_id
@@ -35,15 +35,15 @@ const LINE_LINK_CTES = `
   customer_line_by_email AS (
     SELECT
       LOWER(email) AS email_norm,
-      MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_line
+      MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_line
     FROM customers
     WHERE email IS NOT NULL AND email <> ''
     GROUP BY LOWER(email)
   )`;
 
 const HAS_LINE_LINK_EXPR = `CASE
-  WHEN (ff.line_user_id IS NOT NULL AND ff.line_user_id <> '')
-    OR (fs.line_user_id IS NOT NULL AND fs.line_user_id <> '')
+  WHEN (ff.line_user_id LIKE 'U%')
+    OR (fs.line_user_id LIKE 'U%')
     OR COALESCE(cls.has_line, 0) = 1
     OR COALESCE(clc.has_line, 0) = 1
     OR COALESCE(cle.has_line, 0) = 1
@@ -131,7 +131,7 @@ export async function recomputeCustomerJourney(db: D1Database): Promise<Recomput
              f.shopify_order_id,
              f.total_price,
              CASE
-               WHEN (ff.line_user_id IS NOT NULL AND ff.line_user_id <> '')
+               WHEN (ff.line_user_id LIKE 'U%')
                  OR COALESCE(cls.has_line, 0) = 1
                  OR COALESCE(clc.has_line, 0) = 1
                  OR COALESCE(cle.has_line, 0) = 1 THEN 1
@@ -142,7 +142,7 @@ export async function recomputeCustomerJourney(db: D1Database): Promise<Recomput
              s.total_price,
              CAST(julianday(s.processed_at) - julianday(f.processed_at) AS INTEGER),
              CASE
-               WHEN (fs.line_user_id IS NOT NULL AND fs.line_user_id <> '')
+               WHEN (fs.line_user_id LIKE 'U%')
                  OR COALESCE(cls.has_line, 0) = 1
                  OR COALESCE(clc.has_line, 0) = 1
                  OR COALESCE(cle.has_line, 0) = 1 THEN 1
@@ -206,7 +206,7 @@ export async function recomputeCustomerJourney(db: D1Database): Promise<Recomput
            f.shopify_order_id,
            f.total_price,
            CASE
-             WHEN (ff.line_user_id IS NOT NULL AND ff.line_user_id <> '')
+             WHEN (ff.line_user_id LIKE 'U%')
                OR COALESCE(cls.has_line, 0) = 1
                OR COALESCE(clc.has_line, 0) = 1
                OR COALESCE(cle.has_line, 0) = 1 THEN 1
@@ -217,7 +217,7 @@ export async function recomputeCustomerJourney(db: D1Database): Promise<Recomput
            s.total_price,
            CAST(julianday(s.processed_at) - julianday(f.processed_at) AS INTEGER),
            CASE
-             WHEN (fs.line_user_id IS NOT NULL AND fs.line_user_id <> '')
+             WHEN (fs.line_user_id LIKE 'U%')
                OR COALESCE(cls.has_line, 0) = 1
                OR COALESCE(clc.has_line, 0) = 1
                OR COALESCE(cle.has_line, 0) = 1 THEN 1

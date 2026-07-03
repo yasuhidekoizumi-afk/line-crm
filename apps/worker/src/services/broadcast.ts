@@ -378,8 +378,7 @@ export async function processBroadcastSend(
           `SELECT id, line_user_id FROM friends
            WHERE id IN (${friendIds.map(() => '?').join(',')})
              AND is_following = 1
-             AND line_user_id IS NOT NULL
-             AND line_user_id != ''
+             AND line_user_id LIKE 'U%'
              ${broadcast.line_account_id ? 'AND line_account_id = ?' : ''}`,
         )
         .bind(...friendIds, ...(broadcast.line_account_id ? [broadcast.line_account_id] : []))

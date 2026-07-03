@@ -79,7 +79,7 @@ customerRoutes.get('/', async (c) => {
 customerRoutes.get('/shopify-tags', async (c) => {
   try {
     const rows = await c.env.DB
-      .prepare("SELECT DISTINCT tags FROM customers WHERE tags IS NOT NULL AND tags != '' AND line_user_id IS NOT NULL")
+      .prepare("SELECT DISTINCT tags FROM customers WHERE tags IS NOT NULL AND tags != '' AND line_user_id LIKE 'U%'")
       .all<{ tags: string }>();
     const set = new Set<string>();
     for (const r of rows.results ?? []) {

@@ -243,7 +243,7 @@ export async function getCustomers(
   const bindings: unknown[] = [];
 
   if (scope === 'line') {
-    conditions.push('line_user_id IS NOT NULL');
+    conditions.push("line_user_id LIKE 'U%'");
   } else if (scope === 'sendable') {
     const accountCondition = opts?.line_account_id ? 'AND f.line_account_id = ?' : '';
     conditions.push(`(
@@ -470,7 +470,7 @@ export async function countCustomers(
   const bindings: unknown[] = [];
 
   if (scope === 'line') {
-    conditions.push('line_user_id IS NOT NULL');
+    conditions.push("line_user_id LIKE 'U%'");
   } else if (scope === 'sendable') {
     const accountCondition = opts?.line_account_id ? 'AND f.line_account_id = ?' : '';
     conditions.push(`(

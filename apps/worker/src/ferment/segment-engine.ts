@@ -300,7 +300,7 @@ function rulesGroupToSql(group: SegmentGroupCondition): QueryPart {
    const query = `
      SELECT c.customer_id
      FROM customers c
-     WHERE c.line_user_id IS NOT NULL AND (${whereSql})
+     WHERE c.line_user_id LIKE 'U%' AND (${whereSql})
      ORDER BY c.created_at DESC
      LIMIT 10000
    `;
@@ -334,7 +334,7 @@ export async function computeSegment(segmentId: string, db: D1Database): Promise
   // ルールが空の場合はLINE登録者（line_user_id あり）全員を対象（最大10000件に制限: Workersメモリ対策）
   if (!rules.conditions || rules.conditions.length === 0) {
     const result = await db
-      .prepare('SELECT customer_id FROM customers WHERE line_user_id IS NOT NULL ORDER BY created_at DESC LIMIT 10000')
+      .prepare("SELECT customer_id FROM customers WHERE line_user_id LIKE 'U%' ORDER BY created_at DESC LIMIT 10000")
       .all<{ customer_id: string }>();
     const ids = result.results.map((r) => r.customer_id);
     await replaceSegmentMembers(db, segmentId, ids);

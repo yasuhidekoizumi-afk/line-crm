@@ -2374,7 +2374,7 @@ loyalty.post('/api/loyalty/admin/test-link-coupon', async (c) => {
     let resolvedFrom = body.lineUserId ? 'param' : null;
     if (!targetLineUserId) {
       const row = await c.env.DB
-        .prepare('SELECT f.line_user_id AS uid FROM loyalty_points lp JOIN friends f ON f.id = lp.friend_id WHERE lp.shopify_customer_id = ? AND f.line_user_id IS NOT NULL LIMIT 1')
+        .prepare("SELECT f.line_user_id AS uid FROM loyalty_points lp JOIN friends f ON f.id = lp.friend_id WHERE lp.shopify_customer_id = ? AND f.line_user_id LIKE 'U%' LIMIT 1")
         .bind(shopifyCustomerId)
         .first<{ uid: string }>();
       if (row?.uid) { targetLineUserId = row.uid; resolvedFrom = 'shopify_customer_id'; }
