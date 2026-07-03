@@ -1,0 +1,45 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: pnpm --filter @line-crm/shared --filter @line-crm/line-sdk --filter @line-crm/db build
+
+      - name: DB typecheck
+        run: pnpm --filter @line-crm/db typecheck
+
+      - name: Worker build
+        run: pnpm --filter worker build
+        env:
+          VITE_LIFF_ID: ${{ vars.VITE_LIFF_ID || 'dummy-liff-id' }}
+          VITE_BOT_BASIC_ID: ${{ vars.VITE_BOT_BASIC_ID || '@dummy' }}
+          VITE_CALENDAR_CONNECTION_ID: ${{ vars.VITE_CALENDAR_CONNECTION_ID || 'dummy-calendar-connection' }}
+
+      - name: Web build
+        run: pnpm --filter web build
+        env:
+          NEXT_PUBLIC_API_URL: 'https://oryzae-line-crm.oryzae.workers.dev'
+          NEXT_PUBLIC_LIFF_ID: ${{ vars.NEXT_PUBLIC_LIFF_ID || 'dummy-liff-id' }}
+          GITHUB_PAGES: 'true'
+          CUSTOM_DOMAIN: 'true'
+          NODE_OPTIONS: '--max-old-space-size=4096'
