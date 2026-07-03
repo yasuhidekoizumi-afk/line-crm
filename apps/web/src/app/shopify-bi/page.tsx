@@ -80,6 +80,35 @@ const MATURE_F2_BASELINE = {
   avgSecondOrderValue: 3477,
 }
 
+const TRAFFIC_SOURCE_META: Record<string, { label: string; emoji: string; color: string }> = {
+  email: { label: 'Email (Shopify Flow等)', emoji: '✉️', color: 'text-purple-700' },
+  gmail: { label: 'Gmail (referrer経由)', emoji: '📧', color: 'text-purple-600' },
+  line: { label: 'LINE (UTM)', emoji: '🟢', color: 'text-green-700' },
+  line_organic: { label: 'LINEアプリ内ブラウザ', emoji: '🟢', color: 'text-green-600' },
+  tiktok: { label: 'TikTok広告 (UTM)', emoji: '🎵', color: 'text-pink-700' },
+  tiktok_shop: { label: 'TikTok Shop', emoji: '🎵', color: 'text-pink-700' },
+  meta: { label: 'Meta広告 (IG/FB)', emoji: '📘', color: 'text-blue-700' },
+  meta_organic: { label: 'Meta オーガニック', emoji: '📘', color: 'text-blue-600' },
+  google: { label: 'Google広告', emoji: '🔍', color: 'text-red-700' },
+  google_organic: { label: 'Google検索 (オーガニック)', emoji: '🔎', color: 'text-red-600' },
+  search_organic: { label: 'Yahoo/Bing検索', emoji: '🔎', color: 'text-red-500' },
+  subscription: { label: '定期便（継続）', emoji: '🔄', color: 'text-cyan-700' },
+  shop_pay: { label: 'Shop Pay', emoji: '💳', color: 'text-indigo-600' },
+  yotpo: { label: 'Yotpo (レビュー)', emoji: '⭐', color: 'text-yellow-700' },
+  offline: { label: 'オフライン (チラシ等)', emoji: '📄', color: 'text-amber-700' },
+  direct_self: { label: '直接 (oryzae.shop)', emoji: '🔗', color: 'text-gray-700' },
+  direct: { label: '直接 (ブックマーク等)', emoji: '🔗', color: 'text-gray-600' },
+  other_utm: { label: 'その他UTM', emoji: '🏷️', color: 'text-gray-700' },
+  unknown: { label: '不明', emoji: '❓', color: 'text-orange-700' },
+}
+
+const MATRIX_QUADRANTS = [
+  { key: '1-1', line: 1, email: 1, label: 'LINE有 × メール有', color: 'bg-purple-50 border-purple-300' },
+  { key: '1-0', line: 1, email: 0, label: 'LINE有 × メール無', color: 'bg-green-50 border-green-300' },
+  { key: '0-1', line: 0, email: 1, label: 'LINE無 × メール有', color: 'bg-blue-50 border-blue-300' },
+  { key: '0-0', line: 0, email: 0, label: 'LINE無 × メール無', color: 'bg-gray-50 border-gray-300' },
+] as const
+
 const PERIOD_OPTIONS = [
   { value: '7d',   label: '過去7日' },
   { value: '30d',  label: '過去30日' },
@@ -131,6 +160,17 @@ export default function ShopifyBiTopPage() {
   const [scenarioNoLineLtvInput, setScenarioNoLineLtvInput] = useState<number | null>(null)
   const [scenarioOpportunityInput, setScenarioOpportunityInput] = useState<number | null>(null)
   const [scenarioEffectFactor, setScenarioEffectFactor] = useState(50)
+
+  // ── その他BIセクションの操作UI（フロントのみ） ──
+  const [trafficSort, setTrafficSort] = useState<'revenue' | 'orders' | 'aov' | 'newRate' | 'lineRate'>('revenue')
+  const [trafficMinRevenue, setTrafficMinRevenue] = useState(0)
+  const [trafficRevenueShiftPct, setTrafficRevenueShiftPct] = useState(10)
+  const [matrixFromKey, setMatrixFromKey] = useState('0-0')
+  const [matrixToKey, setMatrixToKey] = useState('1-1')
+  const [matrixMoveCustomers, setMatrixMoveCustomers] = useState(0)
+  const [cohortTargetRate, setCohortTargetRate] = useState(30)
+  const [cohortMinCustomers, setCohortMinCustomers] = useState(100)
+  const [cohortVisibleMonths, setCohortVisibleMonths] = useState(12)
 
   const calcRange = useCallback(() => {
     const now = new Date()
@@ -337,6 +377,64 @@ export default function ShopifyBiTopPage() {
     setScenarioNoLineLtvInput(null)
     setScenarioOpportunityInput(null)
     setScenarioEffectFactor(50)
+  }
+
+  const trafficRows = trafficSource
+    .map((s) => {
+      const newRate = s.orders > 0 ? (s.new_customer_orders / s.orders) * 100 : 0
+      const lineRate = s.orders > 0 ? (s.line_linked_orders / s.orders) * 100 : 0
+      return { ...s, newRate, lineRate }
+    })
+    .filter((s) => s.revenue >= trafficMinRevenue)
+    .sort((a, b) => {
+      if (trafficSort === 'orders') return b.orders - a.orders
+      if (trafficSort === 'aov') return b.aov - a.aov
+      if (trafficSort === 'newRate') return b.newRate - a.newRate
+      if (trafficSort === 'lineRate') return b.lineRate - a.lineRate
+      return b.revenue - a.revenue
+    })
+  const trafficTop = trafficRows[0]
+  const trafficShiftFrom = trafficRows.find((s) => s.source !== trafficTop?.source) ?? null
+  const trafficShiftAmount = trafficShiftFrom ? trafficShiftFrom.revenue * (trafficRevenueShiftPct / 100) : 0
+  const trafficShiftOrders = trafficShiftFrom && trafficShiftFrom.aov > 0 ? trafficShiftAmount / trafficShiftFrom.aov : 0
+  const trafficShiftTargetOrders = trafficTop && trafficTop.aov > 0 ? trafficShiftAmount / trafficTop.aov : 0
+  const trafficBestLineRate = trafficRows.reduce((best, row) => Math.max(best, row.lineRate), 0)
+  const resetTrafficControls = () => {
+    setTrafficSort('revenue')
+    setTrafficMinRevenue(0)
+    setTrafficRevenueShiftPct(10)
+  }
+
+  const matrixRows = MATRIX_QUADRANTS.map((q) => ({
+    ...q,
+    row: channelMatrix.find((r) => r.line_linked === q.line && r.email_subscribed === q.email) ?? null,
+  }))
+  const matrixFrom = matrixRows.find((q) => q.key === matrixFromKey) ?? matrixRows[3]
+  const matrixTo = matrixRows.find((q) => q.key === matrixToKey) ?? matrixRows[0]
+  const matrixEffectiveMove = Math.max(0, Math.min(matrixMoveCustomers, matrixFrom?.row?.customers ?? 0))
+  const matrixLtvDelta = Math.max(0, (matrixTo?.row?.ltv ?? 0) - (matrixFrom?.row?.ltv ?? 0))
+  const matrixOpportunity = matrixEffectiveMove * matrixLtvDelta
+  const resetMatrixScenario = () => {
+    setMatrixFromKey('0-0')
+    setMatrixToKey('1-1')
+    setMatrixMoveCustomers(0)
+  }
+
+  const cohortRows = cohort.slice(-cohortVisibleMonths)
+  const cohortTargetRows = cohortRows.map((c) => {
+    const gapPct = Math.max(0, cohortTargetRate - c.line_link_rate_pct)
+    const additionalLinked = Math.round(c.first_order_customers * (gapPct / 100))
+    return { ...c, gapPct, additionalLinked }
+  })
+  const cohortFilteredTargetRows = cohortTargetRows.filter((c) => c.first_order_customers >= cohortMinCustomers)
+  const cohortAdditionalLinked = cohortFilteredTargetRows.reduce((sum, c) => sum + c.additionalLinked, 0)
+  const cohortWorst = cohortFilteredTargetRows
+    .filter((c) => c.gapPct > 0)
+    .sort((a, b) => (b.additionalLinked - a.additionalLinked) || (b.gapPct - a.gapPct))[0]
+  const resetCohortControls = () => {
+    setCohortTargetRate(30)
+    setCohortMinCustomers(100)
+    setCohortVisibleMonths(12)
   }
 
   const periodLabelObj = PERIOD_OPTIONS.find(p => p.value === period)
@@ -844,9 +942,27 @@ export default function ShopifyBiTopPage() {
 
             {trafficSource.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
-                  <h2 className="font-bold text-gray-900">流入チャネル別 売上（{periodLabel}）</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">Shopify注文の landing_site UTM パラメータから判定</p>
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <h2 className="font-bold text-gray-900">流入チャネル別 売上（{periodLabel}）</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Shopify注文の landing_site UTM パラメータから判定。並び替え・下限・予算寄せを動かして見る。</p>
+                  </div>
+                  <button onClick={resetTrafficControls} className="px-2 py-1 rounded border border-gray-300 bg-white text-xs text-gray-700 hover:bg-gray-50">初期表示に戻す</button>
+                </div>
+                <div className="border-b border-gray-200 bg-slate-50 p-4 sm:p-5">
+                  <div className="grid md:grid-cols-4 gap-3">
+                    <label className="block"><div className="text-xs font-bold text-gray-700">並び替え</div><select value={trafficSort} onChange={(e) => setTrafficSort(e.target.value as typeof trafficSort)} className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm bg-white"><option value="revenue">売上順</option><option value="orders">注文数順</option><option value="aov">客単価順</option><option value="newRate">新規率順</option><option value="lineRate">LINE連携率順</option></select></label>
+                    <label className="block"><div className="text-xs font-bold text-gray-700">表示する最低売上</div><div className="mt-1 flex items-center gap-1"><span className="text-gray-400">¥</span><input type="number" min="0" step="10000" value={trafficMinRevenue} onChange={(e) => setTrafficMinRevenue(Math.max(0, Number(e.target.value) || 0))} className="w-full rounded border border-gray-300 px-2 py-1.5 text-right text-sm tabular-nums" /></div></label>
+                    <label className="block"><div className="text-xs font-bold text-gray-700">下位→上位へ寄せる売上</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="5" value={trafficRevenueShiftPct} onChange={(e) => setTrafficRevenueShiftPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1.5 text-right text-sm tabular-nums" /><span className="text-xs text-gray-500">%</span></div></label>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-xs text-gray-500">最高LINE連携率</div><div className="mt-1 text-xl font-bold text-green-700 tabular-nums">{oneDecimal(trafficBestLineRate)}%</div><div className="text-xs text-gray-500 mt-0.5">表示中チャネル内</div></div>
+                  </div>
+                  {trafficTop && trafficShiftFrom && (
+                    <div className="mt-3 rounded-lg bg-white border border-gray-200 p-3 text-sm text-gray-700">
+                      <span className="font-bold text-gray-900">仮説：</span>
+                      {TRAFFIC_SOURCE_META[trafficShiftFrom.source]?.label ?? trafficShiftFrom.source} の売上 {yen(trafficShiftAmount)}（約{oneDecimal(trafficShiftOrders)}件）を、上位チャネル {TRAFFIC_SOURCE_META[trafficTop.source]?.label ?? trafficTop.source} に寄せられるなら、同じ売上でも必要注文は約{oneDecimal(trafficShiftTargetOrders)}件。
+                      AOV差を見るための簡易感度です。
+                    </div>
+                  )}
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -862,31 +978,8 @@ export default function ShopifyBiTopPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {trafficSource.map((s) => {
-                        const sourceMeta: Record<string, { label: string; emoji: string; color: string }> = {
-                          email: { label: 'Email (Shopify Flow等)', emoji: '✉️', color: 'text-purple-700' },
-                          gmail: { label: 'Gmail (referrer経由)', emoji: '📧', color: 'text-purple-600' },
-                          line: { label: 'LINE (UTM)', emoji: '🟢', color: 'text-green-700' },
-                          line_organic: { label: 'LINEアプリ内ブラウザ', emoji: '🟢', color: 'text-green-600' },
-                          tiktok: { label: 'TikTok広告 (UTM)', emoji: '🎵', color: 'text-pink-700' },
-                          tiktok_shop: { label: 'TikTok Shop', emoji: '🎵', color: 'text-pink-700' },
-                          meta: { label: 'Meta広告 (IG/FB)', emoji: '📘', color: 'text-blue-700' },
-                          meta_organic: { label: 'Meta オーガニック', emoji: '📘', color: 'text-blue-600' },
-                          google: { label: 'Google広告', emoji: '🔍', color: 'text-red-700' },
-                          google_organic: { label: 'Google検索 (オーガニック)', emoji: '🔎', color: 'text-red-600' },
-                          search_organic: { label: 'Yahoo/Bing検索', emoji: '🔎', color: 'text-red-500' },
-                          subscription: { label: '定期便（継続）', emoji: '🔄', color: 'text-cyan-700' },
-                          shop_pay: { label: 'Shop Pay', emoji: '💳', color: 'text-indigo-600' },
-                          yotpo: { label: 'Yotpo (レビュー)', emoji: '⭐', color: 'text-yellow-700' },
-                          offline: { label: 'オフライン (チラシ等)', emoji: '📄', color: 'text-amber-700' },
-                          direct_self: { label: '直接 (oryzae.shop)', emoji: '🔗', color: 'text-gray-700' },
-                          direct: { label: '直接 (ブックマーク等)', emoji: '🔗', color: 'text-gray-600' },
-                          other_utm: { label: 'その他UTM', emoji: '🏷️', color: 'text-gray-700' },
-                          unknown: { label: '不明', emoji: '❓', color: 'text-orange-700' },
-                        }
-                        const meta = sourceMeta[s.source] ?? { label: s.source, emoji: '', color: 'text-gray-700' }
-                        const newRate = s.orders > 0 ? (s.new_customer_orders / s.orders) * 100 : 0
-                        const lineRate = s.orders > 0 ? (s.line_linked_orders / s.orders) * 100 : 0
+                      {trafficRows.map((s) => {
+                        const meta = TRAFFIC_SOURCE_META[s.source] ?? { label: s.source, emoji: '', color: 'text-gray-700' }
                         return (
                           <tr key={s.source}>
                             <td className={`px-3 py-2 font-medium ${meta.color}`}>{meta.emoji} {meta.label}</td>
@@ -894,40 +987,44 @@ export default function ShopifyBiTopPage() {
                             <td className="px-3 py-2 text-right font-medium tabular-nums">{yen(s.revenue)}</td>
                             <td className="px-3 py-2 text-right text-gray-700 tabular-nums">{yen(s.aov)}</td>
                             <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden sm:table-cell">{yen(s.revenue_per_customer)}</td>
-                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{newRate.toFixed(1)}%</td>
-                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{lineRate.toFixed(1)}%</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{s.newRate.toFixed(1)}%</td>
+                            <td className="px-3 py-2 text-right text-gray-700 tabular-nums hidden md:table-cell">{s.lineRate.toFixed(1)}%</td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </table>
                 </div>
-                <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">💡 「不明」は landing_site が空の注文。「直接」は landing_site あるが UTM 無し。</div>
+                <div className="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-100">💡 「不明」は landing_site が空の注文。「直接」は landing_site あるが UTM 無し。表示中 {trafficRows.length}/{trafficSource.length} チャネル。</div>
               </div>
             )}
 
             {channelMatrix.length > 0 && (
-              <details className="bg-white border border-gray-200 rounded-lg">
+              <details className="bg-white border border-gray-200 rounded-lg" open>
                 <summary className="px-4 sm:px-5 py-3 cursor-pointer font-bold text-gray-900 hover:bg-gray-50">📋 LINE連携 × メール購読登録 4象限（{periodLabel}）</summary>
-                <div className="p-4 sm:p-5 border-t border-gray-100">
-                  <p className="text-xs text-gray-500 mb-3">customers.subscribed_email = 1 の登録ベース。</p>
+                <div className="p-4 sm:p-5 border-t border-gray-100 space-y-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <p className="text-xs text-gray-500">customers.subscribed_email = 1 の登録ベース。象限間で何人動かすとLTV機会がいくらになるかを見る。</p>
+                    <button onClick={resetMatrixScenario} className="px-2 py-1 rounded border border-gray-300 bg-white text-xs text-gray-700 hover:bg-gray-50">実績に戻す</button>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { line: 1, email: 1, label: 'LINE有 × メール有', color: 'bg-purple-50 border-purple-300' },
-                      { line: 1, email: 0, label: 'LINE有 × メール無', color: 'bg-green-50 border-green-300' },
-                      { line: 0, email: 1, label: 'LINE無 × メール有', color: 'bg-blue-50 border-blue-300' },
-                      { line: 0, email: 0, label: 'LINE無 × メール無', color: 'bg-gray-50 border-gray-300' },
-                    ].map((q) => {
-                      const row = channelMatrix.find((r) => r.line_linked === q.line && r.email_subscribed === q.email)
-                      return (
-                        <div key={q.label} className={`border-2 rounded-lg p-3 ${q.color}`}>
-                          <div className="text-xs font-bold text-gray-700">{q.label}</div>
-                          {row ? (
-                            <><div className="text-lg font-bold text-gray-900 mt-1 tabular-nums">LTV {yen(row.ltv)}</div><div className="text-xs text-gray-600 mt-1 tabular-nums">{num(row.customers)}人 / {num(row.orders)}件</div></>
-                          ) : <div className="text-xs text-gray-400 mt-2">該当なし</div>}
-                        </div>
-                      )
-                    })}
+                    {matrixRows.map((q) => (
+                      <div key={q.key} className={`border-2 rounded-lg p-3 ${q.color}`}>
+                        <div className="text-xs font-bold text-gray-700">{q.label}</div>
+                        {q.row ? (
+                          <><div className="text-lg font-bold text-gray-900 mt-1 tabular-nums">LTV {yen(q.row.ltv)}</div><div className="text-xs text-gray-600 mt-1 tabular-nums">{num(q.row.customers)}人 / {num(q.row.orders)}件 / 売上 {yen(q.row.revenue)}</div></>
+                        ) : <div className="text-xs text-gray-400 mt-2">該当なし</div>}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-lg bg-slate-50 border border-gray-200 p-3">
+                    <div className="grid md:grid-cols-4 gap-3 items-end">
+                      <label className="block"><div className="text-xs font-bold text-gray-700">移行元</div><select value={matrixFromKey} onChange={(e) => setMatrixFromKey(e.target.value)} className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm bg-white">{matrixRows.map((q) => <option key={q.key} value={q.key}>{q.label}</option>)}</select></label>
+                      <label className="block"><div className="text-xs font-bold text-gray-700">移行先</div><select value={matrixToKey} onChange={(e) => setMatrixToKey(e.target.value)} className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm bg-white">{matrixRows.map((q) => <option key={q.key} value={q.key}>{q.label}</option>)}</select></label>
+                      <label className="block"><div className="text-xs font-bold text-gray-700">動かす人数</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" max={matrixFrom?.row?.customers ?? 0} value={matrixMoveCustomers} onChange={(e) => setMatrixMoveCustomers(Math.max(0, Math.min(matrixFrom?.row?.customers ?? 0, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1.5 text-right text-sm tabular-nums" /><span className="text-xs text-gray-500">人</span></div></label>
+                      <div className="rounded-lg bg-white border border-gray-200 p-3"><div className="text-xs text-gray-500">LTV機会額</div><div className="mt-1 text-xl font-bold text-amber-700 tabular-nums">{yen(matrixOpportunity)}</div><div className="text-xs text-gray-500 mt-0.5">差分 {yen(matrixLtvDelta)} × {num(matrixEffectiveMove)}人</div></div>
+                    </div>
+                    <input type="range" min="0" max={matrixFrom?.row?.customers ?? 0} step="1" value={matrixEffectiveMove} onChange={(e) => setMatrixMoveCustomers(Number(e.target.value))} className="mt-3 w-full" />
                   </div>
                 </div>
               </details>
@@ -935,12 +1032,29 @@ export default function ShopifyBiTopPage() {
 
             {cohort.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
                   <div>
                     <h2 className="font-bold text-gray-900">月別 LINE連携率（コホート）</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">初回購入月別。LINE連携率の推移と異常検知。</p>
+                    <p className="text-xs text-gray-500 mt-0.5">初回購入月別。目標連携率を設定すると、月ごとの上積み余地を試算。</p>
                   </div>
-                  <Link href="/shopify-bi/cohort" className="text-sm text-indigo-600 hover:text-indigo-800">詳細 →</Link>
+                  <div className="flex items-center gap-2">
+                    <button onClick={resetCohortControls} className="px-2 py-1 rounded border border-gray-300 bg-white text-xs text-gray-700 hover:bg-gray-50">初期表示に戻す</button>
+                    <Link href="/shopify-bi/cohort" className="text-sm text-indigo-600 hover:text-indigo-800">詳細 →</Link>
+                  </div>
+                </div>
+                <div className="border-b border-gray-200 bg-slate-50 p-4 sm:p-5">
+                  <div className="grid md:grid-cols-4 gap-3">
+                    <label className="block"><div className="text-xs font-bold text-gray-700">目標LINE連携率</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="1" value={cohortTargetRate} onChange={(e) => setCohortTargetRate(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1.5 text-right text-sm tabular-nums" /><span className="text-xs text-gray-500">%</span></div><input type="range" min="0" max="100" step="1" value={cohortTargetRate} onChange={(e) => setCohortTargetRate(Number(e.target.value))} className="mt-2 w-full" /></label>
+                    <label className="block"><div className="text-xs font-bold text-gray-700">対象とする最低新規数</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" step="10" value={cohortMinCustomers} onChange={(e) => setCohortMinCustomers(Math.max(0, Number(e.target.value) || 0))} className="w-full rounded border border-gray-300 px-2 py-1.5 text-right text-sm tabular-nums" /><span className="text-xs text-gray-500">人</span></div></label>
+                    <label className="block"><div className="text-xs font-bold text-gray-700">表示月数</div><select value={cohortVisibleMonths} onChange={(e) => setCohortVisibleMonths(Number(e.target.value))} className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm bg-white"><option value={6}>直近6ヶ月</option><option value={12}>直近12ヶ月</option><option value={24}>直近24ヶ月</option><option value={999}>全期間</option></select></label>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3"><div className="text-xs text-gray-500">目標到達で追加連携見込み</div><div className="mt-1 text-xl font-bold text-green-700 tabular-nums">+{num(cohortAdditionalLinked)}人</div><div className="text-xs text-gray-500 mt-0.5">対象 {cohortFilteredTargetRows.length}ヶ月合計</div></div>
+                  </div>
+                  {cohortWorst && (
+                    <div className="mt-3 rounded-lg bg-white border border-gray-200 p-3 text-sm text-gray-700">
+                      <span className="font-bold text-gray-900">最優先：</span>
+                      {cohortWorst.cohort_month}（連携率 {cohortWorst.line_link_rate_pct}% / 新規 {num(cohortWorst.first_order_customers)}人）。目標まで {oneDecimal(cohortWorst.gapPct)}pt、上積み余地 約{num(cohortWorst.additionalLinked)}人。
+                    </div>
+                  )}
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -950,25 +1064,31 @@ export default function ShopifyBiTopPage() {
                         <th className="px-3 py-2 text-right">新規顧客</th>
                         <th className="px-3 py-2 text-right">LINE連携率</th>
                         <th className="px-3 py-2 hidden sm:table-cell">推移</th>
-                        <th className="px-3 py-2 text-right hidden md:table-cell">連携リピート率</th>
-                        <th className="px-3 py-2 text-right hidden md:table-cell">非連携リピート率</th>
+                        <th className="px-3 py-2 text-right hidden md:table-cell">目標差</th>
+                        <th className="px-3 py-2 text-right hidden md:table-cell">追加連携見込</th>
+                        <th className="px-3 py-2 text-right hidden lg:table-cell">連携リピート率</th>
+                        <th className="px-3 py-2 text-right hidden lg:table-cell">非連携リピート率</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {cohort.slice(-12).map((c) => {
+                      {cohortTargetRows.map((c) => {
                         const isAnomaly = c.first_order_customers >= 200 && c.line_link_rate_pct < 15
+                        const belowMin = c.first_order_customers < cohortMinCustomers
                         return (
-                          <tr key={c.cohort_month} className={isAnomaly ? 'bg-red-50' : ''}>
+                          <tr key={c.cohort_month} className={isAnomaly ? 'bg-red-50' : belowMin ? 'opacity-50' : ''}>
                             <td className="px-3 py-2 font-medium text-gray-900">{c.cohort_month} {isAnomaly && '⚠️'}</td>
                             <td className="px-3 py-2 text-right text-gray-700">{num(c.first_order_customers)}</td>
                             <td className={`px-3 py-2 text-right font-medium ${c.line_link_rate_pct >= 40 ? 'text-green-700' : c.line_link_rate_pct >= 20 ? 'text-yellow-700' : 'text-red-700'}`}>{c.line_link_rate_pct}%</td>
                             <td className="px-3 py-2 hidden sm:table-cell">
-                              <div className="w-full bg-gray-200 rounded-full h-2 max-w-[200px]">
+                              <div className="w-full bg-gray-200 rounded-full h-2 max-w-[200px] relative">
                                 <div className={`h-2 rounded-full ${c.line_link_rate_pct >= 40 ? 'bg-green-500' : c.line_link_rate_pct >= 20 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${Math.min(100, c.line_link_rate_pct)}%` }} />
+                                <div className="absolute top-[-2px] h-3 w-0.5 bg-indigo-600" style={{ left: `${Math.min(100, cohortTargetRate)}%` }} title={`目標 ${cohortTargetRate}%`} />
                               </div>
                             </td>
-                            <td className="px-3 py-2 text-right text-gray-700 hidden md:table-cell">{c.line_repeat_rate_pct ?? '—'}%</td>
-                            <td className="px-3 py-2 text-right text-gray-700 hidden md:table-cell">{c.noline_repeat_rate_pct ?? '—'}%</td>
+                            <td className={`px-3 py-2 text-right hidden md:table-cell ${c.gapPct > 0 ? 'text-amber-700' : 'text-green-700'}`}>{c.gapPct > 0 ? `−${oneDecimal(c.gapPct)}pt` : '達成'}</td>
+                            <td className="px-3 py-2 text-right text-gray-700 hidden md:table-cell tabular-nums">{c.additionalLinked > 0 ? `+${num(c.additionalLinked)}人` : '—'}</td>
+                            <td className="px-3 py-2 text-right text-gray-700 hidden lg:table-cell">{c.line_repeat_rate_pct ?? '—'}%</td>
+                            <td className="px-3 py-2 text-right text-gray-700 hidden lg:table-cell">{c.noline_repeat_rate_pct ?? '—'}%</td>
                           </tr>
                         )
                       })}
