@@ -79,7 +79,6 @@ const MATURE_F2_BASELINE = {
   noLineF2RatePct: 18.2,
   avgSecondOrderValue: 3477,
 }
-const LINE_LINK_TARGETS = [30, 40, 50]
 
 const PERIOD_OPTIONS = [
   { value: '7d',   label: '過去7日' },
@@ -113,6 +112,14 @@ export default function ShopifyBiTopPage() {
   const [recomputing, setRecomputing] = useState(false)
   const [dataKey, setDataKey] = useState(0)
   const fetchingRef = useRef(false)
+
+  // ── 初回LINE連携率シミュレーター（フル可変） ──
+  const [simTargetRate, setSimTargetRate] = useState(30)
+  const [simLineF2, setSimLineF2] = useState(MATURE_F2_BASELINE.lineF2RatePct)
+  const [simNoLineF2, setSimNoLineF2] = useState(MATURE_F2_BASELINE.noLineF2RatePct)
+  const [simSecondValue, setSimSecondValue] = useState(MATURE_F2_BASELINE.avgSecondOrderValue)
+  const [simFirstBuyersInput, setSimFirstBuyersInput] = useState<number | null>(null)
+  const [simConservativeFactor, setSimConservativeFactor] = useState(50)
 
   const calcRange = useCallback(() => {
     const now = new Date()
@@ -266,29 +273,26 @@ export default function ShopifyBiTopPage() {
 
   const initialLineCustomers = lineOverview?.first_order_line_customers ?? (lineSeg?.first_order_customers ?? 0)
   const currentInitialLineRate = totalFirstCustomers > 0 ? (initialLineCustomers / totalFirstCustomers) * 100 : 0
-  const matureF2LiftPct = MATURE_F2_BASELINE.lineF2RatePct - MATURE_F2_BASELINE.noLineF2RatePct
-  const baselineExpectedF2 = totalFirstCustomers > 0
-    ? (initialLineCustomers * MATURE_F2_BASELINE.lineF2RatePct + (totalFirstCustomers - initialLineCustomers) * MATURE_F2_BASELINE.noLineF2RatePct) / 100
-    : 0
-  const simulatorRows = LINE_LINK_TARGETS.map((targetRate) => {
-    const targetLineCustomers = Math.round(totalFirstCustomers * targetRate / 100)
-    const additionalLinked = Math.max(0, targetLineCustomers - initialLineCustomers)
-    const expectedF2 = totalFirstCustomers > 0
-      ? (targetLineCustomers * MATURE_F2_BASELINE.lineF2RatePct + (totalFirstCustomers - targetLineCustomers) * MATURE_F2_BASELINE.noLineF2RatePct) / 100
-      : 0
-    const additionalF2Max = Math.max(0, expectedF2 - baselineExpectedF2)
-    const additionalF2Conservative = additionalF2Max * 0.5
-    return {
-      targetRate,
-      targetLineCustomers,
-      additionalLinked,
-      expectedF2,
-      additionalF2Max,
-      additionalF2Conservative,
-      additionalSalesMax: additionalF2Max * MATURE_F2_BASELINE.avgSecondOrderValue,
-      additionalSalesConservative: additionalF2Conservative * MATURE_F2_BASELINE.avgSecondOrderValue,
-    }
-  })
+  const simFirstBuyers = Math.max(0, Math.round(simFirstBuyersInput ?? totalFirstCustomers))
+  const simCurrentLineCustomers = Math.round(simFirstBuyers * currentInitialLineRate / 100)
+  const simCurrentNoLineCustomers = Math.max(0, simFirstBuyers - simCurrentLineCustomers)
+  const simTargetLineCustomers = Math.round(simFirstBuyers * simTargetRate / 100)
+  const simAdditionalLinked = Math.max(0, simTargetLineCustomers - simCurrentLineCustomers)
+  const simF2LiftPct = simLineF2 - simNoLineF2
+  const simBaselineExpectedF2 = (simCurrentLineCustomers * simLineF2 + simCurrentNoLineCustomers * simNoLineF2) / 100
+  const simTargetExpectedF2 = (simTargetLineCustomers * simLineF2 + Math.max(0, simFirstBuyers - simTargetLineCustomers) * simNoLineF2) / 100
+  const simAdditionalF2Max = Math.max(0, simTargetExpectedF2 - simBaselineExpectedF2)
+  const simAdditionalF2Adjusted = simAdditionalF2Max * (simConservativeFactor / 100)
+  const simAdditionalSalesMax = simAdditionalF2Max * simSecondValue
+  const simAdditionalSalesAdjusted = simAdditionalF2Adjusted * simSecondValue
+  const resetSimulator = () => {
+    setSimTargetRate(30)
+    setSimLineF2(MATURE_F2_BASELINE.lineF2RatePct)
+    setSimNoLineF2(MATURE_F2_BASELINE.noLineF2RatePct)
+    setSimSecondValue(MATURE_F2_BASELINE.avgSecondOrderValue)
+    setSimFirstBuyersInput(null)
+    setSimConservativeFactor(50)
+  }
 
   const periodLabelObj = PERIOD_OPTIONS.find(p => p.value === period)
   const periodLabel = period === 'custom' && range
@@ -505,70 +509,125 @@ export default function ShopifyBiTopPage() {
 
             {funnel.length > 0 && totalFirstCustomers > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
-                  <h2 className="font-bold text-gray-900">🎯 初回LINE連携率 改善シミュレーター</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    「初回購入時点でLINE連携している人の割合」を上げると、F2到達が将来どれだけ増えるかの試算。単発売上ではなく今後のCRM施策の母数づくりが本質。
-                  </p>
-                  <p className="text-[11px] text-amber-700 mt-1">
-                    ⚠️ F2率は成熟コホート実測値（連携あり {MATURE_F2_BASELINE.lineF2RatePct}% / なし {MATURE_F2_BASELINE.noLineF2RatePct}%、{MATURE_F2_BASELINE.cohortLabel}）を使用。ランダム実験ではないため「最大期待値」は交絡込みの上限。
-                  </p>
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-bold text-gray-900">🎯 初回LINE連携率 改善シミュレーター</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      目標連携率・F2率・単価・母数を自由に変更して、F2到達と2回目売上の感度を見る。単発売上ではなく今後のCRM施策の母数づくりが本質。
+                    </p>
+                    <p className="text-[11px] text-amber-700 mt-1">
+                      初期値: 成熟コホート実測（連携あり {MATURE_F2_BASELINE.lineF2RatePct}% / なし {MATURE_F2_BASELINE.noLineF2RatePct}%、{MATURE_F2_BASELINE.cohortLabel}）。ランダム実験ではないため、交絡調整で割り引いて見る。
+                    </p>
+                  </div>
+                  <button onClick={resetSimulator} className="shrink-0 px-2 py-1 rounded border border-gray-300 bg-white text-xs text-gray-700 hover:bg-gray-50">初期値に戻す</button>
                 </div>
+
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-gray-200">
-                  <FunnelStat label={`${periodLabel} 初回購入者`} value={num(totalFirstCustomers)} unit="人" tone="neutral" />
-                  <FunnelStat label="現状の初回LINE連携率" value={`${oneDecimal(currentInitialLineRate)}%`} sub={`${num(initialLineCustomers)}人`} tone="warn" />
-                  <FunnelStat label="連携での F2率差" value={`+${oneDecimal(matureF2LiftPct)}pt`} sub={`${MATURE_F2_BASELINE.lineF2RatePct}% vs ${MATURE_F2_BASELINE.noLineF2RatePct}%`} tone="good" />
-                  <FunnelStat label="2回目平均単価" value={yen(MATURE_F2_BASELINE.avgSecondOrderValue)} sub="加重平均（実測）" tone="neutral" />
+                  <FunnelStat label="初回購入者数" value={num(simFirstBuyers)} unit="人" sub={`${periodLabel}実績: ${num(totalFirstCustomers)}人`} tone="neutral" />
+                  <FunnelStat label="現状の初回LINE連携率" value={`${oneDecimal(currentInitialLineRate)}%`} sub={`${num(simCurrentLineCustomers)}人換算`} tone="warn" />
+                  <FunnelStat label="設定F2率差" value={`${simF2LiftPct >= 0 ? '+' : ''}${oneDecimal(simF2LiftPct)}pt`} sub={`連携あり ${oneDecimal(simLineF2)}% / なし ${oneDecimal(simNoLineF2)}%`} tone={simF2LiftPct >= 0 ? 'good' : 'warn'} />
+                  <FunnelStat label="2回目平均単価" value={yen(simSecondValue)} sub="手入力で変更可" tone="neutral" />
                 </div>
-                <div className="overflow-x-auto border-t border-gray-200">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-xs text-gray-600">
-                      <tr>
-                        <th className="px-3 py-2 text-left">目標 初回連携率</th>
-                        <th className="px-3 py-2 text-right">連携人数</th>
-                        <th className="px-3 py-2 text-right hidden sm:table-cell">追加連携</th>
-                        <th className="px-3 py-2 text-right">追加F2<br/><span className="font-normal text-gray-400">保守</span></th>
-                        <th className="px-3 py-2 text-right">追加F2<br/><span className="font-normal text-gray-400">最大期待値</span></th>
-                        <th className="px-3 py-2 text-right hidden md:table-cell">追加2回目売上<br/><span className="font-normal text-gray-400">保守〜最大</span></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      <tr className="bg-gray-50/60">
-                        <td className="px-3 py-2 font-medium text-gray-700">現状 {oneDecimal(currentInitialLineRate)}%</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-700">{num(initialLineCustomers)}人</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-400 hidden sm:table-cell">—</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-400">—</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-400">—</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-400 hidden md:table-cell">—</td>
-                      </tr>
-                      {simulatorRows.map((r) => (
-                        <tr key={r.targetRate} className={r.targetRate === 30 ? 'bg-indigo-50/40' : ''}>
-                          <td className="px-3 py-2 font-medium text-gray-900">
-                            {r.targetRate}%{r.targetRate === 30 && <span className="ml-2 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-medium">第1目標</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums">{num(r.targetLineCustomers)}人</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-gray-600 hidden sm:table-cell">+{num(r.additionalLinked)}人</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-gray-700">+{oneDecimal(r.additionalF2Conservative)}人</td>
-                          <td className="px-3 py-2 text-right tabular-nums font-bold text-indigo-700">+{oneDecimal(r.additionalF2Max)}人</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-amber-700 hidden md:table-cell">{yen(r.additionalSalesConservative)} 〜 {yen(r.additionalSalesMax)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                <div className="grid lg:grid-cols-2 gap-4 p-4 sm:p-5 border-t border-gray-200">
+                  <div className="space-y-4">
+                    <div className="rounded-lg border border-gray-200 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-sm font-bold text-gray-900">目標 初回LINE連携率</label>
+                        <div className="flex items-center gap-2">
+                          <input type="number" min="0" max="100" step="1" value={simTargetRate} onChange={(e) => setSimTargetRate(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-20 rounded border border-gray-300 px-2 py-1 text-right tabular-nums" />
+                          <span className="text-sm text-gray-500">%</span>
+                        </div>
+                      </div>
+                      <input type="range" min="0" max="80" step="1" value={simTargetRate} onChange={(e) => setSimTargetRate(Number(e.target.value))} className="mt-3 w-full" />
+                      <div className="mt-1 flex justify-between text-[11px] text-gray-400"><span>0%</span><span>40%</span><span>80%</span></div>
+                    </div>
+
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <label className="block rounded-lg border border-gray-200 p-3">
+                        <div className="text-xs font-medium text-gray-600">初回購入者数</div>
+                        <input type="number" min="0" value={simFirstBuyersInput ?? totalFirstCustomers} onChange={(e) => setSimFirstBuyersInput(Math.max(0, Number(e.target.value) || 0))} className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" />
+                        <div className="mt-1 text-[11px] text-gray-400">期間実績を初期値に使用</div>
+                      </label>
+                      <label className="block rounded-lg border border-gray-200 p-3">
+                        <div className="text-xs font-medium text-gray-600">2回目平均単価</div>
+                        <div className="mt-1 flex items-center gap-1">
+                          <span className="text-gray-400">¥</span>
+                          <input type="number" min="0" step="100" value={simSecondValue} onChange={(e) => setSimSecondValue(Math.max(0, Number(e.target.value) || 0))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" />
+                        </div>
+                        <div className="mt-1 text-[11px] text-gray-400">初期値 {yen(MATURE_F2_BASELINE.avgSecondOrderValue)}</div>
+                      </label>
+                    </div>
+
+                    <div className="grid sm:grid-cols-3 gap-3">
+                      <label className="block rounded-lg border border-gray-200 p-3">
+                        <div className="text-xs font-medium text-gray-600">F2率: LINE連携あり</div>
+                        <div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="0.1" value={simLineF2} onChange={(e) => setSimLineF2(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-gray-500">%</span></div>
+                      </label>
+                      <label className="block rounded-lg border border-gray-200 p-3">
+                        <div className="text-xs font-medium text-gray-600">F2率: LINE連携なし</div>
+                        <div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="0.1" value={simNoLineF2} onChange={(e) => setSimNoLineF2(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-gray-500">%</span></div>
+                      </label>
+                      <label className="block rounded-lg border border-gray-200 p-3">
+                        <div className="text-xs font-medium text-gray-600">交絡調整</div>
+                        <div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="5" value={simConservativeFactor} onChange={(e) => setSimConservativeFactor(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-gray-500">%</span></div>
+                        <div className="mt-1 text-[11px] text-gray-400">最大期待値を何%採用するか</div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border-2 border-indigo-200 bg-indigo-50/60 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-medium text-indigo-700">シミュレーション結果</div>
+                        <div className="mt-1 text-lg font-bold text-indigo-950">現状 {oneDecimal(currentInitialLineRate)}% → 目標 {oneDecimal(simTargetRate)}%</div>
+                      </div>
+                      {simTargetRate < currentInitialLineRate && <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">現状以下</span>}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="rounded-md bg-white p-3 border border-indigo-100">
+                        <div className="text-xs text-gray-500">目標連携人数</div>
+                        <div className="mt-1 text-2xl font-bold tabular-nums text-gray-900">{num(simTargetLineCustomers)}人</div>
+                        <div className="text-xs text-gray-500 mt-0.5">追加連携 +{num(simAdditionalLinked)}人</div>
+                      </div>
+                      <div className="rounded-md bg-white p-3 border border-indigo-100">
+                        <div className="text-xs text-gray-500">想定F2到達</div>
+                        <div className="mt-1 text-2xl font-bold tabular-nums text-gray-900">{oneDecimal(simTargetExpectedF2)}人</div>
+                        <div className="text-xs text-gray-500 mt-0.5">現状期待値 {oneDecimal(simBaselineExpectedF2)}人</div>
+                      </div>
+                      <div className="rounded-md bg-white p-3 border border-indigo-100">
+                        <div className="text-xs text-gray-500">追加F2（調整後）</div>
+                        <div className="mt-1 text-2xl font-bold tabular-nums text-green-700">+{oneDecimal(simAdditionalF2Adjusted)}人</div>
+                        <div className="text-xs text-gray-500 mt-0.5">最大期待値 +{oneDecimal(simAdditionalF2Max)}人</div>
+                      </div>
+                      <div className="rounded-md bg-white p-3 border border-indigo-100">
+                        <div className="text-xs text-gray-500">追加2回目売上</div>
+                        <div className="mt-1 text-2xl font-bold tabular-nums text-amber-700">{yen(simAdditionalSalesAdjusted)}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">最大 {yen(simAdditionalSalesMax)}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 rounded-md bg-white border border-indigo-100 p-3 text-sm text-gray-700">
+                      <span className="font-bold text-gray-900">読み方：</span>
+                      連携率を {oneDecimal(simTargetRate)}% まで上げるには追加で約 {num(simAdditionalLinked)}人 のLINE連携が必要。F2率差 {oneDecimal(simF2LiftPct)}pt のうち {simConservativeFactor}% を実効効果として採用すると、追加F2は約 {oneDecimal(simAdditionalF2Adjusted)}人、2回目売上は約 {yen(simAdditionalSalesAdjusted)}。
+                    </div>
+                  </div>
                 </div>
+
                 <div className="px-4 sm:px-5 py-4 bg-slate-50 border-t border-slate-200">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div>
                       <h3 className="font-bold text-gray-900">経営判断メモ</h3>
-                      <p className="text-xs text-gray-500 mt-0.5">初回連携率をどこまで投資して上げるか</p>
+                      <p className="text-xs text-gray-500 mt-0.5">入力値を動かして、投資上限とテスト規模を決める</p>
                     </div>
-                    <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">推奨: まず 30% を軽量テスト</span>
+                    <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">推奨: まず 30% 前後を軽量テスト</span>
                   </div>
                   <div className="grid md:grid-cols-3 gap-3 mt-3 text-sm">
                     <div className="rounded-md bg-white border border-gray-200 p-3">
                       <div className="text-xs text-gray-500">売上インパクト単体</div>
-                      <div className="font-bold text-gray-900 mt-1">大きくはない</div>
-                      <p className="text-xs text-gray-600 mt-1">初回購入者が {periodLabel}で{num(totalFirstCustomers)}人規模のため、30%到達でも追加F2は最大 +{oneDecimal(simulatorRows[0]?.additionalF2Max ?? 0)}人／期。重い開発投資の正当化には足りない。</p>
+                      <div className="font-bold text-gray-900 mt-1">数字を動かすと上限が見える</div>
+                      <p className="text-xs text-gray-600 mt-1">初回購入者数・単価・実効効果を変えても回収額が小さいなら、重い開発ではなく既存導線の改善から始める。</p>
                     </div>
                     <div className="rounded-md bg-white border border-gray-200 p-3">
                       <div className="text-xs text-gray-500">本質的な価値</div>
@@ -578,7 +637,7 @@ export default function ShopifyBiTopPage() {
                     <div className="rounded-md bg-white border border-gray-200 p-3">
                       <div className="text-xs text-gray-500">次の意思決定</div>
                       <div className="font-bold text-gray-900 mt-1">導線1〜2本だけ改善→計測</div>
-                      <p className="text-xs text-gray-600 mt-1">サンクスページ／Shopifyメール／同梱物のどこで友だち追加を促すか棚卸し。30日後に初回連携率と60日後F2率で効果検証。</p>
+                      <p className="text-xs text-gray-600 mt-1">サンクスページ／Shopifyメール／同梱物のどこで友だち追加を促すか棚卸し。30日後に初回連携率、60日後F2率で検証。</p>
                     </div>
                   </div>
                 </div>
