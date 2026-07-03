@@ -133,49 +133,8 @@ for (let i = 0; i < friends.length; i += 500) {
 
 ## セグメント配信
 
-タグだけでなく、複数条件の組み合わせで対象を絞り込む高度な配信:
-
-### SegmentCondition 構造
-
-```typescript
-interface SegmentCondition {
-  operator: 'AND' | 'OR'
-  rules: SegmentRule[]
-}
-
-interface SegmentRule {
-  type: 'tag_exists' | 'tag_not_exists' | 'metadata_equals' | 'metadata_not_equals' | 'ref_code' | 'is_following'
-  value: string | boolean | { key: string; value: string }
-}
-```
-
-### ルールタイプ一覧
-
-| type | value | 説明 |
-|------|-------|------|
-| `tag_exists` | タグID (string) | そのタグを持つ友だち |
-| `tag_not_exists` | タグID (string) | そのタグを持たない友だち |
-| `metadata_equals` | `{key, value}` | metadata.key == value |
-| `metadata_not_equals` | `{key, value}` | metadata.key != value |
-| `ref_code` | ref_code (string) | 流入元コード一致 |
-| `is_following` | boolean | フォロー中かどうか |
-
-### SQL 生成
-
-`buildSegmentQuery()` が条件をSQLに変換:
-
-```sql
--- AND の場合
-SELECT f.id, f.line_user_id FROM friends f
-WHERE EXISTS (SELECT 1 FROM friend_tags ft WHERE ft.friend_id = f.id AND ft.tag_id = ?)
-  AND json_extract(f.metadata, '$.plan') = ?
-  AND f.is_following = 1
-
--- OR の場合
-SELECT f.id, f.line_user_id FROM friends f
-WHERE EXISTS (SELECT 1 FROM friend_tags ft WHERE ft.friend_id = f.id AND ft.tag_id = ?)
-  OR json_extract(f.metadata, '$.plan') = ?
-```
+セグメント配信は、事前に保存済みのセグメントIDを配信作成時に指定し、通常の `/api/broadcasts/:id/send` で実行します。
+この通常送信ルートでは `broadcast_recipient_sends` に送信証跡を残すため、再送時の二重送信を防ぎます。
 
 ## API エンドポイント
 
@@ -341,41 +300,6 @@ curl -X POST "https://line-crm-worker.line-crm-api.workers.dev/api/broadcasts/BR
 - `sending` / `sent` の場合は 400 エラー
 - 配信失敗時は status が `draft` にリセット（再試行可）
 
-### POST /api/broadcasts/:id/send-segment — セグメント配信
-
-複数条件を組み合わせた対象に配信:
-
-```bash
-# VIPタグを持ち、かつ metadata.plan が "premium" の友だちに配信
-curl -X POST "https://line-crm-worker.line-crm-api.workers.dev/api/broadcasts/BROADCAST_UUID/send-segment" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "conditions": {
-      "operator": "AND",
-      "rules": [
-        { "type": "tag_exists", "value": "VIP_TAG_UUID" },
-        { "type": "metadata_equals", "value": { "key": "plan", "value": "premium" } },
-        { "type": "is_following", "value": true }
-      ]
-    }
-  }'
-
-# タグAまたはタグBを持つ友だちに配信
-curl -X POST "https://line-crm-worker.line-crm-api.workers.dev/api/broadcasts/BROADCAST_UUID/send-segment" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "conditions": {
-      "operator": "OR",
-      "rules": [
-        { "type": "tag_exists", "value": "TAG_A_UUID" },
-        { "type": "tag_exists", "value": "TAG_B_UUID" }
-      ]
-    }
-  }'
-```
-
 ## 予約配信の仕組み
 
 1. `scheduledAt` を JST 文字列で設定 → status が `scheduled` に
@@ -422,15 +346,6 @@ await client.broadcasts.update(broadcast.id, {
 // 即時配信
 const result = await client.broadcasts.send(broadcast.id)
 console.log(`Sent: ${result.successCount}/${result.totalCount}`)
-
-// セグメント配信
-const segResult = await client.broadcasts.sendToSegment(broadcast.id, {
-  operator: 'AND',
-  rules: [
-    { type: 'tag_exists', value: 'vip-tag-uuid' },
-    { type: 'is_following', value: true },
-  ],
-})
 
 // === 高レベルAPI ===
 

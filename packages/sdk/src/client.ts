@@ -10,7 +10,7 @@ import { AdPlatformsResource } from './resources/ad-platforms.js'
 import { StaffResource } from './resources/staff.js'
 import { ImagesResource } from './resources/images.js'
 import { Workflows } from './workflows.js'
-import type { LineHarnessConfig, StepDefinition, ScenarioTriggerType, ScenarioWithSteps, Broadcast, MessageType, SegmentCondition } from './types.js'
+import type { LineHarnessConfig, StepDefinition, ScenarioTriggerType, ScenarioWithSteps, Broadcast, MessageType } from './types.js'
 
 export class LineHarness {
   readonly friends: FriendsResource
@@ -31,7 +31,6 @@ export class LineHarness {
   readonly createStepScenario: (name: string, triggerType: ScenarioTriggerType, steps: StepDefinition[]) => Promise<ScenarioWithSteps>
   readonly broadcastText: (text: string) => Promise<Broadcast>
   readonly broadcastToTag: (tagId: string, messageType: MessageType, content: string) => Promise<Broadcast>
-  readonly broadcastToSegment: (messageType: MessageType, content: string, conditions: SegmentCondition) => Promise<Broadcast>
   readonly sendTextToFriend: (friendId: string, text: string) => Promise<{ messageId: string }>
   readonly sendFlexToFriend: (friendId: string, flexJson: string) => Promise<{ messageId: string }>
 
@@ -60,7 +59,6 @@ export class LineHarness {
     this.createStepScenario = this.workflows.createStepScenario.bind(this.workflows)
     this.broadcastText = this.workflows.broadcastText.bind(this.workflows)
     this.broadcastToTag = this.workflows.broadcastToTag.bind(this.workflows)
-    this.broadcastToSegment = this.workflows.broadcastToSegment.bind(this.workflows)
     this.sendTextToFriend = this.workflows.sendTextToFriend.bind(this.workflows)
     this.sendFlexToFriend = this.workflows.sendFlexToFriend.bind(this.workflows)
   }

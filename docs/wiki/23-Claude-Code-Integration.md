@@ -216,11 +216,9 @@ BC=$(curl -s -X POST "$API/api/broadcasts" \
   -d "{\"title\": \"VIP限定お知らせ\", \"messageType\": \"text\", \"messageContent\": \"VIP会員限定のお知らせです。\", \"targetType\": \"all\"}")
 BC_ID=$(echo $BC | jq -r '.data.id')
 
-# セグメント配信
-curl -X POST "$API/api/broadcasts/$BC_ID/send-segment" \
-  -H "Authorization: Bearer $KEY" \
-  -H "Content-Type: application/json" \
-  -d "{\"conditions\": {\"operator\": \"AND\", \"rules\": [{\"type\": \"tag_exists\", \"value\": \"$VIP_TAG\"}, {\"type\": \"is_following\", \"value\": true}]}}"
+# 配信実行
+curl -X POST "$API/api/broadcasts/$BC_ID/send" \
+  -H "Authorization: Bearer $KEY"
 ```
 
 ### 3. フォーム作成 + 自動タグ付け
