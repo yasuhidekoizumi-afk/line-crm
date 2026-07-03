@@ -43,8 +43,27 @@ customerJourney.get('/api/customer-journey/funnel', async (c) => {
 
   const stats = await c.env.DB
     .prepare(
-      `SELECT
-         CASE WHEN f.line_user_id LIKE 'U%' THEN 'LINE連携あり' ELSE 'LINE連携なし' END AS segment,
+      `WITH customer_line AS (
+         SELECT
+           shopify_customer_id_jp,
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE shopify_customer_id_jp IS NOT NULL
+         GROUP BY shopify_customer_id_jp
+       ), base AS (
+         SELECT
+           customer_journey.*,
+           CASE
+             WHEN f.line_user_id LIKE 'U%' OR COALESCE(cl.has_customer_line, 0) = 1 THEN 1
+             ELSE 0
+           END AS has_line_link
+         FROM customer_journey
+         LEFT JOIN friends f ON f.id = customer_journey.friend_id
+         LEFT JOIN customer_line cl ON cl.shopify_customer_id_jp = customer_journey.shopify_customer_id
+         WHERE ${where}
+       )
+       SELECT
+         CASE WHEN has_line_link = 1 THEN 'LINE連携あり' ELSE 'LINE連携なし' END AS segment,
          COUNT(*) AS first_order_customers,
          SUM(CASE WHEN second_order_at IS NOT NULL THEN 1 ELSE 0 END) AS repeat_customers,
          ROUND(100.0 * SUM(CASE WHEN second_order_at IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) AS repeat_rate_pct,
@@ -53,9 +72,7 @@ customerJourney.get('/api/customer-journey/funnel', async (c) => {
          SUM(CASE WHEN days_to_second <= 90 THEN 1 ELSE 0 END) AS repeat_within_90d,
          ROUND(AVG(days_to_second), 1) AS avg_days_to_second,
          ROUND(SUM(total_revenue) / COUNT(*)) AS ltv
-       FROM customer_journey
-       LEFT JOIN friends f ON f.id = customer_journey.friend_id
-       WHERE ${where}
+       FROM base
        GROUP BY segment
        ORDER BY segment DESC`,
     )
@@ -77,22 +94,39 @@ customerJourney.get('/api/customer-journey/cohort', async (c) => {
 
   const cohorts = await c.env.DB
     .prepare(
-      `SELECT
+      `WITH customer_line AS (
+         SELECT
+           shopify_customer_id_jp,
+           MAX(CASE WHEN line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE shopify_customer_id_jp IS NOT NULL
+         GROUP BY shopify_customer_id_jp
+       ), base AS (
+         SELECT
+           customer_journey.*,
+           CASE
+             WHEN f.line_user_id LIKE 'U%' OR COALESCE(cl.has_customer_line, 0) = 1 THEN 1
+             ELSE 0
+           END AS has_line_link
+         FROM customer_journey
+         LEFT JOIN friends f ON f.id = customer_journey.friend_id
+         LEFT JOIN customer_line cl ON cl.shopify_customer_id_jp = customer_journey.shopify_customer_id
+         WHERE ${where}
+       )
+       SELECT
          cohort_month,
          COUNT(*) AS first_order_customers,
          SUM(CASE WHEN second_order_at IS NOT NULL THEN 1 ELSE 0 END) AS repeat_customers,
          ROUND(100.0 * SUM(CASE WHEN second_order_at IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) AS repeat_rate_pct,
-         SUM(CASE WHEN f.line_user_id LIKE 'U%' THEN 1 ELSE 0 END) AS line_linked_customers,
-         ROUND(100.0 * SUM(CASE WHEN f.line_user_id LIKE 'U%' THEN 1 ELSE 0 END) / COUNT(*), 1) AS line_link_rate_pct,
-         SUM(CASE WHEN f.line_user_id LIKE 'U%' AND second_order_at IS NOT NULL THEN 1 ELSE 0 END) AS line_repeat_customers,
-         ROUND(100.0 * SUM(CASE WHEN f.line_user_id LIKE 'U%' AND second_order_at IS NOT NULL THEN 1 ELSE 0 END)
-               / NULLIF(SUM(CASE WHEN f.line_user_id LIKE 'U%' THEN 1 ELSE 0 END), 0), 1) AS line_repeat_rate_pct,
-         SUM(CASE WHEN (f.line_user_id IS NULL OR f.line_user_id NOT LIKE 'U%') AND second_order_at IS NOT NULL THEN 1 ELSE 0 END) AS noline_repeat_customers,
-         ROUND(100.0 * SUM(CASE WHEN (f.line_user_id IS NULL OR f.line_user_id NOT LIKE 'U%') AND second_order_at IS NOT NULL THEN 1 ELSE 0 END)
-               / NULLIF(SUM(CASE WHEN (f.line_user_id IS NULL OR f.line_user_id NOT LIKE 'U%') THEN 1 ELSE 0 END), 0), 1) AS noline_repeat_rate_pct
-       FROM customer_journey
-       LEFT JOIN friends f ON f.id = customer_journey.friend_id
-       WHERE ${where}
+         SUM(CASE WHEN has_line_link = 1 THEN 1 ELSE 0 END) AS line_linked_customers,
+         ROUND(100.0 * SUM(CASE WHEN has_line_link = 1 THEN 1 ELSE 0 END) / COUNT(*), 1) AS line_link_rate_pct,
+         SUM(CASE WHEN has_line_link = 1 AND second_order_at IS NOT NULL THEN 1 ELSE 0 END) AS line_repeat_customers,
+         ROUND(100.0 * SUM(CASE WHEN has_line_link = 1 AND second_order_at IS NOT NULL THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN has_line_link = 1 THEN 1 ELSE 0 END), 0), 1) AS line_repeat_rate_pct,
+         SUM(CASE WHEN has_line_link = 0 AND second_order_at IS NOT NULL THEN 1 ELSE 0 END) AS noline_repeat_customers,
+         ROUND(100.0 * SUM(CASE WHEN has_line_link = 0 AND second_order_at IS NOT NULL THEN 1 ELSE 0 END)
+               / NULLIF(SUM(CASE WHEN has_line_link = 0 THEN 1 ELSE 0 END), 0), 1) AS noline_repeat_rate_pct
+       FROM base
        GROUP BY cohort_month
        ORDER BY cohort_month`,
     )
