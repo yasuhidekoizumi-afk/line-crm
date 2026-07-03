@@ -121,6 +121,17 @@ export default function ShopifyBiTopPage() {
   const [simFirstBuyersInput, setSimFirstBuyersInput] = useState<number | null>(null)
   const [simConservativeFactor, setSimConservativeFactor] = useState(50)
 
+  // ── F2ファネル / LTV分解 感度調整（フロントのみ） ──
+  const [scenarioMoveToLine, setScenarioMoveToLine] = useState(0)
+  const [scenarioLineF2Input, setScenarioLineF2Input] = useState<number | null>(null)
+  const [scenarioNoLineF2Input, setScenarioNoLineF2Input] = useState<number | null>(null)
+  const [scenarioLine30Input, setScenarioLine30Input] = useState<number | null>(null)
+  const [scenarioNoLine30Input, setScenarioNoLine30Input] = useState<number | null>(null)
+  const [scenarioLineLtvInput, setScenarioLineLtvInput] = useState<number | null>(null)
+  const [scenarioNoLineLtvInput, setScenarioNoLineLtvInput] = useState<number | null>(null)
+  const [scenarioOpportunityInput, setScenarioOpportunityInput] = useState<number | null>(null)
+  const [scenarioEffectFactor, setScenarioEffectFactor] = useState(50)
+
   const calcRange = useCallback(() => {
     const now = new Date()
     const today = todayStr()
@@ -258,9 +269,6 @@ export default function ShopifyBiTopPage() {
       repeatRevenueProxy: f.repeat_customers * f.ltv,
     }))
     .sort((a, b) => b.ltv - a.ltv)
-  const ltvOpportunity = ltvDelta > 0 && noLineSeg
-    ? noLineUnconvertedCustomers * ltvDelta
-    : 0
   const additionalF2IfNoLineMatchesLine = lineSeg && noLineSeg && repeatRateLift > 0
     ? Math.round(noLineSeg.first_order_customers * (repeatRateLift / 100))
     : 0
@@ -292,6 +300,43 @@ export default function ShopifyBiTopPage() {
     setSimSecondValue(MATURE_F2_BASELINE.avgSecondOrderValue)
     setSimFirstBuyersInput(null)
     setSimConservativeFactor(50)
+  }
+
+  const actualLineFirst = lineSeg?.first_order_customers ?? 0
+  const actualNoLineFirst = noLineSeg?.first_order_customers ?? 0
+  const scenarioEffectiveMove = Math.max(0, Math.min(scenarioMoveToLine, actualNoLineFirst))
+  const scenarioLineFirst = actualLineFirst + scenarioEffectiveMove
+  const scenarioNoLineFirst = Math.max(0, actualNoLineFirst - scenarioEffectiveMove)
+  const scenarioTotalFirst = scenarioLineFirst + scenarioNoLineFirst
+  const scenarioLineF2Rate = scenarioLineF2Input ?? lineSeg?.repeat_rate_pct ?? 0
+  const scenarioNoLineF2Rate = scenarioNoLineF2Input ?? noLineSeg?.repeat_rate_pct ?? 0
+  const scenarioLine30Rate = scenarioLine30Input ?? (lineSeg && lineSeg.first_order_customers > 0 ? (lineSeg.repeat_within_30d / lineSeg.first_order_customers) * 100 : 0)
+  const scenarioNoLine30Rate = scenarioNoLine30Input ?? (noLineSeg && noLineSeg.first_order_customers > 0 ? (noLineSeg.repeat_within_30d / noLineSeg.first_order_customers) * 100 : 0)
+  const scenarioLineLtv = scenarioLineLtvInput ?? lineSeg?.ltv ?? 0
+  const scenarioNoLineLtv = scenarioNoLineLtvInput ?? noLineSeg?.ltv ?? 0
+  const scenarioF2Customers = (scenarioLineFirst * scenarioLineF2Rate + scenarioNoLineFirst * scenarioNoLineF2Rate) / 100
+  const scenarioF2Rate = scenarioTotalFirst > 0 ? (scenarioF2Customers / scenarioTotalFirst) * 100 : 0
+  const scenarioAdditionalF2 = scenarioF2Customers - totalRepeatCustomers
+  const scenarioUnconverted = Math.max(0, scenarioTotalFirst - scenarioF2Customers)
+  const scenario30Customers = (scenarioLineFirst * scenarioLine30Rate + scenarioNoLineFirst * scenarioNoLine30Rate) / 100
+  const scenario30Rate = scenarioTotalFirst > 0 ? (scenario30Customers / scenarioTotalFirst) * 100 : 0
+  const scenarioLtvDelta = Math.max(0, scenarioLineLtv - scenarioNoLineLtv)
+  const scenarioActualLtvValue = (actualLineFirst * (lineSeg?.ltv ?? 0)) + (actualNoLineFirst * (noLineSeg?.ltv ?? 0))
+  const scenarioLtvValue = (scenarioLineFirst * scenarioLineLtv) + (scenarioNoLineFirst * scenarioNoLineLtv)
+  const scenarioLtvValueDelta = scenarioLtvValue - scenarioActualLtvValue
+  const scenarioOpportunityCustomers = Math.max(0, Math.round(scenarioOpportunityInput ?? noLineUnconvertedCustomers))
+  const scenarioOpportunityMax = scenarioOpportunityCustomers * scenarioLtvDelta
+  const scenarioOpportunityAdjusted = scenarioOpportunityMax * (scenarioEffectFactor / 100)
+  const resetFunnelLtvScenario = () => {
+    setScenarioMoveToLine(0)
+    setScenarioLineF2Input(null)
+    setScenarioNoLineF2Input(null)
+    setScenarioLine30Input(null)
+    setScenarioNoLine30Input(null)
+    setScenarioLineLtvInput(null)
+    setScenarioNoLineLtvInput(null)
+    setScenarioOpportunityInput(null)
+    setScenarioEffectFactor(50)
   }
 
   const periodLabelObj = PERIOD_OPTIONS.find(p => p.value === period)
@@ -411,10 +456,45 @@ export default function ShopifyBiTopPage() {
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-gray-200">
                   <FunnelStat label="初回購入顧客" value={num(totalFirstCustomers)} unit="人" tone="neutral" />
-                  <FunnelStat label="F2到達" value={num(totalRepeatCustomers)} unit="人" sub={`${totalRepeatRate.toFixed(1)}%`} tone="good" />
-                  <FunnelStat label="30日内F2" value={`${repeatWithin30Rate.toFixed(1)}%`} sub={`${num(totalRepeatWithin30)}人`} tone="neutral" />
-                  <FunnelStat label="F2未到達" value={num(totalUnconvertedCustomers)} unit="人" sub="フォロー対象" tone="warn" />
+                  <FunnelStat label="F2到達（実績）" value={num(totalRepeatCustomers)} unit="人" sub={`${totalRepeatRate.toFixed(1)}%`} tone="good" />
+                  <FunnelStat label="30日内F2（実績）" value={`${repeatWithin30Rate.toFixed(1)}%`} sub={`${num(totalRepeatWithin30)}人`} tone="neutral" />
+                  <FunnelStat label="F2未到達（実績）" value={num(totalUnconvertedCustomers)} unit="人" sub="フォロー対象" tone="warn" />
                 </div>
+                {lineSeg && noLineSeg && (
+                  <div className="border-t border-gray-200 bg-slate-50 p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div>
+                        <h3 className="font-bold text-gray-900">🧪 ファネル感度調整</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">未連携顧客をLINE連携側に移した場合、F2率・30日内F2がどう変わるかを即時計算。</p>
+                      </div>
+                      <button onClick={resetFunnelLtvScenario} className="px-2 py-1 rounded border border-gray-300 bg-white text-xs text-gray-700 hover:bg-gray-50">実績に戻す</button>
+                    </div>
+                    <div className="grid lg:grid-cols-3 gap-3 mt-3">
+                      <div className="rounded-lg bg-white border border-gray-200 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs font-bold text-gray-700">未連携→LINE連携に移す人数</label>
+                          <div className="flex items-center gap-1"><input type="number" min="0" max={actualNoLineFirst} value={scenarioMoveToLine} onChange={(e) => setScenarioMoveToLine(Math.max(0, Math.min(actualNoLineFirst, Number(e.target.value) || 0)))} className="w-20 rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-xs text-gray-500">人</span></div>
+                        </div>
+                        <input type="range" min="0" max={actualNoLineFirst} step="1" value={scenarioEffectiveMove} onChange={(e) => setScenarioMoveToLine(Number(e.target.value))} className="mt-3 w-full" />
+                        <div className="mt-1 flex justify-between text-[11px] text-gray-400"><span>0人</span><span>最大 {num(actualNoLineFirst)}人</span></div>
+                      </div>
+                      <div className="rounded-lg bg-white border border-gray-200 p-3 grid grid-cols-2 gap-2">
+                        <label className="block"><div className="text-xs font-medium text-gray-600">LINE F2率</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="0.1" value={scenarioLineF2Rate} onChange={(e) => setScenarioLineF2Input(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-xs text-gray-500">%</span></div></label>
+                        <label className="block"><div className="text-xs font-medium text-gray-600">非連携 F2率</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="0.1" value={scenarioNoLineF2Rate} onChange={(e) => setScenarioNoLineF2Input(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-xs text-gray-500">%</span></div></label>
+                      </div>
+                      <div className="rounded-lg bg-white border border-gray-200 p-3 grid grid-cols-2 gap-2">
+                        <label className="block"><div className="text-xs font-medium text-gray-600">LINE 30日内F2</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="0.1" value={scenarioLine30Rate} onChange={(e) => setScenarioLine30Input(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-xs text-gray-500">%</span></div></label>
+                        <label className="block"><div className="text-xs font-medium text-gray-600">非連携 30日内F2</div><div className="mt-1 flex items-center gap-1"><input type="number" min="0" max="100" step="0.1" value={scenarioNoLine30Rate} onChange={(e) => setScenarioNoLine30Input(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-full rounded border border-gray-300 px-2 py-1 text-right tabular-nums" /><span className="text-xs text-gray-500">%</span></div></label>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+                      <div className="rounded-md bg-white border border-gray-200 p-3"><div className="text-xs text-gray-500">シナリオF2到達</div><div className="mt-1 text-xl font-bold text-gray-900 tabular-nums">{oneDecimal(scenarioF2Customers)}人</div><div className="text-xs text-gray-500 mt-0.5">{oneDecimal(scenarioF2Rate)}% / 実績差 {scenarioAdditionalF2 >= 0 ? '+' : ''}{oneDecimal(scenarioAdditionalF2)}人</div></div>
+                      <div className="rounded-md bg-white border border-gray-200 p-3"><div className="text-xs text-gray-500">シナリオ30日内F2</div><div className="mt-1 text-xl font-bold text-indigo-700 tabular-nums">{oneDecimal(scenario30Rate)}%</div><div className="text-xs text-gray-500 mt-0.5">{oneDecimal(scenario30Customers)}人 / 実績 {num(totalRepeatWithin30)}人</div></div>
+                      <div className="rounded-md bg-white border border-gray-200 p-3"><div className="text-xs text-gray-500">LINE連携側の初回母数</div><div className="mt-1 text-xl font-bold text-green-700 tabular-nums">{num(scenarioLineFirst)}人</div><div className="text-xs text-gray-500 mt-0.5">実績 {num(actualLineFirst)}人 → +{num(scenarioEffectiveMove)}人</div></div>
+                      <div className="rounded-md bg-white border border-gray-200 p-3"><div className="text-xs text-gray-500">F2未到達</div><div className="mt-1 text-xl font-bold text-amber-700 tabular-nums">{oneDecimal(scenarioUnconverted)}人</div><div className="text-xs text-gray-500 mt-0.5">実績 {num(totalUnconvertedCustomers)}人</div></div>
+                    </div>
+                  </div>
+                )}
                 <div className="px-4 sm:px-5 py-3 border-t border-gray-200">
                   <div className="flex h-3 w-full overflow-hidden rounded-full bg-gray-100">
                     <div className="bg-indigo-500 h-3" style={{ width: `${Math.min(100, totalRepeatRate)}%` }} title={`F2到達 ${totalRepeatRate.toFixed(1)}%`} />
@@ -646,26 +726,40 @@ export default function ShopifyBiTopPage() {
 
             {ltvRows.length > 0 && lineSeg && noLineSeg && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
-                  <h2 className="font-bold text-gray-900">💰 LTV分解（LINE連携 × F2転換）</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">LTVを「F2転換率」「30日内転換速度」「顧客あたり売上」に分解。どのレバーを伸ばすべきかを見る。</p>
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50 flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-bold text-gray-900">💰 LTV分解（LINE連携 × F2転換）</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">LTVを「F2転換率」「30日内転換速度」「顧客あたり売上」に分解。どのレバーを伸ばすべきかを見る。数値を書き換えると機会額が即再計算されます。</p>
+                  </div>
+                  <button onClick={resetFunnelLtvScenario} className="shrink-0 px-2 py-1 rounded border border-gray-300 bg-white text-xs text-gray-700 hover:bg-gray-50">実績に戻す</button>
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-px bg-gray-200">
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-px bg-gray-200">
                   <div className="bg-white px-4 py-3">
-                    <div className="text-xs text-gray-500">LTV差分</div>
-                    <div className="mt-1 text-xl font-bold text-indigo-700 tabular-nums">{yen(ltvDelta)}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">LINE連携あり − なし</div>
+                    <div className="text-xs text-gray-500">LINE連携 LTV</div>
+                    <div className="mt-1 flex items-center gap-1"><span className="text-gray-400">¥</span><input type="number" min="0" step="100" value={Math.round(scenarioLineLtv)} onChange={(e) => setScenarioLineLtvInput(Math.max(0, Number(e.target.value) || 0))} className="w-full rounded border border-gray-200 px-2 py-1 text-right text-lg font-bold text-indigo-700 tabular-nums" /></div>
+                    <div className="text-xs text-gray-500 mt-0.5">実績 {yen(lineSeg.ltv)}</div>
                   </div>
                   <div className="bg-white px-4 py-3">
-                    <div className="text-xs text-gray-500">F2率差分</div>
-                    <div className="mt-1 text-xl font-bold text-green-700 tabular-nums">+{repeatRateLift.toFixed(1)}pt</div>
-                    <div className="text-xs text-gray-500 mt-0.5">初回後の継続率レバー</div>
+                    <div className="text-xs text-gray-500">非連携 LTV</div>
+                    <div className="mt-1 flex items-center gap-1"><span className="text-gray-400">¥</span><input type="number" min="0" step="100" value={Math.round(scenarioNoLineLtv)} onChange={(e) => setScenarioNoLineLtvInput(Math.max(0, Number(e.target.value) || 0))} className="w-full rounded border border-gray-200 px-2 py-1 text-right text-lg font-bold text-gray-700 tabular-nums" /></div>
+                    <div className="text-xs text-gray-500 mt-0.5">LTV差分 {yen(scenarioLtvDelta)}</div>
+                  </div>
+                  <div className="bg-white px-4 py-3">
+                    <div className="text-xs text-gray-500">機会対象人数</div>
+                    <div className="mt-1 flex items-center gap-1"><input type="number" min="0" value={scenarioOpportunityCustomers} onChange={(e) => setScenarioOpportunityInput(Math.max(0, Number(e.target.value) || 0))} className="w-full rounded border border-gray-200 px-2 py-1 text-right text-lg font-bold text-green-700 tabular-nums" /><span className="text-xs text-gray-500">人</span></div>
+                    <div className="text-xs text-gray-500 mt-0.5">初期値 未連携F2未到達 {num(noLineUnconvertedCustomers)}人</div>
                   </div>
                   <div className="bg-white px-4 py-3">
                     <div className="text-xs text-gray-500">LTV機会額</div>
-                    <div className="mt-1 text-xl font-bold text-amber-700 tabular-nums">{yen(ltvOpportunity)}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">未連携F2未到達 × LTV差分</div>
+                    <div className="mt-1 text-xl font-bold text-amber-700 tabular-nums">{yen(scenarioOpportunityAdjusted)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">最大 {yen(scenarioOpportunityMax)}</div>
+                    <div className="mt-1 flex items-center gap-1"><span className="text-[11px] text-gray-500">実効効果</span><input type="number" min="0" max="100" step="5" value={scenarioEffectFactor} onChange={(e) => setScenarioEffectFactor(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} className="w-16 rounded border border-gray-200 px-1 py-0.5 text-right text-xs tabular-nums" /><span className="text-[11px] text-gray-500">%</span></div>
                   </div>
+                </div>
+                <div className="px-4 sm:px-5 py-2 bg-slate-50 border-t border-gray-200 text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                  <span>LTV差分（LINE − 非連携）: <span className="font-bold text-gray-900">{yen(scenarioLtvDelta)}</span></span>
+                  <span>F2率差分: <span className="font-bold text-gray-900">+{repeatRateLift.toFixed(1)}pt</span></span>
+                  <span>移行シナリオでの総LTV増加: <span className="font-bold text-gray-900">{scenarioLtvValueDelta >= 0 ? '+' : ''}{yen(scenarioLtvValueDelta)}</span></span>
                 </div>
                 <div className="overflow-x-auto border-t border-gray-200">
                   <table className="w-full text-sm">
