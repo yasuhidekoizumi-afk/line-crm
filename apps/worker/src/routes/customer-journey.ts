@@ -102,6 +102,125 @@ customerJourney.get('/api/customer-journey/funnel', async (c) => {
   return c.json({ success: true, data: stats.results ?? [] });
 });
 
+// ─── LINE母集団サマリー ────────────────────────────────
+// F2ファネルは「期間内の初回購入者」だけを見るため、/customers の全体LINE連携数とは母集団が異なる。
+// このAPIでは、全体LINE連携顧客 / 期間内購入者全体 / 期間内初回購入者を並べて返し、誤読を防ぐ。
+customerJourney.get('/api/customer-journey/line-overview', async (c) => {
+  const from = c.req.query('from'); // YYYY-MM-DD
+  const to = c.req.query('to');
+
+  let orderWhere = `o.cancelled_at IS NULL
+    AND (o.financial_status IS NULL OR o.financial_status NOT IN ('refunded','voided'))
+    AND o.shopify_customer_id IS NOT NULL`;
+  const orderBinds: string[] = [];
+  if (from) { orderWhere += ` AND o.processed_at >= ?`; orderBinds.push(from); }
+  if (to)   { orderWhere += ` AND o.processed_at < ?`;  orderBinds.push(to); }
+
+  let firstWhere = '1=1';
+  const firstBinds: string[] = [];
+  if (from) { firstWhere += ' AND cj.first_order_at >= ?'; firstBinds.push(from); }
+  if (to)   { firstWhere += ' AND cj.first_order_at < ?';  firstBinds.push(to); }
+
+  const row = await c.env.DB
+    .prepare(
+      `WITH customer_totals AS (
+         SELECT
+           COUNT(*) AS total_customers,
+           SUM(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS total_line_customers
+         FROM customers
+       ), customer_line_by_shopify AS (
+         SELECT
+           shopify_customer_id_jp AS shopify_customer_id,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE shopify_customer_id_jp IS NOT NULL
+         GROUP BY shopify_customer_id_jp
+       ), customer_line_by_customer AS (
+         SELECT
+           customer_id,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE customer_id IS NOT NULL
+         GROUP BY customer_id
+       ), customer_line_by_email AS (
+         SELECT
+           LOWER(email) AS email_norm,
+           MAX(CASE WHEN line_user_id IS NOT NULL AND line_user_id <> '' THEN 1 ELSE 0 END) AS has_customer_line
+         FROM customers
+         WHERE email IS NOT NULL AND email <> ''
+         GROUP BY LOWER(email)
+       ), period_purchasers AS (
+         SELECT
+           o.shopify_customer_id,
+           MAX(o.customer_id) AS customer_id,
+           MAX(o.friend_id) AS friend_id,
+           LOWER(MIN(o.email)) AS email_norm,
+           COUNT(*) AS orders
+         FROM shopify_orders o
+         WHERE ${orderWhere}
+         GROUP BY o.shopify_customer_id
+       ), period_purchaser_base AS (
+         SELECT
+           p.*,
+           CASE
+             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+               OR COALESCE(cls.has_customer_line, 0) = 1
+               OR COALESCE(clc.has_customer_line, 0) = 1
+               OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1
+             ELSE 0
+           END AS has_line_link
+         FROM period_purchasers p
+         LEFT JOIN friends f ON f.id = p.friend_id
+         LEFT JOIN customer_line_by_shopify cls ON cls.shopify_customer_id = p.shopify_customer_id
+         LEFT JOIN customer_line_by_customer clc ON clc.customer_id = p.customer_id
+         LEFT JOIN customer_line_by_email cle ON cle.email_norm = p.email_norm
+       ), first_buyers AS (
+         SELECT
+           cj.shopify_customer_id,
+           cj.customer_id,
+           cj.friend_id,
+           LOWER(first_order.email) AS email_norm,
+           cj.second_order_at
+         FROM customer_journey cj
+         LEFT JOIN shopify_orders first_order ON first_order.shopify_order_id = cj.first_order_id
+         WHERE ${firstWhere}
+       ), first_buyer_base AS (
+         SELECT
+           fb.*,
+           CASE
+             WHEN (f.line_user_id IS NOT NULL AND f.line_user_id <> '')
+               OR COALESCE(cls.has_customer_line, 0) = 1
+               OR COALESCE(clc.has_customer_line, 0) = 1
+               OR COALESCE(cle.has_customer_line, 0) = 1 THEN 1
+             ELSE 0
+           END AS has_line_link
+         FROM first_buyers fb
+         LEFT JOIN friends f ON f.id = fb.friend_id
+         LEFT JOIN customer_line_by_shopify cls ON cls.shopify_customer_id = fb.shopify_customer_id
+         LEFT JOIN customer_line_by_customer clc ON clc.customer_id = fb.customer_id
+         LEFT JOIN customer_line_by_email cle ON cle.email_norm = fb.email_norm
+       )
+       SELECT
+         ct.total_customers,
+         ct.total_line_customers,
+         ROUND(100.0 * ct.total_line_customers / NULLIF(ct.total_customers, 0), 1) AS total_line_rate_pct,
+         (SELECT COUNT(*) FROM period_purchasers) AS period_purchasers,
+         (SELECT COALESCE(SUM(orders), 0) FROM period_purchasers) AS period_orders,
+         (SELECT COALESCE(SUM(has_line_link), 0) FROM period_purchaser_base) AS period_line_purchasers,
+         (SELECT ROUND(100.0 * COALESCE(SUM(has_line_link), 0) / NULLIF(COUNT(*), 0), 1) FROM period_purchaser_base) AS period_line_purchaser_rate_pct,
+         (SELECT COUNT(*) FROM first_buyer_base) AS first_order_customers,
+         (SELECT COALESCE(SUM(has_line_link), 0) FROM first_buyer_base) AS first_order_line_customers,
+         (SELECT ROUND(100.0 * COALESCE(SUM(has_line_link), 0) / NULLIF(COUNT(*), 0), 1) FROM first_buyer_base) AS first_order_line_rate_pct,
+         (SELECT COALESCE(SUM(CASE WHEN second_order_at IS NOT NULL THEN 1 ELSE 0 END), 0) FROM first_buyer_base) AS first_order_repeat_customers
+       FROM customer_totals ct`,
+    )
+    .bind(...orderBinds, ...firstBinds)
+    .first();
+
+  return c.json({ success: true, data: row });
+});
+
+
 // ─── コホート別 2回目購入率（月別マトリクス）
 customerJourney.get('/api/customer-journey/cohort', async (c) => {
   const from = c.req.query('from');

@@ -43,6 +43,20 @@ interface ChannelMatrixRow {
   aov: number
 }
 
+interface LineOverview {
+  total_customers: number
+  total_line_customers: number
+  total_line_rate_pct: number
+  period_purchasers: number
+  period_orders: number
+  period_line_purchasers: number
+  period_line_purchaser_rate_pct: number
+  first_order_customers: number
+  first_order_line_customers: number
+  first_order_line_rate_pct: number
+  first_order_repeat_customers: number
+}
+
 interface TrafficSourceRow {
   source: string
   orders: number
@@ -80,6 +94,7 @@ export default function ShopifyBiTopPage() {
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [stats, setStats] = useState<OrderStats | null>(null)
+  const [lineOverview, setLineOverview] = useState<LineOverview | null>(null)
   const [funnel, setFunnel] = useState<FunnelRow[]>([])
   const [cohort, setCohort] = useState<CohortRow[]>([])
   const [channelMatrix, setChannelMatrix] = useState<ChannelMatrixRow[]>([])
@@ -133,6 +148,7 @@ export default function ShopifyBiTopPage() {
 
       const results = await Promise.allSettled([
         fetchApi<{ success: boolean; data: OrderStats }>(`/api/shopify/orders/stats?${ps}`),
+        fetchApi<{ success: boolean; data: LineOverview }>(`/api/customer-journey/line-overview?${ps}`),
         fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel?${ps}`),
         fetchApi<{ success: boolean; data: CohortRow[] }>(`/api/customer-journey/cohort?${cohortPs}`),
         fetchApi<{ success: boolean; data: ChannelMatrixRow[] }>(`/api/customer-journey/channel-matrix?${ps}`),
@@ -141,14 +157,16 @@ export default function ShopifyBiTopPage() {
       // 各APIの結果を個別に処理（1つが失敗しても他は表示）
       if (results[0].status === 'fulfilled' && results[0].value.success) setStats(results[0].value.data)
       else console.warn('[shopify-bi] stats API failed:', results[0])
-      if (results[1].status === 'fulfilled' && results[1].value.success) setFunnel(results[1].value.data)
-      else console.warn('[shopify-bi] funnel API failed:', results[1])
-      if (results[2].status === 'fulfilled' && results[2].value.success) setCohort(results[2].value.data)
-      else console.warn('[shopify-bi] cohort API failed:', results[2])
-      if (results[3].status === 'fulfilled' && results[3].value.success) setChannelMatrix(results[3].value.data)
-      else console.warn('[shopify-bi] channel-matrix API failed:', results[3])
-      if (results[4].status === 'fulfilled' && results[4].value.success) setTrafficSource(results[4].value.data)
-      else console.warn('[shopify-bi] traffic-source API failed:', results[4])
+      if (results[1].status === 'fulfilled' && results[1].value.success) setLineOverview(results[1].value.data)
+      else console.warn('[shopify-bi] line-overview API failed:', results[1])
+      if (results[2].status === 'fulfilled' && results[2].value.success) setFunnel(results[2].value.data)
+      else console.warn('[shopify-bi] funnel API failed:', results[2])
+      if (results[3].status === 'fulfilled' && results[3].value.success) setCohort(results[3].value.data)
+      else console.warn('[shopify-bi] cohort API failed:', results[3])
+      if (results[4].status === 'fulfilled' && results[4].value.success) setChannelMatrix(results[4].value.data)
+      else console.warn('[shopify-bi] channel-matrix API failed:', results[4])
+      if (results[5].status === 'fulfilled' && results[5].value.success) setTrafficSource(results[5].value.data)
+      else console.warn('[shopify-bi] traffic-source API failed:', results[5])
     } catch (e) {
       setError(`読み込み失敗: ${String(e)}`)
     } finally {
@@ -180,10 +198,12 @@ export default function ShopifyBiTopPage() {
       if (range.fromMonth && range.toMonth) { cohortPs.set('from', range.fromMonth); cohortPs.set('to', range.toMonth) }
       const ps = new URLSearchParams()
       if (range.from && range.to) { ps.set('from', range.from); ps.set('to', range.to) }
-      const [funnelRes, cohortRes] = await Promise.allSettled([
+      const [overviewRes, funnelRes, cohortRes] = await Promise.allSettled([
+        fetchApi<{ success: boolean; data: LineOverview }>(`/api/customer-journey/line-overview?${ps}`),
         fetchApi<{ success: boolean; data: FunnelRow[] }>(`/api/customer-journey/funnel?${ps}`),
         fetchApi<{ success: boolean; data: CohortRow[] }>(`/api/customer-journey/cohort?${cohortPs}`),
       ])
+      if (overviewRes.status === 'fulfilled' && overviewRes.value.success) setLineOverview(overviewRes.value.data)
       if (funnelRes.status === 'fulfilled' && funnelRes.value.success) setFunnel(funnelRes.value.data)
       if (cohortRes.status === 'fulfilled' && cohortRes.value.success) setCohort(cohortRes.value.data)
     } catch (e) {
@@ -300,11 +320,55 @@ export default function ShopifyBiTopPage() {
               </div>
             )}
 
+
+
+            {lineOverview && (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
+                  <h2 className="font-bold text-gray-900">🟢 LINE連携の母集団サマリー</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    「LINE連携あり」は集計する母集団で人数が大きく変わる。誤読を防ぐため3つの母集団を並べて表示。
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-gray-200">
+                  <div className="bg-white px-4 py-4">
+                    <div className="text-xs text-gray-500">① 全体のLINE連携顧客</div>
+                    <div className="mt-1 text-2xl font-bold text-green-700 tabular-nums">{num(lineOverview.total_line_customers)}<span className="text-sm font-normal text-gray-500 ml-1">人</span></div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      全顧客 {num(lineOverview.total_customers)}人中 {lineOverview.total_line_rate_pct}%（/customers 画面と一致・期間非依存）
+                    </div>
+                  </div>
+                  <div className="bg-white px-4 py-4">
+                    <div className="text-xs text-gray-500">② {periodLabel} 購入者のうちLINE連携あり</div>
+                    <div className="mt-1 text-2xl font-bold text-indigo-700 tabular-nums">{num(lineOverview.period_line_purchasers)}<span className="text-sm font-normal text-gray-500 ml-1">人</span></div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      期間内購入者 {num(lineOverview.period_purchasers)}人中 {lineOverview.period_line_purchaser_rate_pct}%（既存リピーター含む）
+                    </div>
+                  </div>
+                  <div className="bg-white px-4 py-4">
+                    <div className="text-xs text-gray-500">③ {periodLabel} 初回購入者のうちLINE連携あり</div>
+                    <div className="mt-1 text-2xl font-bold text-amber-700 tabular-nums">{num(lineOverview.first_order_line_customers)}<span className="text-sm font-normal text-gray-500 ml-1">人</span></div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      期間内初回購入者 {num(lineOverview.first_order_customers)}人中 {lineOverview.first_order_line_rate_pct}%（下のF2ファネルの母集団）
+                    </div>
+                  </div>
+                </div>
+                <div className="px-4 sm:px-5 py-3 bg-indigo-50 border-t border-indigo-100 text-xs text-indigo-800 leading-relaxed">
+                  💡 下の「F2転換ファネル」は<span className="font-bold">③の初回購入者だけ</span>が母集団。全体（①{num(lineOverview.total_line_customers)}人）と比べて少なく見えるのは正常です。
+                  新規初回購入時点ではLINE連携率が低く（{lineOverview.first_order_line_rate_pct}%）、リピート回数が増えるほど連携率が上がるため、
+                  購入者全体（②）で見ると<span className="font-bold">{lineOverview.period_line_purchaser_rate_pct}%</span>がLINE連携ありです。
+                </div>
+              </div>
+            )}
+
             {funnel.length > 0 && totalFirstCustomers > 0 && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
                   <h2 className="font-bold text-gray-900">🔁 F2転換ファネル（初回 → 2回目購入）</h2>
                   <p className="text-xs text-gray-500 mt-0.5">{periodLabel} に初回購入した顧客の2回目購入到達状況。F2はLTVの最大レバー。</p>
+                  <p className="text-[11px] text-amber-700 mt-1">
+                    ⚠️ 母集団は「{periodLabel}の初回購入者」のみ。全体のLINE連携顧客数（上のサマリー①）とは母集団が異なります。
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-gray-200">
                   <FunnelStat label="初回購入顧客" value={num(totalFirstCustomers)} unit="人" tone="neutral" />
