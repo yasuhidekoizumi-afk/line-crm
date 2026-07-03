@@ -71,6 +71,15 @@ interface TrafficSourceRow {
 
 const yen = (n: number) => '¥' + Math.round(n).toLocaleString('ja-JP')
 const num = (n: number) => Math.round(n).toLocaleString('ja-JP')
+const oneDecimal = (n: number) => n.toLocaleString('ja-JP', { maximumFractionDigits: 1, minimumFractionDigits: Math.abs(n % 1) > 0.05 ? 1 : 0 })
+
+const MATURE_F2_BASELINE = {
+  cohortLabel: '2025-01-01〜2026-05-04初回購入（60日以上観測）',
+  lineF2RatePct: 35.9,
+  noLineF2RatePct: 18.2,
+  avgSecondOrderValue: 3477,
+}
+const LINE_LINK_TARGETS = [30, 40, 50]
 
 const PERIOD_OPTIONS = [
   { value: '7d',   label: '過去7日' },
@@ -254,6 +263,32 @@ export default function ShopifyBiTopPage() {
     : 'LINE連携済みのF2未到達者'
   const lostCustomersInAnomalies = anomalies.reduce((s, c) => s + Math.round(c.first_order_customers * (0.5 - c.line_link_rate_pct / 100)), 0)
   const lostValue = ltvDelta * lostCustomersInAnomalies
+
+  const initialLineCustomers = lineOverview?.first_order_line_customers ?? (lineSeg?.first_order_customers ?? 0)
+  const currentInitialLineRate = totalFirstCustomers > 0 ? (initialLineCustomers / totalFirstCustomers) * 100 : 0
+  const matureF2LiftPct = MATURE_F2_BASELINE.lineF2RatePct - MATURE_F2_BASELINE.noLineF2RatePct
+  const baselineExpectedF2 = totalFirstCustomers > 0
+    ? (initialLineCustomers * MATURE_F2_BASELINE.lineF2RatePct + (totalFirstCustomers - initialLineCustomers) * MATURE_F2_BASELINE.noLineF2RatePct) / 100
+    : 0
+  const simulatorRows = LINE_LINK_TARGETS.map((targetRate) => {
+    const targetLineCustomers = Math.round(totalFirstCustomers * targetRate / 100)
+    const additionalLinked = Math.max(0, targetLineCustomers - initialLineCustomers)
+    const expectedF2 = totalFirstCustomers > 0
+      ? (targetLineCustomers * MATURE_F2_BASELINE.lineF2RatePct + (totalFirstCustomers - targetLineCustomers) * MATURE_F2_BASELINE.noLineF2RatePct) / 100
+      : 0
+    const additionalF2Max = Math.max(0, expectedF2 - baselineExpectedF2)
+    const additionalF2Conservative = additionalF2Max * 0.5
+    return {
+      targetRate,
+      targetLineCustomers,
+      additionalLinked,
+      expectedF2,
+      additionalF2Max,
+      additionalF2Conservative,
+      additionalSalesMax: additionalF2Max * MATURE_F2_BASELINE.avgSecondOrderValue,
+      additionalSalesConservative: additionalF2Conservative * MATURE_F2_BASELINE.avgSecondOrderValue,
+    }
+  })
 
   const periodLabelObj = PERIOD_OPTIONS.find(p => p.value === period)
   const periodLabel = period === 'custom' && range
@@ -465,6 +500,88 @@ export default function ShopifyBiTopPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {funnel.length > 0 && totalFirstCustomers > 0 && (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
+                  <h2 className="font-bold text-gray-900">🎯 初回LINE連携率 改善シミュレーター</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    「初回購入時点でLINE連携している人の割合」を上げると、F2到達が将来どれだけ増えるかの試算。単発売上ではなく今後のCRM施策の母数づくりが本質。
+                  </p>
+                  <p className="text-[11px] text-amber-700 mt-1">
+                    ⚠️ F2率は成熟コホート実測値（連携あり {MATURE_F2_BASELINE.lineF2RatePct}% / なし {MATURE_F2_BASELINE.noLineF2RatePct}%、{MATURE_F2_BASELINE.cohortLabel}）を使用。ランダム実験ではないため「最大期待値」は交絡込みの上限。
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-gray-200">
+                  <FunnelStat label={`${periodLabel} 初回購入者`} value={num(totalFirstCustomers)} unit="人" tone="neutral" />
+                  <FunnelStat label="現状の初回LINE連携率" value={`${oneDecimal(currentInitialLineRate)}%`} sub={`${num(initialLineCustomers)}人`} tone="warn" />
+                  <FunnelStat label="連携での F2率差" value={`+${oneDecimal(matureF2LiftPct)}pt`} sub={`${MATURE_F2_BASELINE.lineF2RatePct}% vs ${MATURE_F2_BASELINE.noLineF2RatePct}%`} tone="good" />
+                  <FunnelStat label="2回目平均単価" value={yen(MATURE_F2_BASELINE.avgSecondOrderValue)} sub="加重平均（実測）" tone="neutral" />
+                </div>
+                <div className="overflow-x-auto border-t border-gray-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-xs text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left">目標 初回連携率</th>
+                        <th className="px-3 py-2 text-right">連携人数</th>
+                        <th className="px-3 py-2 text-right hidden sm:table-cell">追加連携</th>
+                        <th className="px-3 py-2 text-right">追加F2<br/><span className="font-normal text-gray-400">保守</span></th>
+                        <th className="px-3 py-2 text-right">追加F2<br/><span className="font-normal text-gray-400">最大期待値</span></th>
+                        <th className="px-3 py-2 text-right hidden md:table-cell">追加2回目売上<br/><span className="font-normal text-gray-400">保守〜最大</span></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      <tr className="bg-gray-50/60">
+                        <td className="px-3 py-2 font-medium text-gray-700">現状 {oneDecimal(currentInitialLineRate)}%</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-700">{num(initialLineCustomers)}人</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-400 hidden sm:table-cell">—</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-400">—</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-400">—</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-400 hidden md:table-cell">—</td>
+                      </tr>
+                      {simulatorRows.map((r) => (
+                        <tr key={r.targetRate} className={r.targetRate === 30 ? 'bg-indigo-50/40' : ''}>
+                          <td className="px-3 py-2 font-medium text-gray-900">
+                            {r.targetRate}%{r.targetRate === 30 && <span className="ml-2 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-medium">第1目標</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{num(r.targetLineCustomers)}人</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-gray-600 hidden sm:table-cell">+{num(r.additionalLinked)}人</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-gray-700">+{oneDecimal(r.additionalF2Conservative)}人</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-bold text-indigo-700">+{oneDecimal(r.additionalF2Max)}人</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-amber-700 hidden md:table-cell">{yen(r.additionalSalesConservative)} 〜 {yen(r.additionalSalesMax)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 sm:px-5 py-4 bg-slate-50 border-t border-slate-200">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <h3 className="font-bold text-gray-900">経営判断メモ</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">初回連携率をどこまで投資して上げるか</p>
+                    </div>
+                    <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">推奨: まず 30% を軽量テスト</span>
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-3 mt-3 text-sm">
+                    <div className="rounded-md bg-white border border-gray-200 p-3">
+                      <div className="text-xs text-gray-500">売上インパクト単体</div>
+                      <div className="font-bold text-gray-900 mt-1">大きくはない</div>
+                      <p className="text-xs text-gray-600 mt-1">初回購入者が {periodLabel}で{num(totalFirstCustomers)}人規模のため、30%到達でも追加F2は最大 +{oneDecimal(simulatorRows[0]?.additionalF2Max ?? 0)}人／期。重い開発投資の正当化には足りない。</p>
+                    </div>
+                    <div className="rounded-md bg-white border border-gray-200 p-3">
+                      <div className="text-xs text-gray-500">本質的な価値</div>
+                      <div className="font-bold text-gray-900 mt-1">CRM施策の母数づくり</div>
+                      <p className="text-xs text-gray-600 mt-1">F2フォロー・クロスセル・休眠復活・ポイント・Pay Forward・新商品先行案内は全てLINE連携が到達条件。ここが今後の打ち手の入口。</p>
+                    </div>
+                    <div className="rounded-md bg-white border border-gray-200 p-3">
+                      <div className="text-xs text-gray-500">次の意思決定</div>
+                      <div className="font-bold text-gray-900 mt-1">導線1〜2本だけ改善→計測</div>
+                      <p className="text-xs text-gray-600 mt-1">サンクスページ／Shopifyメール／同梱物のどこで友だち追加を促すか棚卸し。30日後に初回連携率と60日後F2率で効果検証。</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
