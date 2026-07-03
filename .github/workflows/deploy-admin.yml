@@ -55,17 +55,12 @@ jobs:
           CUSTOM_DOMAIN: 'true'
           NODE_OPTIONS: '--max-old-space-size=4096'
         run: |
-          pnpm build 2>&1 | tee /tmp/build-log.txt || true
+          pnpm build 2>&1 | tee /tmp/build-log.txt
           echo "=== BUILD LOG ==="
           cat /tmp/build-log.txt
           echo "=== END BUILD LOG ==="
 
       - run: |
-          if grep -i 'error' /tmp/build-log.txt; then
-            echo "FOUND ERRORS:"
-            grep -i 'error' /tmp/build-log.txt
-            exit 1
-          fi
           if ! [ -d apps/web/out ]; then
             echo "BUILD FAILED - no output directory"
             exit 1
