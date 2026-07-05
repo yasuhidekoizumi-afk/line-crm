@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "test": "node scripts/check-liff-click-redirect.mjs",
     "build:help-kb": "node scripts/build-help-kb.mjs"
   },
   "dependencies": {

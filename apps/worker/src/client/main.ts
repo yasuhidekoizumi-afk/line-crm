@@ -234,11 +234,15 @@ async function linkAndAddFlow() {
   try {
     const existingUuid = getSavedUuid();
 
-    // Get profile, ID token, and friendship status in parallel
-    const [profile, rawIdToken, friendship] = await Promise.all([
+    // profile と idToken だけ先に取得する。friendship（liff.getFriendship）はここでは呼ばない。
+    // 理由: getFriendship は Bot未連携・スコープ不足・タイムアウト等で失敗し得る。これを
+    // Promise.all に含めると、その1回の失敗で catch に落ち、tracking link（/t/）リダイレクト時に
+    // lu=（クリックした人のLINE user id）を付けられないまま _skip_liff=1 で戻ってしまう。
+    // 結果 link_clicks.friend_id が全件 NULL になり、配信→クリック→購入の紐付けが全滅する。
+    // friendship は本当に必要な「友だち判定」の直前で個別に取得する（下の 5.）。
+    const [profile, rawIdToken] = await Promise.all([
       liff.getProfile(),
       Promise.resolve(liff.getIDToken()),
-      liff.getFriendship(),
     ]);
 
     // 1. UUID linking (always, regardless of friendship)
@@ -290,7 +294,16 @@ async function linkAndAddFlow() {
     await linkPromise;
 
     // 5. Friendship check — the key decision point
-    if (!friendship.friendFlag) {
+    // ここで初めて friendship を取得する。ここに到達するのは redirectUrl が無い
+    // （＝友だち追加フローで開かれた）ケースだけなので、getFriendship が失敗しても
+    // クリック計測（3.）には影響しない。失敗時は「未フォロー」とみなして友だち追加導線を出す。
+    let friendFlag = false;
+    try {
+      friendFlag = (await liff.getFriendship()).friendFlag;
+    } catch {
+      friendFlag = false;
+    }
+    if (!friendFlag) {
       // Not a friend yet → show friend-add button
       showFriendAdd(profile);
     } else {
