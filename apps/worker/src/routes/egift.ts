@@ -501,6 +501,9 @@ egift.post('/api/egift/gifts/claim', async (c) => {
     if (gift.status === 'redeemed' || gift.status === 'fulfilled') {
       return c.json({ success: false, error: 'このギフトは既に受け取り済みです' }, 410);
     }
+    if (gift.status === 'expired' || new Date(gift.expires_at) < new Date()) {
+      return c.json({ success: false, error: 'ギフトの有効期限が切れています' }, 410);
+    }
 
     // Find or create friend by line_user_id
     let friend = await c.env.DB.prepare(
@@ -551,6 +554,9 @@ egift.post('/api/egift/gifts/redeem', async (c) => {
 
     if (gift.status === 'redeemed' || gift.status === 'fulfilled') {
       return c.json({ success: false, error: 'このギフトは既に受け取り済みです' }, 410);
+    }
+    if (gift.status === 'expired' || new Date(gift.redeem_expires_at) < new Date()) {
+      return c.json({ success: false, error: 'ギフトの引換期限が切れています' }, 410);
     }
     if (gift.status !== 'line_added') {
       return c.json({ success: false, error: '先にLINE友だち追加が必要です' }, 400);
