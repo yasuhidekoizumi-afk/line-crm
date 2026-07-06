@@ -361,7 +361,20 @@ function TrackedLinksPageInner() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {links.map((link) => (
-                    <tr key={link.id} className={`hover:bg-gray-50 ${selectedLinkId === link.id ? 'bg-green-50/40' : ''}`}>
+                    <tr
+                      key={link.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${link.name}の詳細を表示`}
+                      onClick={() => { void loadDetail(link.id) }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          void loadDetail(link.id)
+                        }
+                      }}
+                      className={`cursor-pointer hover:bg-gray-50 focus:outline-none focus-visible:bg-green-50 ${selectedLinkId === link.id ? 'bg-green-50/40' : ''}`}
+                    >
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{link.name}</p>
                         <p className="text-xs text-gray-400 truncate max-w-md">{link.originalUrl}</p>
@@ -372,14 +385,20 @@ function TrackedLinksPageInner() {
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => loadDetail(link.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void loadDetail(link.id)
+                            }}
                             className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
                           >
                             詳細
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(link.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleDelete(link.id)
+                            }}
                             className="px-3 py-1 min-h-[44px] text-xs font-medium text-red-500 bg-red-50 hover:bg-red-100 rounded-md"
                           >
                             削除
