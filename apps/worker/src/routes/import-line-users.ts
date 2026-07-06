@@ -11,6 +11,13 @@ function extractShopifyId(raw?: string): string | null {
   return m ? m[1] : null;
 }
 
+function parseFriendStatus(raw?: string): 0 | 1 | null {
+  const status = (raw ?? '').trim().toLowerCase();
+  if (status === 'follow') return 1;
+  if (status === 'unfollow') return 0;
+  return null;
+}
+
 /**
  * CRM PLUS(SocialPLUS) ユーザーCSVの取り込み。
  *
@@ -51,12 +58,13 @@ importLineUsers.post('/api/admin/import-line-users', async (c) => {
   }
 
   const now = new Date().toISOString();
-  let friendsInserted = 0, friendsUpdated = 0, customersLinked = 0, customersCreated = 0, conflicts = 0, skipped = 0;
+  let friendsInserted = 0, friendsUpdated = 0, customersLinked = 0, customersCreated = 0, conflicts = 0, skipped = 0, invalidStatus = 0;
 
   for (const u of users) {
     const uid = (u.uid ?? '').trim();
     if (!uid.startsWith('U')) { skipped++; continue; }
-    const isFollowing = (u.status ?? '').trim().toLowerCase() === 'follow' ? 1 : 0;
+    const isFollowing = parseFriendStatus(u.status);
+    if (isFollowing === null) { invalidStatus++; skipped++; continue; }
     const sid = extractShopifyId(u.shopifyId);
 
     try {
@@ -116,7 +124,7 @@ importLineUsers.post('/api/admin/import-line-users', async (c) => {
 
   return c.json({
     success: true,
-    data: { received: users.length, friendsInserted, friendsUpdated, customersLinked, customersCreated, conflicts, skipped, lineAccountId: accountId },
+    data: { received: users.length, friendsInserted, friendsUpdated, customersLinked, customersCreated, conflicts, skipped, invalidStatus, lineAccountId: accountId },
   });
 });
 
