@@ -37,6 +37,8 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.startsWith('/webhook/shopify/') ||
     path.startsWith('/forms/') ||
     path.startsWith('/reviews/') ||
+    path.startsWith('/g/') ||
+    path.startsWith('/api/egift/gifts/') ||
     path === '/email/optin-confirm' ||
     path === '/api/ferment/phase5/double-optin/confirm' ||
     path === '/api/ferment/phase5/gdpr/request' ||
