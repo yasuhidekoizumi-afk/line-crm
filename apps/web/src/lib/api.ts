@@ -774,6 +774,24 @@ export const api = {
         method: 'DELETE',
       }),
   },
+  egift: {
+    listCampaigns: () =>
+      fetchApi<ApiResponse<any[]>>('/api/egift/campaigns'),
+    getCampaign: (id: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${id}`),
+    createCampaign: (data: { name: string; startsAt: string; endsAt: string; dailyWinnerLimit?: number; totalGiftLimit?: number; targetSku?: string; targetProductId?: string; targetVariantId?: string; inventoryBudget?: number; notes?: string }) =>
+      fetchApi<ApiResponse<any>>('/api/egift/campaigns', { method: 'POST', body: JSON.stringify(data) }),
+    activateCampaign: (id: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${id}/activate`, { method: 'POST' }),
+    apply: (data: { campaignId: string; giverFriendId: string; occasion: string; message?: string }) =>
+      fetchApi<ApiResponse<any>>('/api/egift/applications', { method: 'POST', body: JSON.stringify(data) }),
+    lotteryDryRun: (campaignId: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/lottery/dry-run`, { method: 'POST' }),
+    lotteryCommit: (campaignId: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/lottery/commit`, { method: 'POST' }),
+    getKpi: (campaignId: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/kpi`),
+  },
 }
 
 export interface RichMenuAlias {
