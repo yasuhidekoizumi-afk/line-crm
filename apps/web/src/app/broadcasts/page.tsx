@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, Suspense } from 'react'
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast, type ApiBroadcastDetail } from '@/lib/api'
@@ -717,6 +718,7 @@ function BroadcastsPageInner() {
                         <th className="px-3 py-2 text-left font-semibold">リンク先</th>
                         <th className="px-3 py-2 text-right font-semibold">人数</th>
                         <th className="px-3 py-2 text-right font-semibold">回数</th>
+                        <th className="px-3 py-2 text-right font-semibold">詳細</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -731,6 +733,14 @@ function BroadcastsPageInner() {
                           </td>
                           <td className="px-3 py-2 text-right text-gray-700">
                             {link.clickCount.toLocaleString('ja-JP')}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <Link
+                              href={`/tracked-links?linkId=${encodeURIComponent(link.id)}`}
+                              className="inline-flex min-h-[36px] items-center rounded-md bg-green-50 px-3 text-xs font-medium text-green-700 hover:bg-green-100"
+                            >
+                              クリック者を見る
+                            </Link>
                           </td>
                         </tr>
                       ))}

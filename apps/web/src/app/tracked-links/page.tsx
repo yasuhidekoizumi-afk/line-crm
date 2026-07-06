@@ -1,7 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { api, type ApiClickedNonBuyer, type ApiTrackedLink } from '@/lib/api'
 import type { Tag } from '@line-crm/shared'
@@ -16,6 +17,15 @@ interface ProductMatcherForm {
 interface CreateLinkForm {
   name: string
   originalUrl: string
+}
+
+interface ClickSummaryRow {
+  key: string
+  friendId: string | null
+  friendDisplayName: string | null
+  clickCount: number
+  firstClickedAt: string
+  lastClickedAt: string
 }
 
 function formatDatetime(iso: string | null | undefined): string {
@@ -47,7 +57,9 @@ function buildBroadcastDraft(tagId: string | null, sourceLink: ApiTrackedLink, n
   }
 }
 
-export default function TrackedLinksPage() {
+function TrackedLinksPageInner() {
+  const searchParams = useSearchParams()
+  const queryLinkId = searchParams.get('linkId')
   const [links, setLinks] = useState<ApiTrackedLink[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null)
@@ -83,6 +95,37 @@ export default function TrackedLinksPage() {
     return `/broadcasts?draft=${encodeDraft(buildBroadcastDraft(taggedTagId, selectedLink, nonBuyers.length))}`
   }, [selectedLink, taggedTagId, nonBuyers.length])
 
+  const clickRows = useMemo<ClickSummaryRow[]>(() => {
+    const rows = new Map<string, ClickSummaryRow>()
+    for (const [index, click] of (selectedLink?.clicks ?? []).entries()) {
+      const key = click.friendId ? `friend:${click.friendId}` : `unknown:${click.id || index}`
+      const existing = rows.get(key)
+      if (existing) {
+        existing.clickCount += 1
+        if (new Date(click.clickedAt).getTime() < new Date(existing.firstClickedAt).getTime()) existing.firstClickedAt = click.clickedAt
+        if (new Date(click.clickedAt).getTime() > new Date(existing.lastClickedAt).getTime()) existing.lastClickedAt = click.clickedAt
+      } else {
+        rows.set(key, {
+          key,
+          friendId: click.friendId,
+          friendDisplayName: click.friendDisplayName,
+          clickCount: 1,
+          firstClickedAt: click.clickedAt,
+          lastClickedAt: click.clickedAt,
+        })
+      }
+    }
+    return Array.from(rows.values()).sort((a, b) => new Date(b.lastClickedAt).getTime() - new Date(a.lastClickedAt).getTime())
+  }, [selectedLink?.clicks])
+
+  const identifiedClickCount = useMemo(
+    () => (selectedLink?.clicks ?? []).filter((click) => click.friendId).length,
+    [selectedLink?.clicks],
+  )
+
+  const unidentifiedClickCount = Math.max((selectedLink?.clickCount ?? 0) - identifiedClickCount, 0)
+  const identifiedFriendCount = clickRows.filter((row) => row.friendId).length
+
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -103,7 +146,7 @@ export default function TrackedLinksPage() {
 
   useEffect(() => { load() }, [load])
 
-  const loadDetail = async (linkId: string) => {
+  const loadDetail = useCallback(async (linkId: string) => {
     setSelectedLinkId(linkId)
     setDetailLoading(true)
     setDetailError('')
@@ -118,7 +161,12 @@ export default function TrackedLinksPage() {
     } finally {
       setDetailLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!queryLinkId || selectedLinkId === queryLinkId) return
+    void loadDetail(queryLinkId)
+  }, [loadDetail, queryLinkId, selectedLinkId])
 
   const handleCreate = async () => {
     if (!createForm.name.trim()) {
@@ -379,8 +427,49 @@ export default function TrackedLinksPage() {
                 </div>
                 <div className="p-3 rounded-lg border border-gray-100">
                   <p className="text-xs text-gray-400">識別済みクリック</p>
-                  <p className="mt-1 text-xl font-bold text-gray-900">{(selectedLink.clicks?.filter((click) => click.friendId).length ?? 0).toLocaleString('ja-JP')}</p>
+                  <p className="mt-1 text-xl font-bold text-gray-900">{identifiedClickCount.toLocaleString('ja-JP')}</p>
                 </div>
+              </div>
+
+              <div className="border-t border-gray-100 pt-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">クリックした人一覧</h3>
+                    <p className="mt-1 text-xs text-gray-500">
+                      friend_id が取れているクリックは個人別に集約して表示します。friend_id なしの過去クリックは個人特定できません。
+                    </p>
+                  </div>
+                  <div className="text-right text-xs text-gray-500 shrink-0">
+                    <p>識別済み {identifiedFriendCount.toLocaleString('ja-JP')}人</p>
+                    {unidentifiedClickCount > 0 && <p>未識別 {unidentifiedClickCount.toLocaleString('ja-JP')}件</p>}
+                  </div>
+                </div>
+
+                {clickRows.length === 0 ? (
+                  <div className="mt-3 p-4 bg-gray-50 border border-gray-100 rounded-lg text-sm text-gray-500">
+                    まだクリック履歴がありません。
+                  </div>
+                ) : (
+                  <div className="mt-3 max-h-80 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-100">
+                    {clickRows.slice(0, 100).map((row) => (
+                      <div key={row.key} className="px-3 py-2 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {row.friendDisplayName || (row.friendId ? `友だちID: ${row.friendId}` : '未識別クリック')}
+                          </p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {row.friendId ? `friend_id: ${row.friendId}` : 'friend_id なし'} / 初回 {formatDatetime(row.firstClickedAt)}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-semibold text-gray-900">{row.clickCount.toLocaleString('ja-JP')}回</p>
+                          <p className="text-xs text-gray-400">最終 {formatDatetime(row.lastClickedAt)}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {clickRows.length > 100 && <div className="px-3 py-2 text-xs text-gray-400">他 {clickRows.length - 100}件</div>}
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-gray-100 pt-5">
@@ -456,5 +545,13 @@ export default function TrackedLinksPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function TrackedLinksPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-gray-400 text-sm">読み込み中...</div>}>
+      <TrackedLinksPageInner />
+    </Suspense>
   )
 }
