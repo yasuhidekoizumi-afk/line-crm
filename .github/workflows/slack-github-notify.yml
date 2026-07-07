@@ -1,0 +1,105 @@
+name: Slack GitHub Notifications
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Slack に GitHub 更新を通知
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTION_NAME: ${{ github.event.action || '' }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          SERVER_URL: ${{ github.server_url }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
+          COMMIT_URL: ${{ github.event.head_commit.url || '' }}
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          PR_URL: ${{ github.event.pull_request.html_url || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL secret is not set. Skip Slack notification."
+            exit 0
+          fi
+
+          short_sha="${COMMIT_SHA:0:7}"
+          run_url="${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            title="LINEハーネス: PR が更新されました"
+            summary="#${PR_NUMBER} ${PR_TITLE}"
+            link="$PR_URL"
+          else
+            title="LINEハーネス: main が更新されました"
+            summary="${short_sha} ${COMMIT_MESSAGE}"
+            link="$COMMIT_URL"
+          fi
+
+          if [ -z "$link" ]; then
+            link="$run_url"
+          fi
+
+          payload="$(
+            jq -n \
+              --arg title "$title" \
+              --arg repo "$REPOSITORY" \
+              --arg branch "$REF_NAME" \
+              --arg actor "$ACTOR" \
+              --arg summary "$summary" \
+              --arg link "$link" \
+              --arg run_url "$run_url" \
+              '{
+                text: $title,
+                blocks: [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: ("*" + $title + "*\n" + $summary)
+                    }
+                  },
+                  {
+                    type: "context",
+                    elements: [
+                      {
+                        type: "mrkdwn",
+                        text: ("repo: `" + $repo + "` / branch: `" + $branch + "` / by: `" + $actor + "`")
+                      }
+                    ]
+                  },
+                  {
+                    type: "actions",
+                    elements: [
+                      {
+                        type: "button",
+                        text: { type: "plain_text", text: "GitHub で見る" },
+                        url: $link
+                      },
+                      {
+                        type: "button",
+                        text: { type: "plain_text", text: "Action Run" },
+                        url: $run_url
+                      }
+                    ]
+                  }
+                ]
+              }'
+          )"
+
+          curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
