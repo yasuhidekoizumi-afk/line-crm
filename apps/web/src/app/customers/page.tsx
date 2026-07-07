@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fermentApi, type Customer } from '@/lib/ferment-api'
 import { api } from '@/lib/api'
+import type { LineOfficialFriendInsightSummary } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
 
 type TagItem = { id: string; name: string; color: string }
@@ -22,8 +23,8 @@ const scopeLabels: Record<CustomerScope, { label: string; description: string }>
     description: 'customers にLINE IDが保存されている顧客',
   },
   sendable: {
-    label: '配信可能',
-    description: '現在フォロー中で、選択中のLINEアカウントから送信できる顧客',
+    label: '名寄せ済み配信対象',
+    description: '現在フォロー中のLINE友だちに紐づく統合顧客',
   },
   shopify: {
     label: 'Shopify顧客',
@@ -44,6 +45,8 @@ export default function CustomersPage() {
   const [scope, setScope] = useState<CustomerScope>('line')
   const [offset, setOffset] = useState(0)
   const [total, setTotal] = useState(0)
+  const [officialInsight, setOfficialInsight] = useState<LineOfficialFriendInsightSummary | null>(null)
+  const [harnessFollowingCount, setHarnessFollowingCount] = useState<number | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<Customer | null>(null)
   const [profile, setProfile] = useState<{
@@ -90,6 +93,19 @@ export default function CustomersPage() {
     }
   }, [regionFilter, emailFilter, debouncedSearch, tagFilter, scope, selectedAccountId])
 
+  const loadLineCounts = useCallback(async () => {
+    try {
+      const [officialRes, followingRes] = await Promise.all([
+        api.friends.officialInsightLatest({ accountId: selectedAccountId ?? undefined }),
+        api.friends.count({ accountId: selectedAccountId ?? undefined }),
+      ])
+      if (officialRes.success) setOfficialInsight(officialRes.data)
+      if (followingRes.success) setHarnessFollowingCount(followingRes.data.count)
+    } catch {
+      // 顧客一覧の利用を優先し、公式値の読み込み失敗は非表示にする。
+    }
+  }, [selectedAccountId])
+
   // 入力を300msデバウンスしてからサーバー検索（全件対象）
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300)
@@ -100,6 +116,10 @@ export default function CustomersPage() {
     setOffset(0)
     load(0)
   }, [load])
+
+  useEffect(() => {
+    loadLineCounts()
+  }, [loadLineCounts])
 
   const handlePageChange = (newOffset: number) => {
     setOffset(newOffset)
@@ -182,6 +202,13 @@ export default function CustomersPage() {
 
   // サーバー側で検索・絞り込み済みなので、そのまま表示する
   const displayed = customers
+  const officialTargetedReach = officialInsight?.targetedReaches ?? null
+  const unlinkedFollowingEstimate =
+    officialTargetedReach == null ? null : Math.max(officialTargetedReach - total, 0)
+  const formatOfficialDate = (date: string | null | undefined) => {
+    if (!date || date.length !== 8) return '未取得'
+    return `${date.slice(0, 4)}/${date.slice(4, 6)}/${date.slice(6, 8)}`
+  }
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
@@ -193,6 +220,39 @@ export default function CustomersPage() {
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
+
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <p className="text-xs font-medium text-gray-500">LINE公式配信可能</p>
+          <p className="mt-1 text-2xl font-semibold text-gray-900">
+            {officialTargetedReach == null ? '-' : officialTargetedReach.toLocaleString('ja-JP')}
+            <span className="ml-1 text-sm font-normal text-gray-500">人</span>
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            ターゲットリーチ / 集計日 {formatOfficialDate(officialInsight?.date)}
+          </p>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <p className="text-xs font-medium text-gray-500">ハーネス友だちDB</p>
+          <p className="mt-1 text-2xl font-semibold text-gray-900">
+            {harnessFollowingCount == null ? '-' : harnessFollowingCount.toLocaleString('ja-JP')}
+            <span className="ml-1 text-sm font-normal text-gray-500">人</span>
+          </p>
+          <p className="mt-1 text-xs text-gray-500">friends.is_following=1</p>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <p className="text-xs font-medium text-gray-500">この画面の対象</p>
+          <p className="mt-1 text-2xl font-semibold text-gray-900">
+            {total.toLocaleString('ja-JP')}
+            <span className="ml-1 text-sm font-normal text-gray-500">件</span>
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            {scope === 'sendable' && unlinkedFollowingEstimate != null
+              ? `公式との差分 ${unlinkedFollowingEstimate.toLocaleString('ja-JP')}人は未名寄せなど`
+              : scopeLabels[scope].label}
+          </p>
+        </div>
+      </div>
 
       {/* 対象スコープ */}
       <div className="mb-4">
@@ -213,7 +273,8 @@ export default function CustomersPage() {
         <p className="mt-2 text-xs text-gray-500">
           {scopeLabels[scope].description}
           {scope === 'sendable' && selectedAccount ? `（${selectedAccount.displayName || selectedAccount.name}）` : ''}
-          。注文数・累計購入額はShopify顧客情報、最終注文日は取り込み状況により参考値として扱います。
+          。LINE公式の配信可能人数とは別で、この画面はShopify/統合顧客として名寄せできている人だけを表示します。
+          注文数・累計購入額はShopify顧客情報、最終注文日は取り込み状況により参考値として扱います。
         </p>
       </div>
 
