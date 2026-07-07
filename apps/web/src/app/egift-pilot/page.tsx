@@ -468,15 +468,31 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
         <input className="border rounded px-3 py-2 text-sm w-full" type="number" value={dailyLimit} onChange={e => setDailyLimit(Number(e.target.value))} min={1} max={50} />
       </div>
       <div>
-        <label className="text-xs text-gray-500 mb-1 block">開始日</label>
+        <label className="text-xs text-gray-500 mb-1 block">キャンペーン開始日</label>
         <input className="border rounded px-3 py-2 text-sm w-full" type="date" value={startsAt} onChange={e => setStartsAt(e.target.value)} />
-        <p className="text-xs text-gray-400 mt-0.5">時刻は自動で 00:00 に設定されます</p>
+        <p className="text-xs text-gray-400 mt-0.5">応募受付・抽選の開始日</p>
       </div>
       <div>
-        <label className="text-xs text-gray-500 mb-1 block">終了日</label>
+        <label className="text-xs text-gray-500 mb-1 block">キャンペーン終了日</label>
         <input className="border rounded px-3 py-2 text-sm w-full" type="date" value={endsAt} onChange={e => setEndsAt(e.target.value)} />
-        <p className="text-xs text-gray-400 mt-0.5">時刻は自動で 23:59 に設定されます</p>
+        <p className="text-xs text-gray-400 mt-0.5">最終抽選日（この日を含む）</p>
       </div>
+      {startsAt && endsAt && (
+        <div className="col-span-2 bg-blue-50 border border-blue-200 rounded p-3 text-sm">
+          <p className="text-blue-900">
+            📅 <strong>{(() => {
+              const s = new Date(startsAt + 'T00:00:00+09:00');
+              const e = new Date(endsAt + 'T23:59:59+09:00');
+              const days = Math.max(1, Math.floor((e.getTime() - s.getTime()) / 86400000) + 1);
+              return `${days}日間`;
+            })()}</strong>のキャンペーンです。
+            期間中、毎日 <strong>{dailyLimit}名</strong> を抽選します。
+          </p>
+          <p className="text-blue-700 text-xs mt-1">
+            💡 このフォームは1回だけ作成すればOK。あとは毎日「抽選を実行」ボタンを押すだけです。
+          </p>
+        </div>
+      )}
       <button
         className="col-span-2 bg-green-700 text-white rounded px-4 py-2 text-sm font-semibold disabled:opacity-50"
         disabled={saving}
