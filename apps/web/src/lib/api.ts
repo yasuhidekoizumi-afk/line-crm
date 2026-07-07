@@ -196,6 +196,26 @@ export type FriendListParams = {
 
 export type FriendWithTags = Friend & { tags: Tag[] }
 
+export interface LineOfficialFriendInsightSummary {
+  date: string | null
+  followers: number | null
+  targetedReaches: number | null
+  blocks: number | null
+  status: string | null
+  fetchedAt: string | null
+  items: {
+    id: string
+    line_account_id: string
+    account_name: string | null
+    date: string
+    followers: number | null
+    targeted_reaches: number | null
+    blocks: number | null
+    status: string
+    fetched_at: string
+  }[]
+}
+
 export const api = {
   system: {
     status: () => fetchApi<ApiResponse<SystemStatus>>('/api/system/status'),
@@ -223,6 +243,18 @@ export const api = {
       const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
       return fetchApi<ApiResponse<{ count: number }>>('/api/friends/count' + query)
     },
+    officialInsightLatest: (params?: { accountId?: string }) => {
+      const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
+      return fetchApi<ApiResponse<LineOfficialFriendInsightSummary>>('/api/friends/official-insight/latest' + query)
+    },
+    fetchOfficialInsight: (params?: { accountId?: string; date?: string }) =>
+      fetchApi<ApiResponse<{ items: LineOfficialFriendInsightSummary['items'] }>>('/api/friends/official-insight/fetch', {
+        method: 'POST',
+        body: JSON.stringify({
+          lineAccountId: params?.accountId,
+          date: params?.date,
+        }),
+      }),
     addTag: (friendId: string, tagId: string) =>
       fetchApi<ApiResponse<null>>(`/api/friends/${friendId}/tags`, {
         method: 'POST',

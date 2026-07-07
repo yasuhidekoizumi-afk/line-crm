@@ -25,6 +25,7 @@ export type {
   BroadcastRequest,
   EventMessage,
   FileEventMessage,
+  FollowersInsight,
   FlexContainer,
   FlexMessage,
   FollowEvent,

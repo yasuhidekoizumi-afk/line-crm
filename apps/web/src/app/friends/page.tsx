@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Tag } from '@line-crm/shared'
 import { api } from '@/lib/api'
-import type { FriendWithTags } from '@/lib/api'
+import type { FriendWithTags, LineOfficialFriendInsightSummary } from '@/lib/api'
 import Header from '@/components/layout/header'
 import FriendTable from '@/components/friends/friend-table'
 import CcPromptButton from '@/components/cc-prompt-button'
@@ -31,17 +31,21 @@ const ccPrompts = [
 const PAGE_SIZE = 20
 
 export default function FriendsPage() {
-  const { selectedAccountId } = useAccount()
+  const { selectedAccountId, selectedAccount } = useAccount()
   const [friends, setFriends] = useState<FriendWithTags[]>([])
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [total, setTotal] = useState(0)
+  const [followingCount, setFollowingCount] = useState<number | null>(null)
+  const [officialInsight, setOfficialInsight] = useState<LineOfficialFriendInsightSummary | null>(null)
   const [page, setPage] = useState(1)
   const [hasNextPage, setHasNextPage] = useState(false)
   const [selectedTagId, setSelectedTagId] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
+  const [insightLoading, setInsightLoading] = useState(false)
   const [error, setError] = useState('')
+  const [insightError, setInsightError] = useState('')
 
   const loadTags = useCallback(async () => {
     try {
@@ -79,6 +83,37 @@ export default function FriendsPage() {
     }
   }, [page, selectedTagId, selectedAccountId, searchQuery])
 
+  const loadCounts = useCallback(async () => {
+    setInsightError('')
+    try {
+      const [countRes, insightRes] = await Promise.all([
+        api.friends.count({ accountId: selectedAccountId ?? undefined }),
+        api.friends.officialInsightLatest({ accountId: selectedAccountId ?? undefined }),
+      ])
+      if (countRes.success) setFollowingCount(countRes.data.count)
+      if (insightRes.success) setOfficialInsight(insightRes.data)
+    } catch {
+      setInsightError('公式値の読み込みに失敗しました。')
+    }
+  }, [selectedAccountId])
+
+  const refreshOfficialInsight = useCallback(async () => {
+    setInsightLoading(true)
+    setInsightError('')
+    try {
+      const fetchRes = await api.friends.fetchOfficialInsight({ accountId: selectedAccountId ?? undefined })
+      if (!fetchRes.success) {
+        setInsightError(fetchRes.error)
+        return
+      }
+      await loadCounts()
+    } catch {
+      setInsightError('LINE公式値の取得に失敗しました。')
+    } finally {
+      setInsightLoading(false)
+    }
+  }, [loadCounts, selectedAccountId])
+
   useEffect(() => {
     loadTags()
   }, [loadTags])
@@ -91,13 +126,66 @@ export default function FriendsPage() {
     loadFriends()
   }, [loadFriends])
 
+  useEffect(() => {
+    loadCounts()
+  }, [loadCounts])
+
   const handleTagFilter = (tagId: string) => {
     setSelectedTagId(tagId)
+  }
+
+  const formatInsightDate = (date: string | null) => {
+    if (!date || date.length !== 8) return '未取得'
+    return `${date.slice(0, 4)}/${date.slice(4, 6)}/${date.slice(6, 8)}`
   }
 
   return (
     <div>
       <Header title="友だち管理" />
+
+      <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-medium text-gray-500">LINE公式値</p>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-5 gap-y-2">
+              <div>
+                <span className="text-2xl font-semibold text-gray-900">
+                  {officialInsight?.targetedReaches == null ? '-' : officialInsight.targetedReaches.toLocaleString('ja-JP')}
+                </span>
+                <span className="ml-1 text-sm text-gray-600">ターゲットリーチ</span>
+              </div>
+              <div className="text-sm text-gray-600">
+                友だち追加 {officialInsight?.followers == null ? '-' : officialInsight.followers.toLocaleString('ja-JP')}
+              </div>
+              <div className="text-sm text-gray-600">
+                ブロック {officialInsight?.blocks == null ? '-' : officialInsight.blocks.toLocaleString('ja-JP')}
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              {selectedAccount?.name ?? '選択中のアカウント'} / 集計日 {formatInsightDate(officialInsight?.date ?? null)}
+              {officialInsight?.fetchedAt ? ` / 取得 ${new Date(officialInsight.fetchedAt).toLocaleString('ja-JP')}` : ''}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="text-sm text-gray-600">
+              ハーネスDB: {followingCount == null ? '-' : followingCount.toLocaleString('ja-JP')} 件
+            </div>
+            <button
+              type="button"
+              onClick={refreshOfficialInsight}
+              disabled={insightLoading}
+              className="px-3 py-2 min-h-[44px] text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
+            >
+              {insightLoading ? '取得中...' : 'LINE公式から取得'}
+            </button>
+          </div>
+        </div>
+        {insightError && (
+          <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            {insightError}
+          </div>
+        )}
+      </div>
 
       {/* Filters */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 mb-4">

@@ -149,6 +149,15 @@ export interface UserProfile {
   statusMessage?: string;
 }
 
+// ─── Insight types ───────────────────────────────────────────────────────────
+
+export interface FollowersInsight {
+  status: 'ready' | 'unready' | 'out_of_service';
+  followers?: number;
+  targetedReaches?: number;
+  blocks?: number;
+}
+
 // ─── Send message types ───────────────────────────────────────────────────────
 
 export type FlexContainer = object;
