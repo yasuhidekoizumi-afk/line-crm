@@ -325,6 +325,66 @@ egift.get('/api/egift/campaigns/:id/gifts', async (c) => {
 });
 
 // =============================================================================
+// Products lookup (from Shopify)
+// =============================================================================
+
+interface ShopifyProductOption {
+  sku: string;
+  productTitle: string;
+  variantTitle: string;
+  price: string;
+  stock: number;
+}
+
+egift.get('/api/egift/products', async (c) => {
+  try {
+    const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+    const token = c.env.SHOPIFY_ADMIN_TOKEN;
+
+    if (!token) {
+      return c.json({ success: false, error: 'Shopify API token not configured' }, 500);
+    }
+
+    const q = c.req.query('q') || '';
+    const url = q
+      ? `https://${domain}/admin/api/2024-01/products.json?status=active&limit=100&title=${encodeURIComponent(q)}`
+      : `https://${domain}/admin/api/2024-01/products.json?status=active&limit=100`;
+
+    const res = await fetch(url, {
+      headers: {
+        'X-Shopify-Access-Token': token,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      return c.json({ success: false, error: `Shopify API error: ${res.status}` }, 502);
+    }
+
+    const data = await res.json() as { products: any[] };
+    const options: ShopifyProductOption[] = [];
+
+    for (const p of data.products) {
+      for (const v of p.variants) {
+        if (!v.sku) continue;
+        if (v.inventory_quantity < 5) continue; // skip out-of-stock
+        options.push({
+          sku: v.sku,
+          productTitle: p.title,
+          variantTitle: v.title,
+          price: v.price,
+          stock: v.inventory_quantity,
+        });
+      }
+    }
+
+    return c.json({ success: true, data: options });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+// =============================================================================
 // Gift LP (public)
 // =============================================================================
 

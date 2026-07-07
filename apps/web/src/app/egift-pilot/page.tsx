@@ -444,6 +444,16 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
   const [dailyLimit, setDailyLimit] = useState(10)
   const [targetSku, setTargetSku] = useState('')
   const [saving, setSaving] = useState(false)
+  const [productOptions, setProductOptions] = useState<Array<{sku: string; productTitle: string; variantTitle: string; price: string; stock: number}>>([])
+  const [productsLoading, setProductsLoading] = useState(false)
+
+  useEffect(() => {
+    api.egift.listProducts().then((r: any) => {
+      if (r.success) setProductOptions(r.data)
+    }).catch(() => {})
+  }, [])
+
+  const selectedProduct = productOptions.find(p => p.sku === targetSku)
 
   const handleCreate = async () => {
     if (!name || !startsAt || !endsAt) return alert('必須項目を入力してください')
@@ -469,8 +479,28 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
       </div>
       <div>
         <label className="text-xs text-gray-500 mb-1 block">対象商品SKU <span className="text-gray-400">（任意）</span></label>
-        <input className="border rounded px-3 py-2 text-sm w-full" placeholder="例: set3-pla-cho-ban-40-box-select" value={targetSku} onChange={e => setTargetSku(e.target.value)} />
-        <p className="text-xs text-gray-400 mt-0.5">ShopifyのSKU。空欄可・後から変更可</p>
+        {productOptions.length > 0 ? (
+          <>
+            <select
+              className="border rounded px-3 py-2 text-sm w-full bg-white"
+              value={targetSku}
+              onChange={e => setTargetSku(e.target.value)}
+            >
+              <option value="">指定なし</option>
+              {productOptions.map(p => (
+                <option key={p.sku} value={p.sku}>
+                  {p.productTitle}{p.variantTitle !== 'Default Title' ? ` — ${p.variantTitle}` : ''} | ¥{Number(p.price).toLocaleString()} | 在庫{p.stock}
+                </option>
+              ))}
+            </select>
+            {selectedProduct && (
+              <p className="text-xs text-green-700 mt-0.5">選択中: {selectedProduct.productTitle} — ¥{Number(selectedProduct.price).toLocaleString()}（在庫{selectedProduct.stock}個）</p>
+            )}
+          </>
+        ) : (
+          <input className="border rounded px-3 py-2 text-sm w-full" placeholder="例: set3-pla-cho-ban-40-box-select" value={targetSku} onChange={e => setTargetSku(e.target.value)} />
+        )}
+        <p className="text-xs text-gray-400 mt-0.5">Shopifyの商品から選択（在庫5個以上のみ表示）</p>
       </div>
       <div>
         <label className="text-xs text-gray-500 mb-1 block">1日あたり当選数</label>

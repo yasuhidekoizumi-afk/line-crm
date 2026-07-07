@@ -821,6 +821,8 @@ export const api = {
       fetchApi<ApiResponse<any[]>>(`/api/egift/campaigns/${id}/applications`),
     listGifts: (id: string) =>
       fetchApi<ApiResponse<any[]>>(`/api/egift/campaigns/${id}/gifts`),
+    listProducts: () =>
+      fetchApi<ApiResponse<any[]>>('/api/egift/products'),
     apply: (data: { campaignId: string; giverFriendId: string; occasion: string; message?: string }) =>
       fetchApi<ApiResponse<any>>('/api/egift/applications', { method: 'POST', body: JSON.stringify(data) }),
     lotteryDryRun: (campaignId: string) =>
