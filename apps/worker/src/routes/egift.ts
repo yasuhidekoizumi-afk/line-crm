@@ -484,169 +484,250 @@ egift.get('/g/:token', async (c) => {
     ).bind(gift.giver_friend_id).first<{ display_name: string | null }>();
     const giverName = giver?.display_name ?? 'お友達';
 
+    // Get giver message from application
+    const app = await c.env.DB.prepare(
+      'SELECT message, occasion FROM egift_applications WHERE id = ?',
+    ).bind(gift.application_id).first<{ message: string | null; occasion: string | null }>();
+    const giverMessage = app?.message || null;
+
+    // Get campaign product info
+    let productImage = '';
+    let productName = '米麹ミニグラノーラ 選べる3種セット';
+    if (gift.campaign_id) {
+      const camp = await getEgiftCampaignById(c.env.DB, gift.campaign_id);
+      if (camp?.target_product_id) {
+        // Try Shopify for product image
+        const pid = camp.target_product_id.replace('gid://shopify/Product/', '');
+        try {
+          const token = await getShopifyAdminToken({
+            SHOPIFY_SHOP_DOMAIN: c.env.SHOPIFY_SHOP_DOMAIN,
+            SHOPIFY_CLIENT_ID: c.env.SHOPIFY_CLIENT_ID,
+            SHOPIFY_CLIENT_SECRET: c.env.SHOPIFY_CLIENT_SECRET,
+            SHOPIFY_ADMIN_TOKEN: c.env.SHOPIFY_ADMIN_TOKEN,
+          });
+          if (token) {
+            const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+            const pRes = await fetch(`https://${domain}/admin/api/2024-01/products/${pid}.json`, {
+              headers: { 'X-Shopify-Access-Token': token },
+            });
+            if (pRes.ok) {
+              const pData = await pRes.json() as { product: { title: string; image?: { src: string } } };
+              productName = pData.product.title;
+              productImage = pData.product.image?.src || '';
+            }
+          }
+        } catch {}
+      }
+    }
+
+    const escapedGiverName = giverName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const escapedProductName = productName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const escapedMessage = giverMessage ? giverMessage.replace(/`/g, '\\`').replace(/\$/g, '\\$') : '';
+    const imageUrl = productImage || 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A0295.jpg';
+
     // Return HTML gift LP
     return c.html(`<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ORYZAE ギフト</title>
+<meta name="theme-color" content="#5c4a2e">
+<title>${escapedGiverName}さんからの贈り物 | ORYZAE</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; background: #faf7f2; color: #3d3226; line-height: 1.7; }
-  .container { max-width: 420px; margin: 0 auto; padding: 40px 20px; }
-  .card { background: #fff; border-radius: 12px; padding: 32px 24px; box-shadow: 0 2px 12px rgba(0,0,0,.06); text-align: center; }
-  .gift-icon { font-size: 48px; margin-bottom: 12px; }
-  h1 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
-  .giver { font-size: 14px; color: #8a7a5c; margin-bottom: 24px; }
-  .product-img { width: 120px; height: 120px; background: #f0ebe0; border-radius: 8px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; font-size: 40px; }
-  .message-box { background: #fdf8f0; border: 1px solid #e8dcc8; border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 14px; color: #5c4a2e; }
-  .features { text-align: left; margin-bottom: 24px; font-size: 14px; }
-  .features li { margin-bottom: 8px; padding-left: 4px; }
-  .btn { display: block; width: 100%; padding: 16px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans","Helvetica Neue",sans-serif; background: #faf7f2; color: #3d3226; line-height: 1.7; -webkit-font-smoothing: antialiased; }
+  .container { max-width: 440px; margin: 0 auto; padding: 0 0 60px; }
+  .hero { background: linear-gradient(135deg, #5c4a2e 0%, #8a6d3b 100%); color: #fff; padding: 32px 20px 24px; text-align: center; }
+  .hero-icon { font-size: 32px; margin-bottom: 8px; }
+  .hero h1 { font-size: 18px; font-weight: 700; line-height: 1.5; }
+  .hero .giver { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+  .steps { display: flex; justify-content: center; padding: 16px; gap: 8px; background: #fff; border-bottom: 1px solid #eee; }
+  .step { flex: 0 0 auto; text-align: center; font-size: 11px; color: #ccc; }
+  .step.active { color: #5c4a2e; font-weight: 700; }
+  .step.done { color: #5c4a2e; }
+  .step .dot { width: 28px; height: 28px; border-radius: 50%; background: #eee; margin: 0 auto 4px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .step.active .dot { background: #5c4a2e; color: #fff; }
+  .step.done .dot { background: #4caf50; color: #fff; }
+  .card { background: #fff; margin: 16px; border-radius: 12px; padding: 28px 24px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+  .product-img { width: 100%; max-width: 280px; aspect-ratio: 1; object-fit: cover; border-radius: 8px; margin: 0 auto 16px; display: block; background: #f0ebe0; }
+  .product-name { font-size: 15px; font-weight: 700; text-align: center; margin-bottom: 8px; }
+  .product-desc { font-size: 13px; color: #8a7a5c; text-align: center; margin-bottom: 20px; }
+  .message-box { background: #fdf8f0; border: 1px solid #e8dcc8; border-radius: 8px; padding: 16px; margin-bottom: 20px; font-size: 14px; color: #5c4a2e; text-align: center; position: relative; }
+  .message-box::before { content: "💌"; font-size: 20px; display: block; margin-bottom: 8px; }
+  .message-box .msg-text { font-style: italic; }
+  .btn { display: block; width: 100%; padding: 16px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; text-align: center; transition: opacity .2s; }
+  .btn:active { opacity: .8; }
   .btn-primary { background: #5c4a2e; color: #fff; }
-  .btn-primary:hover { background: #4a3b24; }
-  .btn-line { background: #06C755; color: #fff; margin-top: 12px; }
-  .btn-line:hover { background: #05a748; }
-  .note { font-size: 11px; color: #aaa; margin-top: 20px; }
-  .form-group { margin-bottom: 16px; text-align: left; }
-  .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #5c4a2e; }
-  .form-group input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; }
-  #claim-section.hidden, #redeem-section.hidden, #done-section.hidden { display: none; }
+  .btn-line { background: #06C755; color: #fff; }
+  .btn-white { background: #fff; color: #5c4a2e; border: 2px solid #5c4a2e; }
+  .note { font-size: 11px; color: #999; margin-top: 16px; text-align: center; }
+  .form-group { margin-bottom: 14px; text-align: left; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #5c4a2e; }
+  .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; background: #fafaf7; }
+  .form-group input:focus { outline: none; border-color: #5c4a2e; box-shadow: 0 0 0 2px rgba(92,74,46,.1); }
+  #redeem-section, #done-section { display: none; }
   .hidden { display: none !important; }
+  .footer { text-align: center; padding: 24px 16px; font-size: 11px; color: #bbb; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; border-top-color: transparent; animation: spin .6s linear infinite; margin-right: 8px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 <div class="container">
 
-  <!-- STEP 0: Friend Add Gate -->
-  <div id="claim-section" class="card">
-    <div class="gift-icon">🎁</div>
-    <h1>${giverName}さんから<br>発酵習慣の贈り物が届いています</h1>
-    <div class="product-img">🎁</div>
-    <div class="features">
-      <p style="font-size:14px;margin-bottom:12px;">人気の3フレーバーを<br>ちょっとずつ試せるギフトです。</p>
-      <p style="font-size:13px;color:#8a7a5c;">受け取りには、配送のご連絡のため<br>ORYZAE公式LINEの友だち追加をお願いします。</p>
-    </div>
-    <a class="btn btn-line" href="${claimUrl}" target="_blank" rel="noopener" id="line-add-btn">
-      🎁 LINEでギフトを受け取る
-    </a>
-    <p class="note">※ 1リンクにつき1回限り<br>※ 7日以内のお受け取りをお願いします<br>※ 無料・送料込みです</p>
-  </div>
+<div class="hero">
+  <div class="hero-icon">🎁</div>
+  <h1>${escapedGiverName}さんから<br>発酵習慣の贈り物が届いています</h1>
+</div>
 
-  <!-- STEP 1: Redeem Form (shown after LINE add) -->
-  <div id="redeem-section" class="card hidden">
-    <div class="gift-icon">📦</div>
-    <h1>ご登録ありがとうございます</h1>
-    <p style="font-size:14px;color:#8a7a5c;margin-bottom:24px;">ギフトのお届け先をご入力ください</p>
-    <div class="form-group">
-      <label>お名前</label>
-      <input type="text" id="name" placeholder="山田 花子">
-    </div>
-    <div class="form-group">
-      <label>郵便番号</label>
-      <input type="text" id="zip" placeholder="1500001">
-    </div>
-    <div class="form-group">
-      <label>ご住所</label>
-      <input type="text" id="address" placeholder="東京都渋谷区...">
-    </div>
-    <div class="form-group">
-      <label>電話番号</label>
-      <input type="text" id="phone" placeholder="09012345678">
-    </div>
-    <div class="form-group">
-      <label>メールアドレス</label>
-      <input type="email" id="email" placeholder="example@mail.com">
-    </div>
-    <button class="btn btn-primary" id="redeem-btn">📦 受け取りを完了する</button>
-  </div>
+<div class="steps">
+  <div class="step active" id="step1"><div class="dot">1</div>受け取る</div>
+  <div style="color:#ddd;padding-top:12px;">→</div>
+  <div class="step" id="step2"><div class="dot">2</div>お届け先入力</div>
+  <div style="color:#ddd;padding-top:12px;">→</div>
+  <div class="step" id="step3"><div class="dot">3</div>完了</div>
+</div>
 
-  <!-- STEP 2: Done -->
-  <div id="done-section" class="card hidden">
-    <div class="gift-icon">✅</div>
-    <h1>受け取り完了しました</h1>
-    <p style="font-size:14px;color:#8a7a5c;margin-top:12px;">${giverName}さんからの贈り物、<br>まもなくお手元に届きます。</p>
-    <p style="font-size:14px;margin-top:16px;">はじめての発酵習慣、<br>どうぞお楽しみに。</p>
-    <a class="btn btn-primary" href="https://oryzae.shop" style="margin-top:24px;">ORYZAEの商品を見てみる</a>
+<!-- STEP 1: Claim -->
+<div id="claim-section" class="card">
+  <img class="product-img" src="${imageUrl}" alt="${escapedProductName}" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" loading="lazy">
+  <div style="display:none;width:100%;max-width:280px;aspect-ratio:1;margin:0 auto 16px;background:#f0ebe0;border-radius:8px;display:none;align-items:center;justify-content:center;font-size:48px">🎁</div>
+  <div class="product-name">${escapedProductName}</div>
+  <div class="product-desc">人気の3フレーバーをちょっとずつ試せるギフトです。<br>無料・送料込みでお届けします。</div>
+  ${escapedMessage ? '<div class="message-box"><div class="msg-text">' + escapedMessage + '</div></div>' : ''}
+  <a class="btn btn-line" href="${claimUrl}" id="line-add-btn">
+    🎁 LINEでギフトを受け取る
+  </a>
+  <p class="note">※ LINE公式アカウントの友だち追加が必要です<br>※ 1リンクにつき1回限り・7日間有効</p>
+</div>
+
+<!-- STEP 2: Redeem -->
+<div id="redeem-section" class="card">
+  <h2 style="font-size:18px;margin-bottom:6px;">📦 お届け先のご登録</h2>
+  <p style="font-size:13px;color:#8a7a5c;margin-bottom:20px;">ギフトのお届け先をご入力ください</p>
+  <div class="form-group">
+    <label>お名前 <span style="color:#e74c3c">*</span></label>
+    <input type="text" id="name" placeholder="山田 花子" autocomplete="name">
   </div>
+  <div class="form-group">
+    <label>郵便番号</label>
+    <input type="text" id="zip" placeholder="150-0001" autocomplete="postal-code">
+  </div>
+  <div class="form-group">
+    <label>ご住所 <span style="color:#e74c3c">*</span></label>
+    <input type="text" id="address" placeholder="東京都渋谷区..." autocomplete="street-address">
+  </div>
+  <div class="form-group">
+    <label>電話番号</label>
+    <input type="tel" id="phone" placeholder="090-1234-5678" autocomplete="tel">
+  </div>
+  <div class="form-group">
+    <label>メールアドレス</label>
+    <input type="email" id="email" placeholder="example@mail.com" autocomplete="email">
+  </div>
+  <button class="btn btn-primary" id="redeem-btn">
+    <span id="redeem-btn-text">📦 受け取りを完了する</span>
+  </button>
+  <p class="note">ご入力いただいた情報は商品発送のみに使用します</p>
+</div>
+
+<!-- STEP 3: Done -->
+<div id="done-section" class="card">
+  <div style="font-size:56px;margin-bottom:12px;">✅</div>
+  <h2 style="font-size:20px;margin-bottom:8px;">受け取り完了しました</h2>
+  <p style="font-size:14px;color:#8a7a5c;margin-bottom:24px;">${escapedGiverName}さんからの贈り物、<br>まもなくお手元に届きます。</p>
+  <div style="background:#fdf8f0;border-radius:8px;padding:16px;margin-bottom:20px;text-align:left;font-size:13px;">
+    <p style="font-weight:700;color:#5c4a2e;margin-bottom:8px;">🎯 次はあなたも贈り主に</p>
+    <p style="color:#8a7a5c;line-height:1.6;">気に入ったら、今度はあなたが誰かに贈ってみませんか？<br>ORYZAE公式LINEでお得な情報をお届けしています。</p>
+  </div>
+  <a class="btn btn-white" href="https://oryzae.shop" style="margin-bottom:8px;">ORYZAEの商品を見てみる</a>
+  <a class="btn btn-line" href="https://lin.ee/ORYZAE" style="font-size:14px;padding:12px;">🧑‍🍳 ORYZAE公式LINEを友だち追加</a>
+</div>
+
+<div class="footer">ORYZAE Inc. — 地球を発酵させる</div>
 
 </div>
 
 <script>
 const TOKEN = ${JSON.stringify(token)};
-const GIFT_ID = ${JSON.stringify(gift.id)};
 const STATUS = ${JSON.stringify(gift.status)};
+const BASE = location.origin;
 
+const step1 = document.getElementById('step1');
+const step2 = document.getElementById('step2');
+const step3 = document.getElementById('step3');
 const claimSection = document.getElementById('claim-section');
 const redeemSection = document.getElementById('redeem-section');
 const doneSection = document.getElementById('done-section');
 
-function show(section) {
-  claimSection.classList.add('hidden');
-  redeemSection.classList.add('hidden');
-  doneSection.classList.add('hidden');
-  section.classList.remove('hidden');
+function setStep(n) {
+  [step1, step2, step3].forEach((s, i) => {
+    s.className = 'step' + (i + 1 === n ? ' active' : i + 1 < n ? ' done' : '');
+  });
 }
 
-// If already line_added, show redeem form directly
+function show(el) {
+  claimSection.style.display = 'none';
+  redeemSection.style.display = 'none';
+  doneSection.style.display = 'none';
+  el.style.display = '';
+}
+
 if (STATUS === 'line_added') {
+  setStep(2);
   show(redeemSection);
 } else {
+  setStep(1);
   show(claimSection);
 }
 
-// Handle LINE add callback (simplified for pilot — in production, use LIFF)
-// For now, we provide a manual "I've added LINE" button flow
-document.getElementById('line-add-btn').addEventListener('click', async function(e) {
-  e.preventDefault();
-  // In production, this would use LIFF to get the LINE user ID
-  // For pilot, we show the redeem form after a brief delay
-  // The actual LINE add claim happens via the /api/egift/gifts/claim endpoint
+document.getElementById('line-add-btn').addEventListener('click', function() {
+  setStep(2);
   show(redeemSection);
 });
 
 document.getElementById('redeem-btn').addEventListener('click', async function() {
   const btn = this;
+  const btnText = document.getElementById('redeem-btn-text');
   btn.disabled = true;
-  btn.textContent = '処理中...';
+  btnText.innerHTML = '<span class="spinner"></span>処理中...';
 
   const name = document.getElementById('name').value.trim();
-  const zip = document.getElementById('zip').value.trim();
   const address = document.getElementById('address').value.trim();
-  const phone = document.getElementById('phone').value.trim();
-  const email = document.getElementById('email').value.trim();
 
   if (!name || !address) {
     alert('お名前とご住所は必須です');
     btn.disabled = false;
-    btn.textContent = '📦 受け取りを完了する';
+    btnText.textContent = '📦 受け取りを完了する';
     return;
   }
 
   try {
-    const res = await fetch('/api/egift/gifts/redeem', {
+    const res = await fetch(BASE + '/api/egift/gifts/redeem', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        token: TOKEN,
-        name, zip, address, phone, email,
-        prefecture: '', city: '',
-        address1: address, address2: '',
+        token: TOKEN, name,
+        zip: document.getElementById('zip').value.trim(),
+        address,
+        phone: document.getElementById('phone').value.trim(),
+        email: document.getElementById('email').value.trim(),
+        prefecture: '', city: '', address1: address, address2: '',
       }),
     });
     const data = await res.json();
     if (data.success) {
+      setStep(3);
       show(doneSection);
     } else {
       alert('エラー: ' + (data.error || '不明なエラー'));
       btn.disabled = false;
-      btn.textContent = '📦 受け取りを完了する';
+      btnText.textContent = '📦 受け取りを完了する';
     }
   } catch (err) {
-    alert('通信エラーが発生しました');
+    alert('通信エラーが発生しました。時間をおいてお試しください。');
     btn.disabled = false;
-    btn.textContent = '📦 受け取りを完了する';
+    btnText.textContent = '📦 受け取りを完了する';
   }
 });
 </script>
