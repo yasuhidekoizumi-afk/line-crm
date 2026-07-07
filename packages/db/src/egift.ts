@@ -155,6 +155,16 @@ export async function activateEgiftCampaign(db: D1Database, id: string): Promise
     .bind('active', jstNow(), id).run();
 }
 
+export async function pauseEgiftCampaign(db: D1Database, id: string): Promise<void> {
+  await db.prepare('UPDATE egift_campaigns SET status = ?, updated_at = ? WHERE id = ?')
+    .bind('paused', jstNow(), id).run();
+}
+
+export async function completeEgiftCampaign(db: D1Database, id: string): Promise<void> {
+  await db.prepare('UPDATE egift_campaigns SET status = ?, updated_at = ? WHERE id = ?')
+    .bind('completed', jstNow(), id).run();
+}
+
 export async function deleteEgiftCampaign(db: D1Database, id: string): Promise<void> {
   // ON DELETE CASCADE により egift_applications → egift_gifts → egift_events / egift_recipient_purchases も自動削除
   await db.prepare('DELETE FROM egift_campaigns WHERE id = ?').bind(id).run();

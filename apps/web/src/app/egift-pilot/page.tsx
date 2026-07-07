@@ -111,7 +111,7 @@ export default function EgiftPilotPage() {
       </div>
 
       {/* Campaign selector */}
-      <div className="mb-6 flex gap-2 items-center">
+      <div className="mb-6 flex gap-2 items-center flex-wrap">
         <select
           value={selectedId ?? ''}
           onChange={e => setSelectedId(e.target.value)}
@@ -122,11 +122,48 @@ export default function EgiftPilotPage() {
           ))}
         </select>
         {campaign && (
-          <span className="text-xs text-gray-500">
-            {campaign.startsAt.slice(0, 10)} 〜 {campaign.endsAt.slice(0, 10)}
-            &nbsp;|&nbsp; 1日{campaign.dailyWinnerLimit}名
-            {campaign.targetSku && <>&nbsp;|&nbsp; SKU: {campaign.targetSku}</>}
-          </span>
+          <>
+            <span className="text-xs text-gray-500">
+              {campaign.startsAt.slice(0, 10)} 〜 {campaign.endsAt.slice(0, 10)}
+              &nbsp;|&nbsp; 1日{campaign.dailyWinnerLimit}名
+              {campaign.targetSku && <>&nbsp;|&nbsp; SKU: {campaign.targetSku}</>}
+            </span>
+            <div className="flex gap-1 ml-2">
+              {campaign.status === 'draft' && (
+                <button className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                  onClick={async () => {
+                    const r = await api.egift.activateCampaign(campaign.id);
+                    if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'active'} : c));
+                    else alert('失敗: ' + r.error);
+                  }}>▶ 開始</button>
+              )}
+              {campaign.status === 'active' && (
+                <button className="text-xs px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                  onClick={async () => {
+                    const r = await api.egift.pauseCampaign(campaign.id);
+                    if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'paused'} : c));
+                    else alert('失敗: ' + r.error);
+                  }}>⏸ 一時停止</button>
+              )}
+              {campaign.status === 'paused' && (
+                <button className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                  onClick={async () => {
+                    const r = await api.egift.activateCampaign(campaign.id);
+                    if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'active'} : c));
+                    else alert('失敗: ' + r.error);
+                  }}>▶ 再開</button>
+              )}
+              {campaign.status !== 'completed' && (
+                <button className="text-xs px-2 py-1 bg-gray-400 text-white rounded hover:bg-gray-500"
+                  onClick={async () => {
+                    if (!confirm('キャンペーンを完了にしますか？')) return;
+                    const r = await api.egift.completeCampaign(campaign.id);
+                    if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'completed'} : c));
+                    else alert('失敗: ' + r.error);
+                  }}>✓ 完了</button>
+              )}
+            </div>
+          </>
         )}
       </div>
 

@@ -815,6 +815,10 @@ export const api = {
       fetchApi<ApiResponse<any>>('/api/egift/campaigns', { method: 'POST', body: JSON.stringify(data) }),
     activateCampaign: (id: string) =>
       fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${id}/activate`, { method: 'POST' }),
+    pauseCampaign: (id: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${id}/pause`, { method: 'POST' }),
+    completeCampaign: (id: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${id}/complete`, { method: 'POST' }),
     deleteCampaign: (id: string) =>
       fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${id}`, { method: 'DELETE' }),
     listApplications: (id: string) =>

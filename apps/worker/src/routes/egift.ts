@@ -5,6 +5,8 @@ import {
   listEgiftCampaigns,
   activateEgiftCampaign,
   deleteEgiftCampaign,
+  pauseEgiftCampaign,
+  completeEgiftCampaign,
   createEgiftApplication,
   getApplicationCountForCampaign,
   listApplicationsByCampaign,
@@ -115,6 +117,24 @@ egift.post('/api/egift/campaigns', async (c) => {
 egift.post('/api/egift/campaigns/:id/activate', async (c) => {
   try {
     await activateEgiftCampaign(c.env.DB, c.req.param('id'));
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+egift.post('/api/egift/campaigns/:id/pause', async (c) => {
+  try {
+    await pauseEgiftCampaign(c.env.DB, c.req.param('id'));
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+egift.post('/api/egift/campaigns/:id/complete', async (c) => {
+  try {
+    await completeEgiftCampaign(c.env.DB, c.req.param('id'));
     return c.json({ success: true });
   } catch (e) {
     return c.json({ success: false, error: String(e) }, 500);
