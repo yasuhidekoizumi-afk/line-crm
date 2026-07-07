@@ -268,11 +268,25 @@ export default function EgiftPilotPage() {
 
           {/* テスト応募追加 */}
           <details className="mb-8 border rounded-lg p-3">
-            <summary className="cursor-pointer text-sm text-gray-500">🧪 テスト応募を追加</summary>
+            <summary className="cursor-pointer text-sm text-gray-500">🧪 テスト応募を追加 / 応募リンク</summary>
             <TestApplicationForm
               campaignId={selectedId!}
               onAdded={() => refreshData(selectedId!)}
             />
+            <div className="mt-3 pt-3 border-t">
+              <p className="text-xs text-gray-500 mb-1">📱 LINE友だち向け応募リンク（LIFF）</p>
+              <div className="flex gap-1">
+                <code className="text-xs bg-gray-100 px-2 py-1 rounded flex-1 break-all">
+                  https://liff.line.me/?page=egift-apply&amp;campaign_id={selectedId}
+                </code>
+                <button className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded"
+                  onClick={() => {
+                    copyToClipboard(`https://liff.line.me/?page=egift-apply&campaign_id=${selectedId}`);
+                    alert('コピーしました。LINE配信でこのURLを共有してください。');
+                  }}>📋</button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">LINE一斉配信でこのURLを共有すれば、友だちが応募できます</p>
+            </div>
           </details>
 
           {/* =========================================================== */}

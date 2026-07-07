@@ -164,9 +164,33 @@ egift.delete('/api/egift/campaigns/:id', async (c) => {
 egift.post('/api/egift/applications', async (c) => {
   try {
     const body = await c.req.json();
+    let giverFriendId = body.giverFriendId as string | undefined;
+
+    // Resolve lineUserId → friendId if needed
+    if (!giverFriendId && body.lineUserId) {
+      const friend = await c.env.DB.prepare(
+        'SELECT id FROM friends WHERE line_user_id = ?',
+      ).bind(body.lineUserId).first<{ id: string }>();
+      if (!friend) {
+        // Create friend record if not exists
+        const newId = crypto.randomUUID();
+        await c.env.DB.prepare(
+          `INSERT INTO friends (id, line_user_id, is_following, created_at, updated_at)
+           VALUES (?, ?, 1, ?, ?)`,
+        ).bind(newId, body.lineUserId, new Date().toISOString(), new Date().toISOString()).run();
+        giverFriendId = newId;
+      } else {
+        giverFriendId = friend.id;
+      }
+    }
+
+    if (!giverFriendId) {
+      return c.json({ success: false, error: 'giverFriendId or lineUserId is required' }, 400);
+    }
+
     const application = await createEgiftApplication(c.env.DB, {
       campaignId: body.campaignId,
-      giverFriendId: body.giverFriendId,
+      giverFriendId,
       occasion: body.occasion ?? 'other',
       message: body.message,
       lotteryWeight: body.lotteryWeight,
@@ -476,7 +500,7 @@ egift.get('/g/:token', async (c) => {
 
     // Get LIFF URL for LINE friend-add redirect
     const liffUrlBase = c.env.LIFF_URL || 'https://liff.line.me/';
-    const claimUrl = `${liffUrlBase}?egift_token=${encodeURIComponent(token)}`;
+    const claimUrl = `${liffUrlBase}?page=egift&egift_token=${encodeURIComponent(token)}`;
 
     // Get giver info
     const giver = await c.env.DB.prepare(
@@ -652,6 +676,8 @@ egift.get('/g/:token', async (c) => {
 const TOKEN = ${JSON.stringify(token)};
 const STATUS = ${JSON.stringify(gift.status)};
 const BASE = location.origin;
+const urlParams = new URLSearchParams(location.search);
+const returnStatus = urlParams.get('status');
 
 const step1 = document.getElementById('step1');
 const step2 = document.getElementById('step2');
@@ -673,7 +699,7 @@ function show(el) {
   el.style.display = '';
 }
 
-if (STATUS === 'line_added') {
+if (STATUS === 'line_added' || returnStatus === 'line_added') {
   setStep(2);
   show(redeemSection);
 } else {
@@ -682,8 +708,8 @@ if (STATUS === 'line_added') {
 }
 
 document.getElementById('line-add-btn').addEventListener('click', function() {
-  setStep(2);
-  show(redeemSection);
+  // LIFF handles the actual LINE verification and calls claim API
+  // The LIFF app will redirect back with ?status=line_added on success
 });
 
 document.getElementById('redeem-btn').addEventListener('click', async function() {

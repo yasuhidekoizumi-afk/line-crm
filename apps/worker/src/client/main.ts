@@ -18,6 +18,8 @@ import { initBooking } from './booking.js';
 import { initForm } from './form.js';
 import { initLinkShopify } from './link-shopify.js';
 import { initEmailLink } from './email-link.js';
+import { initEgift } from './egift.js';
+import { initEgiftApply } from './egift-apply.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -349,6 +351,10 @@ async function main() {
       await initLinkShopify();
     } else if (page === 'email-link') {
       await initEmailLink();
+    } else if (page === 'egift') {
+      await initEgift();
+    } else if (page === 'egift-apply') {
+      await initEgiftApply();
     } else {
       await linkAndAddFlow();
     }
