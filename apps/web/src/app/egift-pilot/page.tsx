@@ -49,7 +49,30 @@ export default function EgiftPilotPage() {
 
   return (
     <div className="p-6 max-w-4xl">
-      <h1 className="text-2xl font-bold mb-6">🎁 eGift パイロット</h1>
+      <h1 className="text-2xl font-bold mb-2">🎁 eGift パイロット</h1>
+
+      {/* 機能説明 */}
+      <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4 text-sm leading-relaxed text-gray-700">
+        <p className="font-semibold text-green-900 mb-1">この機能でできること</p>
+        <p className="mb-3">
+          既存のお客さま（LINE友だち・購入者）を<strong>贈り主</strong>として抽選で選び、
+          そのお客さまからご友人・ご家族へ ORYZAE のギフト（米麹ミニグラノーラ3種セット）を
+          無料で贈ってもらう施策です。ギフトリンクを受け取った方に
+          <strong>LINE友だち追加</strong>してもらったうえで商品を引き換えてもらい、
+          <strong>初回購入</strong>へつなげます。
+        </p>
+        <p className="font-semibold text-green-900 mb-1">使い方の流れ</p>
+        <ol className="list-decimal list-inside space-y-0.5 mb-3">
+          <li>「＋ キャンペーンを新規作成」でパイロットを1件つくる（期間・1日あたり当選数を設定）</li>
+          <li>贈り主の応募が集まる → 毎日、既存ランク優遇つきで抽選（1日10名）</li>
+          <li>当選者にギフトリンクを発行 → 贈り主が友人に送る</li>
+          <li>受贈者がLINE友だち追加 → 送料無料＋100%OFFクーポンで引換 → 発送</li>
+          <li>下のダッシュボードで KPI（友だち化率・初回購入率）を確認して GO/STOP 判断</li>
+        </ol>
+        <p className="text-xs text-gray-500">
+          🎯 KGI：受贈者の初回購入転換　／　必須KPI：受贈者のLINE友だち化　／　期間：2026-07-21〜08-17（4週間）
+        </p>
+      </div>
 
       {/* Campaign selector */}
       <div className="mb-6 flex gap-2 items-center">
