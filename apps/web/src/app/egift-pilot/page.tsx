@@ -56,19 +56,29 @@ export default function EgiftPilotPage() {
         <p className="font-semibold text-green-900 mb-1">この機能でできること</p>
         <p className="mb-3">
           既存のお客さま（LINE友だち・購入者）を<strong>贈り主</strong>として抽選で選び、
-          そのお客さまからご友人・ご家族へ ORYZAE のギフト（米麹ミニグラノーラ3種セット）を
-          無料で贈ってもらう施策です。ギフトリンクを受け取った方に
-          <strong>LINE友だち追加</strong>してもらったうえで商品を引き換えてもらい、
-          <strong>初回購入</strong>へつなげます。
+          友人・家族に ORYZAE のギフト（米麹ミニグラノーラ3種セット）を無料で贈ってもらいます。
+          受贈者は LINE友だち追加 → 100%OFFクーポンで引換 → 初回購入へ、という流れです。
         </p>
-        <p className="font-semibold text-green-900 mb-1">使い方の流れ</p>
-        <ol className="list-decimal list-inside space-y-0.5 mb-3">
-          <li>「＋ キャンペーンを新規作成」でパイロットを1件つくる（期間・1日あたり当選数を設定）</li>
-          <li>贈り主の応募が集まる → 毎日、既存ランク優遇つきで抽選（1日10名）</li>
-          <li>当選者にギフトリンクを発行 → 贈り主が友人に送る</li>
-          <li>受贈者がLINE友だち追加 → 送料無料＋100%OFFクーポンで引換 → 発送</li>
-          <li>下のダッシュボードで KPI（友だち化率・初回購入率）を確認して GO/STOP 判断</li>
+
+        <p className="font-semibold text-green-900 mb-1">実際に動くもの</p>
+        <p className="mb-2">
+          当選すると、こんなギフトリンクが発行されます（※URLは当選ごとに1つずつ生成）：
+        </p>
+        <div className="bg-white rounded border border-green-300 px-3 py-2 mb-3 font-mono text-xs break-all text-gray-800">
+          https://oryzae-line-crm.oryzae.workers.dev/g/<span className="text-green-700 font-semibold">【ユニークなトークン】</span>
+        </div>
+        <p className="mb-2">
+          このURLを LINE やメールで共有するだけで、受け取った人は次の3ステップでギフトを引き換えられます：
+        </p>
+        <ol className="list-decimal list-inside space-y-0.5 mb-2 text-xs">
+          <li>リンクを開く → 商品画像＋「受け取る」ボタンが表示される</li>
+          <li>「受け取る」→ LINE友だち追加を促す画面 → 友だち追加で本人確認</li>
+          <li>氏名・住所を入力 → 100%OFFクーポンが自動発行 → Shopifyで¥0購入 → 通常配送</li>
         </ol>
+        <p className="mb-2">
+          Shopify側では<strong>対象商品に送料無料を設定＋100%OFFクーポン1枚を発行</strong>する2段構成。
+          クーポンは1回限り・当選者限定のため、URLを知らない第三者が勝手に使う心配はありません。
+        </p>
         <p className="text-xs text-gray-500">
           🎯 KGI：受贈者の初回購入転換　／　必須KPI：受贈者のLINE友だち化　／　期間：2026-07-21〜08-17（4週間）
         </p>
