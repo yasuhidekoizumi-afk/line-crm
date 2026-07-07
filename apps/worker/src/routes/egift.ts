@@ -512,7 +512,7 @@ egift.get('/g/:token', async (c) => {
   .form-group { margin-bottom: 16px; text-align: left; }
   .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #5c4a2e; }
   .form-group input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; }
-  #claim-section, #redeem-section, #done-section { display: none; }
+  #claim-section.hidden, #redeem-section.hidden, #done-section.hidden { display: none; }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -535,7 +535,7 @@ egift.get('/g/:token', async (c) => {
   </div>
 
   <!-- STEP 1: Redeem Form (shown after LINE add) -->
-  <div id="redeem-section" class="card">
+  <div id="redeem-section" class="card hidden">
     <div class="gift-icon">📦</div>
     <h1>ご登録ありがとうございます</h1>
     <p style="font-size:14px;color:#8a7a5c;margin-bottom:24px;">ギフトのお届け先をご入力ください</p>
@@ -563,7 +563,7 @@ egift.get('/g/:token', async (c) => {
   </div>
 
   <!-- STEP 2: Done -->
-  <div id="done-section" class="card">
+  <div id="done-section" class="card hidden">
     <div class="gift-icon">✅</div>
     <h1>受け取り完了しました</h1>
     <p style="font-size:14px;color:#8a7a5c;margin-top:12px;">${giverName}さんからの贈り物、<br>まもなくお手元に届きます。</p>
