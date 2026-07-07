@@ -523,7 +523,7 @@ egift.get('/g/:token', async (c) => {
     const escapedGiverName = giverName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const escapedProductName = productName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const escapedMessage = giverMessage ? giverMessage.replace(/`/g, '\\`').replace(/\$/g, '\\$') : '';
-    const imageUrl = productImage || 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A0295.jpg';
+    const imageUrl = productImage || 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A7391_1_6c516997-b0a2-4ef9-9abd-9cdfb12f0478.jpg';
 
     // Return HTML gift LP
     return c.html(`<!DOCTYPE html>
