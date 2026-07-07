@@ -159,6 +159,57 @@ export default function EgiftPilotPage() {
         <div className="text-gray-400">キャンペーンを選択してください</div>
       )}
 
+      {/* キャンペーン一覧 */}
+      {campaigns.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold mb-3">キャンペーン一覧</h2>
+          <table className="text-sm w-full border">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left px-3 py-2 border-b">名前</th>
+                <th className="text-left px-3 py-2 border-b">状態</th>
+                <th className="text-left px-3 py-2 border-b">期間</th>
+                <th className="text-right px-3 py-2 border-b w-16"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {campaigns.map(c => (
+                <tr key={c.id} className="border-b hover:bg-gray-50">
+                  <td className="px-3 py-2">{c.name}</td>
+                  <td className="px-3 py-2">
+                    <span className={`text-xs px-2 py-0.5 rounded ${
+                      c.status === 'active' ? 'bg-green-100 text-green-800' :
+                      c.status === 'draft' ? 'bg-gray-100 text-gray-600' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>{c.status}</span>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-500">{c.startsAt.slice(0, 10)} 〜 {c.endsAt.slice(0, 10)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:text-gray-300 disabled:no-underline"
+                      disabled={c.status === 'active'}
+                      title={c.status === 'active' ? '実行中は削除不可' : '削除'}
+                      onClick={async () => {
+                        if (!confirm(`${c.name} を削除します。この操作は取り消せません。`)) return;
+                        const r = await api.egift.deleteCampaign(c.id);
+                        if (r.success) {
+                          setCampaigns(prev => prev.filter(x => x.id !== c.id));
+                          if (selectedId === c.id) { setSelectedId(null); setKpi(null); }
+                        } else {
+                          alert('削除失敗: ' + (r.error || '不明なエラー'));
+                        }
+                      }}
+                    >
+                      {c.status === 'active' ? '—' : '削除'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Create campaign form (simple) */}
       <details className="mt-8 border rounded-lg p-4">
         <summary className="cursor-pointer font-semibold text-sm text-gray-600">＋ キャンペーンを新規作成</summary>

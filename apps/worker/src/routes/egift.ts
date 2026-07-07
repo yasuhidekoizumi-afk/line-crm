@@ -4,6 +4,7 @@ import {
   getEgiftCampaignById,
   listEgiftCampaigns,
   activateEgiftCampaign,
+  deleteEgiftCampaign,
   createEgiftApplication,
   getApplicationCountForCampaign,
   getLotteryCandidates,
@@ -111,6 +112,22 @@ egift.post('/api/egift/campaigns', async (c) => {
 egift.post('/api/egift/campaigns/:id/activate', async (c) => {
   try {
     await activateEgiftCampaign(c.env.DB, c.req.param('id'));
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+egift.delete('/api/egift/campaigns/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const campaign = await getEgiftCampaignById(c.env.DB, id);
+    if (!campaign) return c.json({ success: false, error: 'Campaign not found' }, 404);
+    // active なキャンペーンは削除不可（安全弁）
+    if (campaign.status === 'active') {
+      return c.json({ success: false, error: '実行中のキャンペーンは削除できません。先に停止してください。' }, 400);
+    }
+    await deleteEgiftCampaign(c.env.DB, id);
     return c.json({ success: true });
   } catch (e) {
     return c.json({ success: false, error: String(e) }, 500);
