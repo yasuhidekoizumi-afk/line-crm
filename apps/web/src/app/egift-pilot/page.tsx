@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 interface EgiftCampaign {
   id: string; name: string; status: string
   startsAt: string; endsAt: string; dailyWinnerLimit: number
-  totalGiftLimit: number | null; inventoryBudget: number | null
+  totalGiftLimit: number | null; targetSku: string | null; inventoryBudget: number | null
 }
 
 interface EgiftKpi {
@@ -92,8 +92,9 @@ export default function EgiftPilotPage() {
         <p className="font-semibold text-green-900 mb-1">この機能でできること</p>
         <p className="mb-3">
           既存のお客さま（LINE友だち・購入者）を<strong>贈り主</strong>として抽選で選び、
-          友人・家族に ORYZAE のギフト（米麹ミニグラノーラ3種セット）を無料で贈ってもらいます。
+          友人・家族に ORYZAE のギフト商品を無料で贈ってもらいます。
           受贈者は LINE友だち追加 → 100%OFFクーポンで引換 → 初回購入へ、という流れです。
+          （初回パイロットは <strong>米麹ミニグラノーラ 選べる3種セット</strong>、商品はキャンペーン作成時に切り替え可能）
         </p>
 
         <p className="font-semibold text-green-900 mb-1">使い方</p>
@@ -124,6 +125,7 @@ export default function EgiftPilotPage() {
           <span className="text-xs text-gray-500">
             {campaign.startsAt.slice(0, 10)} 〜 {campaign.endsAt.slice(0, 10)}
             &nbsp;|&nbsp; 1日{campaign.dailyWinnerLimit}名
+            {campaign.targetSku && <>&nbsp;|&nbsp; SKU: {campaign.targetSku}</>}
           </span>
         )}
       </div>
@@ -440,6 +442,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
   const [startsAt, setStartsAt] = useState('')
   const [endsAt, setEndsAt] = useState('')
   const [dailyLimit, setDailyLimit] = useState(10)
+  const [targetSku, setTargetSku] = useState('')
   const [saving, setSaving] = useState(false)
 
   const handleCreate = async () => {
@@ -451,6 +454,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
         startsAt: startsAt + 'T00:00:00+09:00',
         endsAt: endsAt + 'T23:59:59+09:00',
         dailyWinnerLimit: dailyLimit,
+        targetSku: targetSku || undefined,
       })
       if (r.success) onCreated(r.data)
       else alert('作成失敗: ' + r.error)
@@ -462,6 +466,11 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
       <div>
         <label className="text-xs text-gray-500 mb-1 block">キャンペーン名</label>
         <input className="border rounded px-3 py-2 text-sm w-full" placeholder="例: eGiftパイロット 2026夏" value={name} onChange={e => setName(e.target.value)} />
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">対象商品SKU <span className="text-gray-400">（任意）</span></label>
+        <input className="border rounded px-3 py-2 text-sm w-full" placeholder="例: set3-pla-cho-ban-40-box-select" value={targetSku} onChange={e => setTargetSku(e.target.value)} />
+        <p className="text-xs text-gray-400 mt-0.5">ShopifyのSKU。空欄可・後から変更可</p>
       </div>
       <div>
         <label className="text-xs text-gray-500 mb-1 block">1日あたり当選数</label>
