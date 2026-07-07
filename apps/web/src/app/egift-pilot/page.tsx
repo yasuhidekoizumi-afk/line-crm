@@ -21,6 +21,10 @@ function pct(v: number) { return (v * 100).toFixed(1) + '%' }
 
 const GIFT_URL_BASE = 'https://oryzae-line-crm.oryzae.workers.dev/g/'
 
+function buildStaticFallbackApplyUrl(campaignId: string) {
+  return `https://oryzae-line-crm.oryzae.workers.dev/?page=egift-apply&campaign_id=${encodeURIComponent(campaignId)}`
+}
+
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text).then(() => {
     // brief visual feedback
@@ -53,6 +57,7 @@ export default function EgiftPilotPage() {
   const [lotteryLoading, setLotteryLoading] = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
   const [lotteryDate, setLotteryDate] = useState(new Date().toISOString().slice(0, 10))
+  const [applyUrl, setApplyUrl] = useState<string | null>(null)
 
   const refreshData = useCallback((id: string) => {
     api.egift.getKpi(id).then(r => { if (r.success) setKpi(r.data) }).catch(() => {})
@@ -76,6 +81,13 @@ export default function EgiftPilotPage() {
     if (!selectedId) return
     refreshData(selectedId)
     setDryRunResult(null)
+    setApplyUrl(null)
+    api.egift.getApplyUrl(selectedId)
+      .then(r => {
+        if (r.success && r.data?.url) setApplyUrl(r.data.url)
+        else setApplyUrl(buildStaticFallbackApplyUrl(selectedId))
+      })
+      .catch(() => setApplyUrl(buildStaticFallbackApplyUrl(selectedId)))
   }, [selectedId, refreshData])
 
   if (loading) return <div className="p-6">読み込み中…</div>
@@ -277,11 +289,13 @@ export default function EgiftPilotPage() {
               <p className="text-xs text-gray-500 mb-1">📱 LINE友だち向け応募リンク（LIFF）</p>
               <div className="flex gap-1">
                 <code className="text-xs bg-gray-100 px-2 py-1 rounded flex-1 break-all">
-                  https://liff.line.me/?page=egift-apply&amp;campaign_id={selectedId}
+                  {applyUrl ?? '応募リンクを生成中…'}
                 </code>
                 <button className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded"
+                  disabled={!applyUrl}
                   onClick={() => {
-                    copyToClipboard(`https://liff.line.me/?page=egift-apply&campaign_id=${selectedId}`);
+                    if (!applyUrl) return;
+                    copyToClipboard(applyUrl);
                     alert('コピーしました。LINE配信でこのURLを共有してください。');
                   }}>📋</button>
               </div>

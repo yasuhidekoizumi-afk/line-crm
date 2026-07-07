@@ -29,6 +29,21 @@ import type { Env } from '../index.js';
 
 const egift = new Hono<Env>();
 
+function buildEgiftLiffUrl(
+  liffUrl: string | undefined,
+  params: Record<string, string>,
+): { url: string; liffId: string | null } {
+  const liffBase = (liffUrl || 'https://liff.line.me').split('?')[0].replace(/\/+$/, '');
+  const liffIdMatch = liffBase.match(/liff\.line\.me\/([0-9]+-[A-Za-z0-9]+)/);
+  const liffId = liffIdMatch?.[1] ?? null;
+  const searchParams = new URLSearchParams();
+  if (liffId) searchParams.set('liffId', liffId);
+  for (const [key, value] of Object.entries(params)) {
+    searchParams.set(key, value);
+  }
+  return { url: `${liffBase}?${searchParams.toString()}`, liffId };
+}
+
 // =============================================================================
 // Serializers
 // =============================================================================
@@ -88,6 +103,29 @@ egift.get('/api/egift/campaigns/:id', async (c) => {
     const campaign = await getEgiftCampaignById(c.env.DB, c.req.param('id'));
     if (!campaign) return c.json({ success: false, error: 'Campaign not found' }, 404);
     return c.json({ success: true, data: serializeCampaign(campaign) });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+egift.get('/api/egift/campaigns/:id/apply-url', async (c) => {
+  try {
+    const campaignId = c.req.param('id');
+    const campaign = await getEgiftCampaignById(c.env.DB, campaignId);
+    if (!campaign) return c.json({ success: false, error: 'Campaign not found' }, 404);
+
+    const { url, liffId } = buildEgiftLiffUrl(c.env.LIFF_URL, {
+      page: 'egift-apply',
+      campaign_id: campaignId,
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        url,
+        hasLiffId: Boolean(liffId),
+      },
+    });
   } catch (e) {
     return c.json({ success: false, error: String(e) }, 500);
   }
@@ -498,9 +536,15 @@ egift.get('/g/:token', async (c) => {
       await markGiftOpened(c.env.DB, gift.id);
     }
 
-    // Get LIFF URL for LINE friend-add redirect
-    const liffUrlBase = c.env.LIFF_URL || 'https://liff.line.me/';
-    const claimUrl = `${liffUrlBase}?page=egift&egift_token=${encodeURIComponent(token)}`;
+    // Get LIFF URL for LINE friend-add redirect.
+    // LIFFプラットフォームはエンドポイントURLへ転送する際、独自クエリを liff.state に畳んで渡すが、
+    // liffId 自体は URL に残らない。クライアント側は VITE_LIFF_ID（ビルド時注入）が無いと初期化できず
+    // 「LIFF初期化失敗」で詰む。/auth/line と同じく LIFF_URL から liffId を抽出して明示的にクエリへ
+    // 付与し、unwrapLiffState() で確実に拾えるようにする。
+    const { url: claimUrl } = buildEgiftLiffUrl(c.env.LIFF_URL, {
+      page: 'egift',
+      egift_token: token,
+    });
 
     // Get giver info
     const giver = await c.env.DB.prepare(

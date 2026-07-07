@@ -811,6 +811,8 @@ export const api = {
       fetchApi<ApiResponse<any[]>>('/api/egift/campaigns'),
     getCampaign: (id: string) =>
       fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${id}`),
+    getApplyUrl: (id: string) =>
+      fetchApi<ApiResponse<{ url: string; hasLiffId: boolean }>>(`/api/egift/campaigns/${id}/apply-url`),
     createCampaign: (data: { name: string; startsAt: string; endsAt: string; dailyWinnerLimit?: number; totalGiftLimit?: number; targetSku?: string; targetProductId?: string; targetVariantId?: string; inventoryBudget?: number; notes?: string }) =>
       fetchApi<ApiResponse<any>>('/api/egift/campaigns', { method: 'POST', body: JSON.stringify(data) }),
     activateCampaign: (id: string) =>
