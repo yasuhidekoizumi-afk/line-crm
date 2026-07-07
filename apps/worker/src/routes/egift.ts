@@ -22,6 +22,7 @@ import {
   type EgiftGift,
   type EgiftKpi,
 } from '@line-crm/db';
+import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const egift = new Hono<Env>();
@@ -338,12 +339,17 @@ interface ShopifyProductOption {
 
 egift.get('/api/egift/products', async (c) => {
   try {
-    const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
-    const token = c.env.SHOPIFY_ADMIN_TOKEN || c.env.SHOPIFY_ADMIN_TOKEN_CRM;
+    const token = await getShopifyAdminToken({
+      SHOPIFY_SHOP_DOMAIN: c.env.SHOPIFY_SHOP_DOMAIN,
+      SHOPIFY_CLIENT_ID: c.env.SHOPIFY_CLIENT_ID,
+      SHOPIFY_CLIENT_SECRET: c.env.SHOPIFY_CLIENT_SECRET,
+      SHOPIFY_ADMIN_TOKEN: c.env.SHOPIFY_ADMIN_TOKEN,
+    });
 
     if (token) {
       try {
-        const url = `https://${domain}/admin/api/2024-01/products.json?status=active&limit=100`;
+        const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+        const url = `https://${domain}/admin/api/2024-01/products.json?status=active&limit=250`;
         const res = await fetch(url, {
           headers: {
             'X-Shopify-Access-Token': token,
