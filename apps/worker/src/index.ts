@@ -54,6 +54,7 @@ import { linkBonusStats } from './routes/link-bonus-stats.js';
 import { customerJourney } from './routes/customer-journey.js';
 import { help } from './routes/help.js';
 import { aiDraft } from './routes/ai-draft.js';
+import { judgeme } from './routes/judgeme-webhook.js';
 // CS Phase 1: 統合受信箱 + AIトリアージ
 import { cs } from './routes/cs.js';
 import { syncFaqFromSheets } from './services/cs-faq-sync.js';
@@ -62,6 +63,7 @@ import { notifyDraftBacklog } from './services/cs-slack-notify.js';
 import { rakuten } from './routes/rakuten.js';
 import { checkRakutenLicenseExpiry } from './services/rakuten-license-monitor.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
+import { expireGifts } from '@line-crm/db';
 // FERMENT: メールマーケティング拡張
 import {
   emailApiRouter,
@@ -162,6 +164,8 @@ export type Env = {
     // CS Phase 2: 楽天 RMS
     RAKUTEN_SERVICE_SECRET?: string;
     RAKUTEN_LICENSE_KEY?: string;
+    // Judge.me webhook
+    JUDGEME_WEBHOOK_SECRET?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -303,6 +307,8 @@ app.route('/', cs);
 app.route('/', rakuten);
 // CS Phase 2: AI下書き生成
 app.route('/', aiDraft);
+// Judge.me webhook（同梱カードレビュー→ポイント付与）
+app.route('/', judgeme);
 
 // FERMENT
 app.route('/api/email', emailApiRouter);
@@ -361,6 +367,7 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
   jobs.push(processLoyaltyExpirations(env.DB));
+  jobs.push(expireGifts(env.DB).then(n => { if (n > 0) console.log(`[egift] expired ${n} gifts`); }).catch(() => {}).then(() => {}));
   const cronExpr = (_event as ScheduledEvent).cron;
   if (cronExpr === '*/10 * * * *') {
     jobs.push(processScheduledEmailCampaigns(env));

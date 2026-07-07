@@ -829,10 +829,10 @@ export const api = {
       fetchApi<ApiResponse<any[]>>('/api/egift/products'),
     apply: (data: { campaignId: string; giverFriendId: string; occasion: string; message?: string }) =>
       fetchApi<ApiResponse<any>>('/api/egift/applications', { method: 'POST', body: JSON.stringify(data) }),
-    lotteryDryRun: (campaignId: string) =>
-      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/lottery/dry-run`, { method: 'POST' }),
-    lotteryCommit: (campaignId: string) =>
-      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/lottery/commit`, { method: 'POST' }),
+    lotteryDryRun: (campaignId: string, date?: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/lottery/dry-run`, { method: 'POST', body: JSON.stringify({ date }) }),
+    lotteryCommit: (campaignId: string, date?: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/lottery/commit`, { method: 'POST', body: JSON.stringify({ date }) }),
     getKpi: (campaignId: string) =>
       fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/kpi`),
   },

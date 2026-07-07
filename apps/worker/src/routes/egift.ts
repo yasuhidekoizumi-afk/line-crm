@@ -188,7 +188,8 @@ egift.post('/api/egift/applications', async (c) => {
 egift.post('/api/egift/campaigns/:id/lottery/dry-run', async (c) => {
   try {
     const campaignId = c.req.param('id');
-    const date = new Date().toISOString().slice(0, 10);
+    const body = await c.req.json().catch(() => ({}));
+    const date = body.date || new Date().toISOString().slice(0, 10);
     const candidates = await getLotteryCandidates(c.env.DB, campaignId, date);
 
     // weighted lottery simulation (same logic as commit, but no DB writes)
@@ -239,7 +240,8 @@ egift.post('/api/egift/campaigns/:id/lottery/dry-run', async (c) => {
 egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
   try {
     const campaignId = c.req.param('id');
-    const date = new Date().toISOString().slice(0, 10);
+    const body = await c.req.json().catch(() => ({}));
+    const date = body.date || new Date().toISOString().slice(0, 10);
     const candidates = await getLotteryCandidates(c.env.DB, campaignId, date);
     const campaign = await getEgiftCampaignById(c.env.DB, campaignId);
     if (!campaign) return c.json({ success: false, error: 'Campaign not found' }, 404);
@@ -299,8 +301,34 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
 
     // mark losers
     await c.env.DB.prepare(
-      `UPDATE egift_applications SET status = 'lost', decided_at = ? WHERE campaign_id = ? AND status = 'applied' AND DATE(applied_at) <= DATE(?)`,
-    ).bind(new Date().toISOString(), campaignId, date).run();
+      `UPDATE egift_applications SET status = 'lost', decided_at = ? WHERE campaign_id = ? AND status = 'applied'`,
+    ).bind(new Date().toISOString(), campaignId).run();
+
+    // Send LINE push to winners (fire-and-forget) with gift URLs
+    if (c.env.LINE_CHANNEL_ACCESS_TOKEN) {
+      for (const w of created) {
+        const friend = await c.env.DB.prepare(
+          'SELECT line_user_id FROM friends WHERE id = ?',
+        ).bind(w.applicationId).first<{ line_user_id: string | null }>();
+        if (friend?.line_user_id?.startsWith('U')) {
+          const giftUrl = `https://oryzae-line-crm.oryzae.workers.dev/g/${w.giftToken}`;
+          fetch('https://api.line.me/v2/bot/message/push', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${c.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+            },
+            body: JSON.stringify({
+              to: friend.line_user_id,
+              messages: [{
+                type: 'text',
+                text: `🎁 eGift当選おめでとうございます！\n\nこちらのリンクを贈りたい方にシェアしてください。\n\n${giftUrl}\n\n※有効期限7日間・1回限り`,
+              }],
+            }),
+          }).catch(() => {});
+        }
+      }
+    }
 
     return c.json({
       success: true,
@@ -446,6 +474,10 @@ egift.get('/g/:token', async (c) => {
       await markGiftOpened(c.env.DB, gift.id);
     }
 
+    // Get LIFF URL for LINE friend-add redirect
+    const liffUrlBase = c.env.LIFF_URL || 'https://liff.line.me/';
+    const claimUrl = `${liffUrlBase}?egift_token=${encodeURIComponent(token)}`;
+
     // Get giver info
     const giver = await c.env.DB.prepare(
       'SELECT display_name FROM friends WHERE id = ?',
@@ -496,7 +528,7 @@ egift.get('/g/:token', async (c) => {
       <p style="font-size:14px;margin-bottom:12px;">人気の3フレーバーを<br>ちょっとずつ試せるギフトです。</p>
       <p style="font-size:13px;color:#8a7a5c;">受け取りには、配送のご連絡のため<br>ORYZAE公式LINEの友だち追加をお願いします。</p>
     </div>
-    <a class="btn btn-line" href="https://lin.ee/xxxxxxxx" target="_blank" rel="noopener" id="line-add-btn">
+    <a class="btn btn-line" href="${claimUrl}" target="_blank" rel="noopener" id="line-add-btn">
       🎁 LINEでギフトを受け取る
     </a>
     <p class="note">※ 1リンクにつき1回限り<br>※ 7日以内のお受け取りをお願いします<br>※ 無料・送料込みです</p>
@@ -707,9 +739,75 @@ egift.post('/api/egift/gifts/redeem', async (c) => {
       return c.json({ success: false, error: '先にLINE友だち追加が必要です' }, 400);
     }
 
-    // TODO: Shopify 100%OFF coupon issuance goes here
-    // For now, generate a placeholder coupon code
-    const couponCode = `EGIFT-${gift.id.slice(0, 8).toUpperCase()}`;
+    // Create Shopify 100% OFF discount code
+    const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+    const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
+    let couponCode = `EGIFT-${gift.id.slice(0, 8).toUpperCase()}`;
+
+    if (adminToken) {
+      try {
+        // Get campaign to find target product
+        const campaign = gift.campaign_id
+          ? await getEgiftCampaignById(c.env.DB, gift.campaign_id)
+          : null;
+
+        // Create price rule: 100% OFF, single use, valid for 14 days
+        const priceRuleBody: any = {
+          price_rule: {
+            title: `eGift 100%OFF ${couponCode}`,
+            target_type: 'line_item',
+            target_selection: 'all',
+            allocation_method: 'across',
+            value_type: 'percentage',
+            value: '-100.0',
+            customer_selection: 'all',
+            once_per_customer: false,
+            usage_limit: 1,
+            starts_at: new Date().toISOString(),
+            ends_at: gift.redeem_expires_at,
+          },
+        };
+
+        // If campaign has target product, restrict to that product
+        if (campaign?.target_product_id) {
+          priceRuleBody.price_rule.target_selection = 'entitled';
+          priceRuleBody.price_rule.entitled_product_ids = [campaign.target_product_id];
+          priceRuleBody.price_rule.entitled_variant_ids = campaign.target_variant_id ? [campaign.target_variant_id] : undefined;
+        }
+
+        const ruleRes = await fetch(`https://${domain}/admin/api/2024-10/price_rules.json`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
+          body: JSON.stringify(priceRuleBody),
+        });
+
+        if (ruleRes.ok) {
+          const ruleData = await ruleRes.json() as { price_rule: { id: number } };
+          const priceRuleId = ruleData.price_rule.id;
+
+          // Create discount code under the price rule
+          const codeRes = await fetch(
+            `https://${domain}/admin/api/2024-10/price_rules/${priceRuleId}/discount_codes.json`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
+              body: JSON.stringify({ discount_code: { code: couponCode } }),
+            },
+          );
+
+          if (codeRes.ok) {
+            console.log(`[egift] Shopify coupon created: ${couponCode} (price_rule ${priceRuleId})`);
+          } else {
+            console.error(`[egift] Shopify discount_code create failed: ${await codeRes.text()}`);
+            couponCode = `EGIFT-${gift.id.slice(0, 8).toUpperCase()}`; // fallback
+          }
+        } else {
+          console.error(`[egift] Shopify price_rule create failed: ${await ruleRes.text()}`);
+        }
+      } catch (err) {
+        console.error(`[egift] Shopify coupon creation error:`, err);
+      }
+    }
 
     await redeemGift(c.env.DB, gift.id, {
       recipientFriendId: gift.recipient_friend_id!,

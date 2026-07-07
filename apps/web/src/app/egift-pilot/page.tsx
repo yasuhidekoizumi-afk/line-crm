@@ -52,6 +52,7 @@ export default function EgiftPilotPage() {
   const [dryRunResult, setDryRunResult] = useState<any>(null)
   const [lotteryLoading, setLotteryLoading] = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
+  const [lotteryDate, setLotteryDate] = useState(new Date().toISOString().slice(0, 10))
 
   const refreshData = useCallback((id: string) => {
     api.egift.getKpi(id).then(r => { if (r.success) setKpi(r.data) }).catch(() => {})
@@ -270,9 +271,20 @@ export default function EgiftPilotPage() {
           {/* =========================================================== */}
           <h2 className="text-lg font-semibold mb-3">🎰 抽選</h2>
           <div className="mb-8 border rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <label className="text-sm text-gray-600">抽選日:</label>
+              <input
+                type="date"
+                className="border rounded px-2 py-1 text-sm"
+                value={lotteryDate}
+                onChange={e => { setLotteryDate(e.target.value); setDryRunResult(null); }}
+              />
+            </div>
             <p className="text-sm text-gray-600 mb-3">
-              今日の応募者から {campaign?.dailyWinnerLimit ?? 10} 名を抽選します。
-              ランクが高いほど当選確率が上がります（重み付き抽選）。
+              {lotteryDate === new Date().toISOString().slice(0, 10)
+                ? '今日の応募者から'
+                : `${lotteryDate} 時点の応募者から`}
+              {campaign?.dailyWinnerLimit ?? 10} 名を抽選します。
             </p>
             <div className="flex gap-2">
               <button
@@ -283,7 +295,7 @@ export default function EgiftPilotPage() {
                   setLotteryLoading(true)
                   setDryRunResult(null)
                   try {
-                    const r = await api.egift.lotteryDryRun(selectedId)
+                    const r = await api.egift.lotteryDryRun(selectedId, lotteryDate)
                     if (r.success) setDryRunResult(r.data)
                     else alert('プレビュー失敗: ' + r.error)
                   } finally { setLotteryLoading(false) }
@@ -297,7 +309,7 @@ export default function EgiftPilotPage() {
                   if (!confirm('抽選を実行します。この操作は取り消せません。よろしいですか？')) return
                   setLotteryLoading(true)
                   try {
-                    const r = await api.egift.lotteryCommit(selectedId)
+                    const r = await api.egift.lotteryCommit(selectedId, lotteryDate)
                     if (r.success) {
                       alert(`${r.data.winnersCount}名に当選ギフトを発行しました。ギフト一覧からURLを確認できます。`)
                       refreshData(selectedId)

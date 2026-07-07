@@ -321,8 +321,7 @@ export async function listGiftsByCampaign(
 }
 
 // =============================================================================
-// Gifts
-// =============================================================================
+// Gift lifecycle helpers
 
 async function sha256hex(input: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -418,6 +417,37 @@ export async function redeemGift(
      WHERE id = ? AND status IN ('issued', 'opened', 'line_added')`,
   ).bind(input.email, phoneHash, input.name, input.zip, input.address, input.shopifyCouponCode, now, now, giftId).run();
   await recordEgiftEvent(db, giftId, 'redeemed', input.recipientFriendId, null);
+}
+
+// =============================================================================
+// Expiry auto-processing
+// =============================================================================
+
+export async function expireGifts(db: D1Database): Promise<number> {
+  const now = jstNow();
+  // Expire gifts past their expires_at that are still in active states
+  const result = await db.prepare(
+    `UPDATE egift_gifts
+     SET status = 'expired', updated_at = ?
+     WHERE status IN ('issued', 'opened')
+       AND expires_at < ?`,
+  ).bind(now, now).run();
+
+  const count = result.meta?.changes ?? 0;
+
+  // Record events for expired gifts
+  if (count > 0) {
+    const expired = await db.prepare(
+      `SELECT id FROM egift_gifts
+       WHERE status = 'expired' AND updated_at = ?`,
+    ).bind(now).all<{ id: string }>();
+
+    for (const g of expired.results) {
+      await recordEgiftEvent(db, g.id, 'expired', null, null);
+    }
+  }
+
+  return count;
 }
 
 // =============================================================================
