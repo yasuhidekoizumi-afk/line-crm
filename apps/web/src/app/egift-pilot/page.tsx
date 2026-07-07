@@ -459,10 +459,24 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
 
   return (
     <div className="grid grid-cols-2 gap-3 mt-4">
-      <input className="border rounded px-3 py-2 text-sm" placeholder="キャンペーン名" value={name} onChange={e => setName(e.target.value)} />
-      <input className="border rounded px-3 py-2 text-sm" type="date" value={startsAt} onChange={e => setStartsAt(e.target.value)} />
-      <input className="border rounded px-3 py-2 text-sm" type="date" value={endsAt} onChange={e => setEndsAt(e.target.value)} />
-      <input className="border rounded px-3 py-2 text-sm" type="number" value={dailyLimit} onChange={e => setDailyLimit(Number(e.target.value))} min={1} max={50} />
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">キャンペーン名</label>
+        <input className="border rounded px-3 py-2 text-sm w-full" placeholder="例: eGiftパイロット 2026夏" value={name} onChange={e => setName(e.target.value)} />
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">1日あたり当選数</label>
+        <input className="border rounded px-3 py-2 text-sm w-full" type="number" value={dailyLimit} onChange={e => setDailyLimit(Number(e.target.value))} min={1} max={50} />
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">開始日</label>
+        <input className="border rounded px-3 py-2 text-sm w-full" type="date" value={startsAt} onChange={e => setStartsAt(e.target.value)} />
+        <p className="text-xs text-gray-400 mt-0.5">時刻は自動で 00:00 に設定されます</p>
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">終了日</label>
+        <input className="border rounded px-3 py-2 text-sm w-full" type="date" value={endsAt} onChange={e => setEndsAt(e.target.value)} />
+        <p className="text-xs text-gray-400 mt-0.5">時刻は自動で 23:59 に設定されます</p>
+      </div>
       <button
         className="col-span-2 bg-green-700 text-white rounded px-4 py-2 text-sm font-semibold disabled:opacity-50"
         disabled={saving}
