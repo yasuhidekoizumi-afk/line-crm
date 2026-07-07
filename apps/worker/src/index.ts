@@ -105,6 +105,7 @@ import { processFlowDeliveries } from './ferment/cron-flows.js';
 import { recomputeAllSegments } from './ferment/cron-segments.js';
 import { sendDailySummary } from './ferment/cron-daily-summary.js';
 import { processBirthdayCoupons } from './services/birthday-coupon.js';
+import { fetchAndStoreLineOfficialFriendInsights } from './services/line-official-insights.js';
 
 declare const __APP_VERSION__: string;
 declare const __GIT_SHA__: string;
@@ -380,6 +381,13 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     );
   } else if (cronExpr === '0 0 * * *') {
     jobs.push(sendDailySummary(env));
+    jobs.push(
+      fetchAndStoreLineOfficialFriendInsights(env.DB)
+        .then((rows) => {
+          if (rows.length > 0) console.log(`[line-official-insights] stored=${rows.length}`);
+        })
+        .catch((e) => console.error('[line-official-insights] error:', e)),
+    );
     jobs.push(recomputeAllCustomerInsights(env).then(() => undefined));
     jobs.push(checkRakutenLicenseExpiry(env).then(() => undefined).catch(() => undefined));
     jobs.push(

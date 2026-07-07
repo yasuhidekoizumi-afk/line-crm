@@ -14,6 +14,11 @@ import {
 import type { Friend as DbFriend, Tag as DbTag } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage } from '../services/step-delivery.js';
+import {
+  fetchAndStoreLineOfficialFriendInsights,
+  getLatestLineOfficialFriendInsightSummary,
+  normalizeLineInsightDate,
+} from '../services/line-official-insights.js';
 import type { Env } from '../index.js';
 
 const friends = new Hono<Env>();
@@ -83,6 +88,33 @@ friends.get('/api/friends/count', async (c) => {
     } else { count = await getFriendCount(c.env.DB); }
     return c.json({ success: true, data: { count } });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
+});
+
+friends.get('/api/friends/official-insight/latest', async (c) => {
+  try {
+    const lineAccountId = c.req.query('lineAccountId') || undefined;
+    const summary = await getLatestLineOfficialFriendInsightSummary(c.env.DB, lineAccountId);
+    return c.json({ success: true, data: summary });
+  } catch (err) {
+    console.error('GET /api/friends/official-insight/latest error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+friends.post('/api/friends/official-insight/fetch', async (c) => {
+  try {
+    const body = (await c.req.json<{ date?: string; lineAccountId?: string }>().catch(() => ({}))) as {
+      date?: string;
+      lineAccountId?: string;
+    };
+    const date = body.date ? normalizeLineInsightDate(body.date) : undefined;
+    if (body.date && !date) return c.json({ success: false, error: 'date must be YYYYMMDD or YYYY-MM-DD' }, 400);
+    const items = await fetchAndStoreLineOfficialFriendInsights(c.env.DB, date ?? undefined, body.lineAccountId);
+    return c.json({ success: true, data: { items } });
+  } catch (err) {
+    console.error('POST /api/friends/official-insight/fetch error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
 });
 
 friends.get('/api/friends/ref-stats', async (c) => {

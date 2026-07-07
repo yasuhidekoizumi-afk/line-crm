@@ -7,6 +7,7 @@ import type {
   ReplyMessageRequest,
   RichMenuObject,
   UserProfile,
+  FollowersInsight,
 } from './types.js';
 
 const LINE_API_BASE = 'https://api.line.me/v2/bot';
@@ -86,6 +87,16 @@ export class LineClient {
   async getMessageQuotaConsumption(): Promise<{ totalUsage: number }> {
     return this.request<{ totalUsage: number }>(
       '/message/quota/consumption',
+      {},
+      'GET',
+    );
+  }
+
+  // ─── Insight（LINE公式アカウントマネージャー集計値） ───────────────────────
+
+  async getFollowersInsight(date: string): Promise<FollowersInsight> {
+    return this.request<FollowersInsight>(
+      `/insight/followers?date=${encodeURIComponent(date)}`,
       {},
       'GET',
     );
