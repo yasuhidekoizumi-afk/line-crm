@@ -45,6 +45,7 @@ export interface EgiftGift {
   application_id: string;
   giver_friend_id: string;
   gift_token_hash: string;
+  gift_token: string | null;
   status: EgiftGiftStatus;
   issued_at: string;
   first_opened_at: string | null;
@@ -234,6 +235,81 @@ export async function getLotteryCandidates(
   return result.results;
 }
 
+export interface ApplicationWithFriend {
+  id: string;
+  campaign_id: string;
+  giver_friend_id: string;
+  giver_display_name: string | null;
+  occasion: string;
+  message: string | null;
+  status: string;
+  lottery_weight: number;
+  applied_at: string;
+  decided_at: string | null;
+}
+
+export async function listApplicationsByCampaign(
+  db: D1Database,
+  campaignId: string,
+): Promise<ApplicationWithFriend[]> {
+  const result = await db
+    .prepare(
+      `SELECT ea.id, ea.campaign_id, ea.giver_friend_id,
+              f.display_name AS giver_display_name,
+              ea.occasion, ea.message, ea.status, ea.lottery_weight,
+              ea.applied_at, ea.decided_at
+       FROM egift_applications ea
+       LEFT JOIN friends f ON f.id = ea.giver_friend_id
+       WHERE ea.campaign_id = ?
+       ORDER BY ea.applied_at DESC`,
+    )
+    .bind(campaignId)
+    .all<ApplicationWithFriend>();
+  return result.results;
+}
+
+export interface GiftWithGiver {
+  id: string;
+  campaign_id: string;
+  application_id: string;
+  giver_friend_id: string;
+  giver_display_name: string | null;
+  gift_token: string | null;
+  status: string;
+  issued_at: string;
+  first_opened_at: string | null;
+  line_added_at: string | null;
+  redeemed_at: string | null;
+  fulfilled_at: string | null;
+  expires_at: string;
+  redeem_expires_at: string;
+  recipient_friend_id: string | null;
+  recipient_name: string | null;
+  shopify_coupon_code: string | null;
+}
+
+export async function listGiftsByCampaign(
+  db: D1Database,
+  campaignId: string,
+): Promise<GiftWithGiver[]> {
+  const result = await db
+    .prepare(
+      `SELECT eg.id, eg.campaign_id, eg.application_id, eg.giver_friend_id,
+              f.display_name AS giver_display_name,
+              eg.gift_token, eg.status, eg.issued_at,
+              eg.first_opened_at, eg.line_added_at, eg.redeemed_at, eg.fulfilled_at,
+              eg.expires_at, eg.redeem_expires_at,
+              eg.recipient_friend_id, eg.recipient_name, eg.shopify_coupon_code
+       FROM egift_gifts eg
+       LEFT JOIN friends f ON f.id = eg.giver_friend_id
+       WHERE eg.campaign_id = ?
+       ORDER BY eg.issued_at DESC`,
+    )
+    .bind(campaignId)
+    .all<GiftWithGiver>();
+  return result.results;
+}
+
 // =============================================================================
 // Gifts
 // =============================================================================
@@ -262,10 +338,10 @@ export async function createEgiftGift(
   const tokenHash = await sha256hex(input.giftToken);
   await db
     .prepare(
-      `INSERT INTO egift_gifts (id, campaign_id, application_id, giver_friend_id, gift_token_hash, status, issued_at, expires_at, redeem_expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'issued', ?, ?, ?, ?, ?)`,
+      `INSERT INTO egift_gifts (id, campaign_id, application_id, giver_friend_id, gift_token_hash, gift_token, status, issued_at, expires_at, redeem_expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'issued', ?, ?, ?, ?, ?)`,
     )
-    .bind(id, input.campaignId, input.applicationId, input.giverFriendId, tokenHash, now, input.expiresAt, input.redeemExpiresAt, now, now)
+    .bind(id, input.campaignId, input.applicationId, input.giverFriendId, tokenHash, input.giftToken, now, input.expiresAt, input.redeemExpiresAt, now, now)
     .run();
 
   // record event

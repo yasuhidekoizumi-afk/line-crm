@@ -7,10 +7,12 @@ import {
   deleteEgiftCampaign,
   createEgiftApplication,
   getApplicationCountForCampaign,
+  listApplicationsByCampaign,
   getLotteryCandidates,
   createEgiftGift,
   getEgiftGiftById,
   getEgiftGiftByTokenHash,
+  listGiftsByCampaign,
   markGiftOpened,
   markGiftLineAdded,
   redeemGift,
@@ -221,6 +223,10 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
     const campaign = await getEgiftCampaignById(c.env.DB, campaignId);
     if (!campaign) return c.json({ success: false, error: 'Campaign not found' }, 404);
 
+    if (candidates.length === 0) {
+      return c.json({ success: false, error: '抽選対象の応募者がいません' }, 400);
+    }
+
     const limit = campaign.daily_winner_limit;
 
     // weighted lottery
@@ -283,6 +289,36 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
         gifts: created,
       },
     });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+// =============================================================================
+// Applications list (admin)
+// =============================================================================
+
+egift.get('/api/egift/campaigns/:id/applications', async (c) => {
+  try {
+    const applications = await listApplicationsByCampaign(c.env.DB, c.req.param('id'));
+    return c.json({ success: true, data: applications });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+// =============================================================================
+// Gifts list (admin)
+// =============================================================================
+
+egift.get('/api/egift/campaigns/:id/gifts', async (c) => {
+  try {
+    const gifts = await listGiftsByCampaign(c.env.DB, c.req.param('id'));
+    const serialized = gifts.map(g => ({
+      ...g,
+      giftUrl: g.gift_token ? `https://oryzae-line-crm.oryzae.workers.dev/g/${g.gift_token}` : null,
+    }));
+    return c.json({ success: true, data: serialized });
   } catch (e) {
     return c.json({ success: false, error: String(e) }, 500);
   }
