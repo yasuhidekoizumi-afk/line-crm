@@ -65,7 +65,7 @@ export default function EgiftPilotPage() {
           当選すると、こんなギフトリンクが発行されます（※URLは当選ごとに1つずつ生成）：
         </p>
         <div className="bg-white rounded border border-green-300 px-3 py-2 mb-3 font-mono text-xs break-all text-gray-800">
-          https://oryzae-line-crm.oryzae.workers.dev/g/<span className="text-green-700 font-semibold">【ユニークなトークン】</span>
+          https://oryzae-line-crm.oryzae.workers.dev/g/<span className="text-green-700 font-semibold">（抽選時に自動生成されるUUID）</span>
         </div>
         <p className="mb-2">
           このURLを LINE やメールで共有するだけで、受け取った人は次の3ステップでギフトを引き換えられます：
