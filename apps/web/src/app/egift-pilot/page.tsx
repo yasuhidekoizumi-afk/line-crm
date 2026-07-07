@@ -263,8 +263,17 @@ export default function EgiftPilotPage() {
               </table>
             </div>
           ) : (
-            <p className="text-sm text-gray-400 mb-8">まだ応募がありません</p>
+            <p className="text-sm text-gray-400 mb-4">まだ応募がありません</p>
           )}
+
+          {/* テスト応募追加 */}
+          <details className="mb-8 border rounded-lg p-3">
+            <summary className="cursor-pointer text-sm text-gray-500">🧪 テスト応募を追加</summary>
+            <TestApplicationForm
+              campaignId={selectedId!}
+              onAdded={() => refreshData(selectedId!)}
+            />
+          </details>
 
           {/* =========================================================== */}
           {/* 抽選 */}
@@ -587,6 +596,32 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
         onClick={handleCreate}
       >
         {saving ? '作成中…' : 'キャンペーンを作成'}
+      </button>
+    </div>
+  )
+}
+
+function TestApplicationForm({ campaignId, onAdded }: { campaignId: string; onAdded: () => void }) {
+  const [friendId, setFriendId] = useState('')
+  const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const handleAdd = async () => {
+    if (!friendId) return alert('Friend IDを入力してください')
+    setSaving(true)
+    try {
+      const r = await api.egift.apply({ campaignId, giverFriendId: friendId, occasion: 'other', message: message || undefined })
+      if (r.success) { onAdded(); setFriendId(''); setMessage(''); alert('応募を追加しました') }
+      else alert('失敗: ' + (r.error || '不明'))
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="flex gap-2 mt-3">
+      <input className="border rounded px-2 py-1 text-xs flex-1" placeholder="Friend ID (friendsテーブルのid)" value={friendId} onChange={e => setFriendId(e.target.value)} />
+      <input className="border rounded px-2 py-1 text-xs w-32" placeholder="メッセージ(任意)" value={message} onChange={e => setMessage(e.target.value)} />
+      <button className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50" disabled={saving} onClick={handleAdd}>
+        {saving ? '...' : '追加'}
       </button>
     </div>
   )
