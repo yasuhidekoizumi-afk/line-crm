@@ -92,6 +92,50 @@ function mountFatalError(title: string, detail: string): void {
   `;
 }
 
+// ─── OAuth callback param restore ──────────────────────
+// LIFFログイン時にLINEがコールバックURLへリダイレクトすると、
+// 元のLIFF URLのクエリパラメータ（page, egift_token等）が失われる。
+// liff.init() の前に sessionStorage へ退避し、コールバック後に復元する。
+const OAUTH_STASH_KEY = 'lh_liff_params_stash';
+
+function stashParams(): void {
+  const params = new URLSearchParams(window.location.search);
+  const stash: Record<string, string> = {};
+  for (const key of ['page', 'egift_token', 'campaign_id', 'ref', 'redirect']) {
+    const v = params.get(key);
+    if (v) stash[key] = v;
+  }
+  if (Object.keys(stash).length > 0) {
+    try { sessionStorage.setItem(OAUTH_STASH_KEY, JSON.stringify(stash)); } catch {}
+  }
+}
+
+function restoreStashedParams(): void {
+  try {
+    const raw = sessionStorage.getItem(OAUTH_STASH_KEY);
+    if (!raw) return;
+    const stash = JSON.parse(raw) as Record<string, string>;
+    const params = new URLSearchParams(window.location.search);
+    let changed = false;
+    for (const [k, v] of Object.entries(stash)) {
+      if (!params.has(k)) {
+        params.set(k, v);
+        changed = true;
+      }
+    }
+    if (changed) {
+      const qs = params.toString();
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+      try { window.history.replaceState(null, '', newUrl); } catch {}
+    }
+    // OAuthコールバック完了後は不要なのでクリア
+    sessionStorage.removeItem(OAUTH_STASH_KEY);
+  } catch {}
+}
+
+// LIFF初期化前に現URLのパラメータを退避
+stashParams();
+
 const LIFF_ID = detectLiffId();
 if (!LIFF_ID) {
   mountFatalError('LIFF初期化失敗', 'LIFF IDが見つかりません。GitHub Variables の VITE_LIFF_ID が未設定の可能性があります。');
@@ -339,6 +383,9 @@ async function main() {
       liff.login({ redirectUri: window.location.href });
       return;
     }
+
+    // OAuthコールバック後、sessionStorageに退避したパラメータをURLに復元
+    restoreStashedParams();
 
     const page = getPage();
     if (page === 'book') {
