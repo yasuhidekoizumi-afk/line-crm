@@ -2,7 +2,7 @@
  * eGift LIFF handler — LINE friend-add gate for gift claims
  *
  * Called from gift LP: LIFF_URL?page=egift&egift_token=XXX
- * Checks LINE login → friendship → calls claim API → redirects back
+ * Checks LINE login → server-side friendship verification → calls claim API → redirects back
  */
 
 declare const liff: {
@@ -35,7 +35,9 @@ export async function initEgift(): Promise<void> {
   try {
     const profile = await liff.getProfile();
 
-    // Check friendship first
+    // Check friendship first. If LIFF reports true, proceed immediately.
+    // If it reports false, show the friend-add gate. PC browsers can keep returning false
+    // after add, so the manual confirmation button asks the server to verify friendship.
     let friendFlag = false;
     try {
       friendFlag = (await liff.getFriendship()).friendFlag;
@@ -62,8 +64,9 @@ export async function initEgift(): Promise<void> {
 
 /**
  * 友だち追加ゲート画面。
- * PC・スマホどちらでも、追加後にこの画面へ戻ってきたら自動で友だち判定し直し、
- * 成功したら claim へ進む。手動の「追加した・確認する」ボタンでも再チェックできる。
+ * PC・スマホどちらでも、追加後にこの画面へ戻ってきたら再チェックする。
+ * 自動再チェックは LIFF getFriendship() が true の場合のみclaimへ進み、
+ * 手動ボタンはサーバー側の友だち確認付きclaimへ進む。
  */
 function showFriendAddGate(
   app: HTMLElement,
@@ -85,19 +88,35 @@ function showFriendAddGate(
   `;
 
   let checking = false;
-  const recheck = async (): Promise<void> => {
+  const recheck = async (forceServerCheck = false): Promise<void> => {
     if (checking) return;
     checking = true;
+    const button = document.getElementById('egiftFriendDoneBtn') as HTMLButtonElement | null;
     try {
+      if (button) {
+        button.disabled = true;
+        button.textContent = '確認中...';
+      }
+      if (forceServerCheck) {
+        app.innerHTML = `<div class="card"><div class="spinner"></div><p>ギフトを確認中...</p></div>`;
+        await claimGift(app, profile.userId, token);
+        return;
+      }
       const { friendFlag } = await liff.getFriendship();
       if (friendFlag) {
         app.innerHTML = `<div class="card"><div class="spinner"></div><p>ギフトを確認中...</p></div>`;
         await claimGift(app, profile.userId, token);
+        return;
       }
+      showFriendCheckNotice('まだ友だち追加が確認できません。追加済みの場合は、数秒待ってからもう一度押してください。');
     } catch {
-      // ignore, ユーザーは手動ボタンで再試行できる
+      // ignore, ユーザーは手動ボタンでサーバー確認できる
     } finally {
       checking = false;
+      if (button) {
+        button.disabled = false;
+        button.textContent = '追加した・確認する';
+      }
     }
   };
 
@@ -106,7 +125,23 @@ function showFriendAddGate(
     if (document.visibilityState === 'visible') void recheck();
   });
   window.addEventListener('focus', () => { void recheck(); });
-  document.getElementById('egiftFriendDoneBtn')!.addEventListener('click', () => { void recheck(); });
+  document.getElementById('egiftFriendDoneBtn')!.addEventListener('click', () => { void recheck(true); });
+}
+
+function showFriendCheckNotice(message: string): void {
+  const existing = document.getElementById('egiftFriendCheckNotice');
+  if (existing) {
+    existing.textContent = message;
+    return;
+  }
+  const button = document.getElementById('egiftFriendDoneBtn');
+  if (!button) return;
+  const notice = document.createElement('p');
+  notice.id = 'egiftFriendCheckNotice';
+  notice.className = 'sub-message';
+  notice.style.color = '#b26b00';
+  notice.textContent = message;
+  button.insertAdjacentElement('afterend', notice);
 }
 
 async function claimGift(app: HTMLElement, lineUserId: string, token: string): Promise<void> {

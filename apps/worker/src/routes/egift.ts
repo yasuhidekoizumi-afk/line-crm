@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import {
   createEgiftCampaign,
+  getLineAccounts,
   getEgiftCampaignById,
   listEgiftCampaigns,
   activateEgiftCampaign,
@@ -24,10 +25,43 @@ import {
   type EgiftGift,
   type EgiftKpi,
 } from '@line-crm/db';
+import { LineClient } from '@line-crm/line-sdk';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const egift = new Hono<Env>();
+
+async function verifyLineFriendship(env: Env['Bindings'], lineUserId: string): Promise<{ ok: boolean; displayName?: string; pictureUrl?: string; error?: string }> {
+  const tokens: string[] = [];
+  const accounts = await getLineAccounts(env.DB).catch(() => []);
+  for (const account of accounts) {
+    if (account.is_active && account.channel_access_token && !tokens.includes(account.channel_access_token)) {
+      tokens.push(account.channel_access_token);
+    }
+  }
+  if (env.LINE_CHANNEL_ACCESS_TOKEN && !tokens.includes(env.LINE_CHANNEL_ACCESS_TOKEN)) {
+    tokens.push(env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
+  if (tokens.length === 0) {
+    return { ok: false, error: 'LINE_CHANNEL_ACCESS_TOKEN is not configured' };
+  }
+
+  let lastError = '';
+  for (const token of tokens) {
+    try {
+      const profile = await new LineClient(token).getProfile(lineUserId);
+      return { ok: true, displayName: profile.displayName, pictureUrl: profile.pictureUrl };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (!/\b404\b|not found/i.test(lastError)) {
+        console.warn('eGift LINE profile verification failed:', lastError);
+      }
+    }
+  }
+
+  return { ok: false, error: lastError || 'LINE friendship not verified' };
+}
 
 function buildEgiftLiffUrl(
   liffUrl: string | undefined,
@@ -631,8 +665,9 @@ egift.get('/g/:token', async (c) => {
   .note { font-size: 11px; color: #999; margin-top: 16px; text-align: center; }
   .form-group { margin-bottom: 14px; text-align: left; }
   .form-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #5c4a2e; }
-  .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; background: #fafaf7; }
+  .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; background: #fafaf7; position: relative; z-index: 1; -webkit-user-select: text; user-select: text; }
   .form-group input:focus { outline: none; border-color: #5c4a2e; box-shadow: 0 0 0 2px rgba(92,74,46,.1); }
+  .form-error { display:none; background:#fff4e5; color:#8a4b00; border:1px solid #ffd59a; border-radius:8px; padding:10px 12px; margin:0 0 14px; font-size:13px; line-height:1.6; }
   #redeem-section, #done-section { display: none; }
   .hidden { display: none !important; }
   .footer { text-align: center; padding: 24px 16px; font-size: 11px; color: #bbb; }
@@ -673,29 +708,32 @@ egift.get('/g/:token', async (c) => {
 <div id="redeem-section" class="card">
   <h2 style="font-size:18px;margin-bottom:6px;">📦 お届け先のご登録</h2>
   <p style="font-size:13px;color:#8a7a5c;margin-bottom:20px;">ギフトのお届け先をご入力ください</p>
-  <div class="form-group">
-    <label>お名前 <span style="color:#e74c3c">*</span></label>
-    <input type="text" id="name" placeholder="山田 花子" autocomplete="name">
-  </div>
-  <div class="form-group">
-    <label>郵便番号</label>
-    <input type="text" id="zip" placeholder="150-0001" autocomplete="postal-code">
-  </div>
-  <div class="form-group">
-    <label>ご住所 <span style="color:#e74c3c">*</span></label>
-    <input type="text" id="address" placeholder="東京都渋谷区..." autocomplete="street-address">
-  </div>
-  <div class="form-group">
-    <label>電話番号</label>
-    <input type="tel" id="phone" placeholder="090-1234-5678" autocomplete="tel">
-  </div>
-  <div class="form-group">
-    <label>メールアドレス</label>
-    <input type="email" id="email" placeholder="example@mail.com" autocomplete="email">
-  </div>
-  <button class="btn btn-primary" id="redeem-btn">
-    <span id="redeem-btn-text">📦 受け取りを完了する</span>
-  </button>
+  <form id="redeem-form" autocomplete="on">
+    <div id="redeem-error" class="form-error" role="alert"></div>
+    <div class="form-group">
+      <label for="name">お名前 <span style="color:#e74c3c">*</span></label>
+      <input type="text" id="name" name="name" placeholder="山田 花子" autocomplete="name" required>
+    </div>
+    <div class="form-group">
+      <label for="zip">郵便番号</label>
+      <input type="text" id="zip" name="zip" placeholder="150-0001" autocomplete="postal-code" inputmode="numeric">
+    </div>
+    <div class="form-group">
+      <label for="address">ご住所 <span style="color:#e74c3c">*</span></label>
+      <input type="text" id="address" name="address" placeholder="東京都渋谷区..." autocomplete="street-address" required>
+    </div>
+    <div class="form-group">
+      <label for="phone">電話番号</label>
+      <input type="tel" id="phone" name="phone" placeholder="090-1234-5678" autocomplete="tel" inputmode="tel">
+    </div>
+    <div class="form-group">
+      <label for="email">メールアドレス</label>
+      <input type="email" id="email" name="email" placeholder="example@mail.com" autocomplete="email" inputmode="email">
+    </div>
+    <button type="submit" class="btn btn-primary" id="redeem-btn">
+      <span id="redeem-btn-text">📦 受け取りを完了する</span>
+    </button>
+  </form>
   <p class="note">ご入力いただいた情報は商品発送のみに使用します</p>
 </div>
 
@@ -729,6 +767,8 @@ const step3 = document.getElementById('step3');
 const claimSection = document.getElementById('claim-section');
 const redeemSection = document.getElementById('redeem-section');
 const doneSection = document.getElementById('done-section');
+const redeemForm = document.getElementById('redeem-form');
+const redeemError = document.getElementById('redeem-error');
 
 function setStep(n) {
   [step1, step2, step3].forEach((s, i) => {
@@ -756,8 +796,16 @@ document.getElementById('line-add-btn').addEventListener('click', function() {
   // The LIFF app will redirect back with ?status=line_added on success
 });
 
-document.getElementById('redeem-btn').addEventListener('click', async function() {
-  const btn = this;
+function showRedeemError(message) {
+  redeemError.textContent = message;
+  redeemError.style.display = 'block';
+  redeemError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+redeemForm.addEventListener('submit', async function(event) {
+  event.preventDefault();
+  redeemError.style.display = 'none';
+  const btn = document.getElementById('redeem-btn');
   const btnText = document.getElementById('redeem-btn-text');
   btn.disabled = true;
   btnText.innerHTML = '<span class="spinner"></span>処理中...';
@@ -766,7 +814,7 @@ document.getElementById('redeem-btn').addEventListener('click', async function()
   const address = document.getElementById('address').value.trim();
 
   if (!name || !address) {
-    alert('お名前とご住所は必須です');
+    showRedeemError('お名前とご住所は必須です');
     btn.disabled = false;
     btnText.textContent = '📦 受け取りを完了する';
     return;
@@ -790,12 +838,12 @@ document.getElementById('redeem-btn').addEventListener('click', async function()
       setStep(3);
       show(doneSection);
     } else {
-      alert('エラー: ' + (data.error || '不明なエラー'));
+      showRedeemError('エラー: ' + (data.error || '不明なエラー'));
       btn.disabled = false;
       btnText.textContent = '📦 受け取りを完了する';
     }
   } catch (err) {
-    alert('通信エラーが発生しました。時間をおいてお試しください。');
+    showRedeemError('通信エラーが発生しました。時間をおいてお試しください。' + (err instanceof Error ? '（' + err.message + '）' : ''));
     btn.disabled = false;
     btnText.textContent = '📦 受け取りを完了する';
   }
@@ -818,6 +866,10 @@ egift.post('/api/egift/gifts/claim', async (c) => {
     const token = body.token as string;
     const lineUserId = body.lineUserId as string;
 
+    if (!token || !lineUserId) {
+      return c.json({ success: false, error: 'token と lineUserId は必須です' }, 400);
+    }
+
     const encoder = new TextEncoder();
     const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(token));
     const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -833,6 +885,19 @@ egift.post('/api/egift/gifts/claim', async (c) => {
       return c.json({ success: false, error: 'ギフトの有効期限が切れています' }, 410);
     }
 
+    // Server-side friendship verification via LINE Messaging API getProfile.
+    // LIFF getFriendship() can keep returning false on PC browsers even after the
+    // user adds the account, so we confirm on the server. getProfile succeeds only
+    // when the user is currently a friend (not blocked / not never-added).
+    const friendship = await verifyLineFriendship(c.env, lineUserId);
+    if (!friendship.ok) {
+      return c.json({
+        success: false,
+        error: '友だち追加が確認できませんでした。ORYZAE公式LINEを友だち追加してから、もう一度お試しください。',
+        code: 'not_friend',
+      }, 403);
+    }
+
     // Find or create friend by line_user_id
     let friend = await c.env.DB.prepare(
       'SELECT id FROM friends WHERE line_user_id = ?',
@@ -842,10 +907,14 @@ egift.post('/api/egift/gifts/claim', async (c) => {
       // create friend record
       const friendId = crypto.randomUUID();
       await c.env.DB.prepare(
-        `INSERT INTO friends (id, line_user_id, is_following, created_at, updated_at)
-         VALUES (?, ?, 1, ?, ?)`,
-      ).bind(friendId, lineUserId, new Date().toISOString(), new Date().toISOString()).run();
+        `INSERT INTO friends (id, line_user_id, display_name, picture_url, is_following, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`,
+      ).bind(friendId, lineUserId, friendship.displayName ?? null, friendship.pictureUrl ?? null, new Date().toISOString(), new Date().toISOString()).run();
       friend = { id: friendId };
+    } else {
+      await c.env.DB.prepare(
+        `UPDATE friends SET is_following = 1, updated_at = ? WHERE id = ?`,
+      ).bind(new Date().toISOString(), friend.id).run();
     }
 
     await markGiftLineAdded(c.env.DB, gift.id, friend.id);
