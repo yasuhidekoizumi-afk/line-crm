@@ -124,8 +124,9 @@ function restoreLiffRedirectParams(): void {
   } catch {}
 }
 
-// LIFF初期化前に復元を試みる
-restoreLiffRedirectParams();
+// LIFF初期化前に復元を試みる（liff.init()後に上書きされる可能性があるため、
+// 実際の復元は main() 内の liff.init() 完了後に行う）
+// restoreLiffRedirectParams() は main() 内で呼び出す
 
 const LIFF_ID = detectLiffId();
 if (!LIFF_ID) {
@@ -374,6 +375,9 @@ async function main() {
       liff.login({ redirectUri: window.location.href });
       return;
     }
+
+    // OAuthコールバック後、liffRedirectUriから元のパラメータを復元
+    restoreLiffRedirectParams();
 
     const page = getPage();
     if (page === 'book') {
