@@ -746,10 +746,9 @@ egift.get('/g/:token', async (c) => {
   <p style="font-size:14px;color:#8a7a5c;margin-bottom:24px;">${escapedGiverName}さんからの贈り物、<br>まもなくお手元に届きます。</p>
   <div style="background:#fdf8f0;border-radius:8px;padding:16px;margin-bottom:20px;text-align:left;font-size:13px;">
     <p style="font-weight:700;color:#5c4a2e;margin-bottom:8px;">🎯 次はあなたも贈り主に</p>
-    <p style="color:#8a7a5c;line-height:1.6;">気に入ったら、今度はあなたが誰かに贈ってみませんか？<br>ORYZAE公式LINEでお得な情報をお届けしています。</p>
+    <p style="color:#8a7a5c;line-height:1.6;">気に入ったら、今度はあなたが誰かに贈ってみませんか？<br>お得な情報はORYZAE公式LINEでお届けします。</p>
   </div>
-  <a class="btn btn-white" href="https://oryzae.shop" style="margin-bottom:8px;">ORYZAEの商品を見てみる</a>
-  <a class="btn btn-line" href="https://lin.ee/ORYZAE" style="font-size:14px;padding:12px;">🧑‍🍳 ORYZAE公式LINEを友だち追加</a>
+  <a class="btn btn-white" href="https://oryzae.shop">ORYZAEの商品を見てみる</a>
 </div>
 
 <div class="footer">ORYZAE Inc. — 地球を発酵させる</div>
