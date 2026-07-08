@@ -95,31 +95,24 @@ function mountFatalError(title: string, detail: string): void {
 // ─── OAuth callback param restore ──────────────────────
 // LIFFログイン時にLINEがコールバックURLへリダイレクトすると、
 // 元のLIFF URLのクエリパラメータ（page, egift_token等）が失われる。
-// liff.init() の前に sessionStorage へ退避し、コールバック後に復元する。
-const OAUTH_STASH_KEY = 'lh_liff_params_stash';
-
-function stashParams(): void {
+// コールバックURLの liffRedirectUri には元の完全なLIFF URLが入っているので、
+// そこからパラメータを抽出して復元する。
+function restoreLiffRedirectParams(): void {
   const params = new URLSearchParams(window.location.search);
-  const stash: Record<string, string> = {};
-  for (const key of ['page', 'egift_token', 'campaign_id', 'ref', 'redirect']) {
-    const v = params.get(key);
-    if (v) stash[key] = v;
-  }
-  if (Object.keys(stash).length > 0) {
-    try { sessionStorage.setItem(OAUTH_STASH_KEY, JSON.stringify(stash)); } catch {}
-  }
-}
+  // OAuthコールバックかを判定（code パラメータの有無）
+  if (!params.has('code')) return;
 
-function restoreStashedParams(): void {
+  const redirectUri = params.get('liffRedirectUri');
+  if (!redirectUri) return;
+
   try {
-    const raw = sessionStorage.getItem(OAUTH_STASH_KEY);
-    if (!raw) return;
-    const stash = JSON.parse(raw) as Record<string, string>;
-    const params = new URLSearchParams(window.location.search);
+    const decoded = decodeURIComponent(redirectUri);
+    const redirectParams = new URLSearchParams(decoded.split('?')[1] || '');
     let changed = false;
-    for (const [k, v] of Object.entries(stash)) {
-      if (!params.has(k)) {
-        params.set(k, v);
+    for (const key of ['page', 'egift_token', 'campaign_id', 'ref', 'redirect']) {
+      const v = redirectParams.get(key);
+      if (v && !params.has(key)) {
+        params.set(key, v);
         changed = true;
       }
     }
@@ -128,13 +121,11 @@ function restoreStashedParams(): void {
       const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
       try { window.history.replaceState(null, '', newUrl); } catch {}
     }
-    // OAuthコールバック完了後は不要なのでクリア
-    sessionStorage.removeItem(OAUTH_STASH_KEY);
   } catch {}
 }
 
-// LIFF初期化前に現URLのパラメータを退避
-stashParams();
+// LIFF初期化前に復元を試みる
+restoreLiffRedirectParams();
 
 const LIFF_ID = detectLiffId();
 if (!LIFF_ID) {
@@ -383,9 +374,6 @@ async function main() {
       liff.login({ redirectUri: window.location.href });
       return;
     }
-
-    // OAuthコールバック後、sessionStorageに退避したパラメータをURLに復元
-    restoreStashedParams();
 
     const page = getPage();
     if (page === 'book') {
