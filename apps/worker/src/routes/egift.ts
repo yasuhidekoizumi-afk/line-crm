@@ -780,7 +780,9 @@ function show(el) {
   claimSection.style.display = 'none';
   redeemSection.style.display = 'none';
   doneSection.style.display = 'none';
-  el.style.display = '';
+  // NOTE: #redeem-section / #done-section have CSS display:none, so setting ''
+  // would fall back to that and keep them hidden. Use an explicit 'block'.
+  el.style.display = 'block';
 }
 
 if (STATUS === 'line_added' || returnStatus === 'line_added') {
