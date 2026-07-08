@@ -135,7 +135,7 @@ if (!LIFF_ID) {
 }
 const UUID_STORAGE_KEY = 'lh_uuid';
 // LINE公式アカウントの友だち追加URL（LINE Developers Console → Messaging API → Bot basic ID）
-const BOT_BASIC_ID = import.meta.env?.VITE_BOT_BASIC_ID || '';
+const BOT_BASIC_ID = import.meta.env?.VITE_BOT_BASIC_ID || '@oryzae_foodcosme';
 
 function apiCall(path: string, options?: RequestInit): Promise<Response> {
   return fetch(path, {

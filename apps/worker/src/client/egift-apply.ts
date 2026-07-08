@@ -11,7 +11,7 @@ declare const liff: {
   closeWindow(): void;
 };
 
-const BOT_BASIC_ID = (import.meta as ImportMeta & { env?: { VITE_BOT_BASIC_ID?: string } }).env?.VITE_BOT_BASIC_ID || '';
+const BOT_BASIC_ID = (import.meta as ImportMeta & { env?: { VITE_BOT_BASIC_ID?: string } }).env?.VITE_BOT_BASIC_ID || '@oryzae_foodcosme';
 
 function escapeHtml(str: string): string {
   const div = document.createElement('div');
