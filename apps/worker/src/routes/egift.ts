@@ -667,6 +667,7 @@ egift.get('/g/:token', async (c) => {
   .form-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #5c4a2e; }
   .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; background: #fafaf7; position: relative; z-index: 1; -webkit-user-select: text; user-select: text; }
   .form-group input:focus { outline: none; border-color: #5c4a2e; box-shadow: 0 0 0 2px rgba(92,74,46,.1); }
+  .form-hint { margin-top:4px; font-size:11px; color:#9b8c72; line-height:1.5; }
   .form-error { display:none; background:#fff4e5; color:#8a4b00; border:1px solid #ffd59a; border-radius:8px; padding:10px 12px; margin:0 0 14px; font-size:13px; line-height:1.6; }
   #redeem-section, #done-section { display: none; }
   .hidden { display: none !important; }
@@ -717,10 +718,11 @@ egift.get('/g/:token', async (c) => {
     <div class="form-group">
       <label for="zip">郵便番号</label>
       <input type="text" id="zip" name="zip" placeholder="150-0001" autocomplete="postal-code" inputmode="numeric">
+      <div id="zip-hint" class="form-hint">郵便番号を入れると、住所を自動入力します</div>
     </div>
     <div class="form-group">
       <label for="address">ご住所 <span style="color:#e74c3c">*</span></label>
-      <input type="text" id="address" name="address" placeholder="東京都渋谷区..." autocomplete="street-address" required>
+      <input type="text" id="address" name="address" placeholder="番地・建物名まで入力してください" autocomplete="street-address" required>
     </div>
     <div class="form-group">
       <label for="phone">電話番号</label>
@@ -769,6 +771,9 @@ const redeemSection = document.getElementById('redeem-section');
 const doneSection = document.getElementById('done-section');
 const redeemForm = document.getElementById('redeem-form');
 const redeemError = document.getElementById('redeem-error');
+const zipInput = document.getElementById('zip');
+const addressInput = document.getElementById('address');
+const zipHint = document.getElementById('zip-hint');
 
 function setStep(n) {
   [step1, step2, step3].forEach((s, i) => {
@@ -803,6 +808,34 @@ function showRedeemError(message) {
   redeemError.style.display = 'block';
   redeemError.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
+
+async function autofillAddressFromZip() {
+  const zip = zipInput.value.replace(/[^0-9]/g, '');
+  if (zip.length !== 7) return;
+  zipHint.textContent = '住所を検索中...';
+  try {
+    const res = await fetch('https://zipcloud.ibsnet.co.jp/api/search?zipcode=' + encodeURIComponent(zip));
+    const data = await res.json();
+    const result = data && data.results && data.results[0];
+    if (!result) {
+      zipHint.textContent = '住所が見つかりませんでした。手入力してください';
+      return;
+    }
+    const baseAddress = [result.address1, result.address2, result.address3].filter(Boolean).join('');
+    const current = addressInput.value.trim();
+    if (!current || current.length < baseAddress.length) {
+      addressInput.value = baseAddress;
+      addressInput.focus();
+      addressInput.setSelectionRange(addressInput.value.length, addressInput.value.length);
+    }
+    zipHint.textContent = '住所を自動入力しました。番地・建物名だけ追記してください';
+  } catch (err) {
+    zipHint.textContent = '住所検索に失敗しました。手入力でも進めます';
+  }
+}
+
+zipInput.addEventListener('input', () => { void autofillAddressFromZip(); });
+zipInput.addEventListener('blur', () => { void autofillAddressFromZip(); });
 
 redeemForm.addEventListener('submit', async function(event) {
   event.preventDefault();
