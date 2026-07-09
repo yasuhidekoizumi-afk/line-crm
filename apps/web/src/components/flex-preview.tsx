@@ -42,6 +42,8 @@ interface FlexNode {
   position?: string
   borderWidth?: string
   borderColor?: string
+  minHeight?: string
+  maxLines?: number
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any
 }
@@ -68,7 +70,17 @@ function FlexText({ node }: { node: FlexNode }) {
     color: node.color || '#111',
     margin: 0,
     lineHeight: 1.4,
-    ...(node.wrap === false ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }),
+    ...(node.maxLines
+      ? {
+          display: '-webkit-box',
+          WebkitLineClamp: node.maxLines,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          wordBreak: 'break-word',
+        }
+      : node.wrap === false
+        ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+        : { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }),
     ...(node.align === 'center' ? { textAlign: 'center' } : node.align === 'end' ? { textAlign: 'right' } : {}),
     ...(node.flex !== undefined ? { flex: node.flex } : {}),
   }
@@ -146,6 +158,7 @@ function FlexBox({ node }: { node: FlexNode }) {
     ...(node.paddingEnd ? { paddingRight: node.paddingEnd } : {}),
     ...(node.width ? { width: node.width } : {}),
     ...(node.height ? { height: node.height } : {}),
+    ...(node.minHeight ? { minHeight: node.minHeight } : {}),
     ...(node.flex !== undefined ? { flex: node.flex } : {}),
     ...(isHorizontal ? { alignItems: node.gravity === 'center' ? 'center' : node.gravity === 'bottom' ? 'flex-end' : 'flex-start' } : {}),
     ...(node.align === 'center' ? { alignItems: 'center' } : node.align === 'end' ? { alignItems: 'flex-end' } : {}),
@@ -188,6 +201,7 @@ function FlexBubble({ bubble, maxWidth }: { bubble: FlexNode; maxWidth?: number 
   return (
     <div style={{
       width: w,
+      flex: `0 0 ${w}px`,
       backgroundColor: '#fff',
       borderRadius: '12px',
       overflow: 'hidden',
@@ -236,7 +250,7 @@ export default function FlexPreview({ content, maxWidth }: { content: string; ma
 
     if (parsed.type === 'carousel' && Array.isArray(parsed.contents)) {
       return (
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '4px 0' }}>
+        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '4px 0', maxWidth: '100%' }}>
           {parsed.contents.map((bubble: FlexNode, i: number) => (
             <FlexBubble key={i} bubble={bubble} maxWidth={maxWidth} />
           ))}

@@ -49,14 +49,22 @@ export const DEFAULT_CARD: Card = {
  */
 export function cardsToFlexContent(cards: Card[]): string {
   const bubbles = cards.map((c) => {
-    const bubble: Record<string, unknown> = { type: 'bubble' }
+    const bubble: Record<string, unknown> = {
+      type: 'bubble',
+      size: 'kilo',
+      styles: {
+        footer: {
+          separator: false,
+        },
+      },
+    }
 
     if (c.imageUrl.trim()) {
       bubble.hero = {
         type: 'image',
         url: c.imageUrl.trim(),
         size: 'full',
-        aspectRatio: '1:1',
+        aspectRatio: '20:13',
         aspectMode: 'cover',
       }
     }
@@ -67,8 +75,9 @@ export function cardsToFlexContent(cards: Card[]): string {
         type: 'text',
         text: c.title.trim(),
         weight: 'bold',
-        size: 'md',
+        size: 'lg',
         wrap: true,
+        maxLines: 2,
       })
     }
     if (c.body.trim()) {
@@ -76,16 +85,19 @@ export function cardsToFlexContent(cards: Card[]): string {
         type: 'text',
         text: c.body.trim(),
         size: 'sm',
-        color: '#666666',
+        color: '#333333',
         wrap: true,
         margin: 'sm',
+        maxLines: 3,
       })
     }
     if (bodyContents.length > 0) {
       bubble.body = {
         type: 'box',
         layout: 'vertical',
-        paddingAll: '12px',
+        minHeight: '126px',
+        paddingAll: '14px',
+        paddingBottom: '8px',
         contents: bodyContents,
       }
     }
@@ -94,15 +106,17 @@ export function cardsToFlexContent(cards: Card[]): string {
       .filter((b) => b.label.trim() && b.uri.trim())
       .map((b) => ({
         type: 'button',
-        style: 'primary',
-        color: '#06C755',
+        style: 'link',
+        height: 'sm',
+        color: '#5B84D7',
         action: { type: 'uri', label: b.label.trim(), uri: b.uri.trim() },
       }))
     if (footerButtons.length > 0) {
       bubble.footer = {
         type: 'box',
         layout: 'vertical',
-        spacing: 'sm',
+        paddingAll: '8px',
+        paddingTop: '0px',
         contents: footerButtons,
       }
     }
