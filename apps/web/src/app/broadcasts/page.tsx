@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import type { Tag } from '@line-crm/shared'
-import { api, type ApiBroadcast, type ApiBroadcastDetail } from '@/lib/api'
+import { api, type ApiBroadcast, type ApiBroadcastDetail, type EmergencyStatus } from '@/lib/api'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
@@ -361,6 +361,7 @@ function BroadcastsPageInner() {
   const [broadcasts, setBroadcasts] = useState<ApiBroadcast[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [segments, setSegments] = useState<Segment[]>([])
+  const [emergencyStatus, setEmergencyStatus] = useState<EmergencyStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   // 即座にスケルトンプレフィル → Gemini 結果が来たら上書き
@@ -454,15 +455,17 @@ function BroadcastsPageInner() {
     setLoading(true)
     setError('')
     try {
-      const [broadcastsRes, tagsRes, segmentsRes] = await Promise.all([
+      const [broadcastsRes, tagsRes, segmentsRes, emergencyRes] = await Promise.all([
         api.broadcasts.list({ accountId: selectedAccountId || undefined, archived: 'all' }),
         api.tags.list(),
         fermentApi.segments.list(),
+        api.emergency.status(),
       ])
       if (broadcastsRes.success) setBroadcasts(broadcastsRes.data)
       else setError(broadcastsRes.error)
       if (tagsRes.success) setTags(tagsRes.data)
       if (segmentsRes.success && segmentsRes.data) setSegments(segmentsRes.data)
+      if (emergencyRes.success) setEmergencyStatus(emergencyRes.data)
     } catch {
       setError('データの読み込みに失敗しました。もう一度お試しください。')
     } finally {
@@ -644,6 +647,18 @@ function BroadcastsPageInner() {
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
           {error}
+        </div>
+      )}
+
+      {emergencyStatus?.paused && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <div className="font-semibold">LINE配信は緊急停止中です</div>
+          <div className="mt-1">
+            予約済みの配信は、予約日時を過ぎても送信されません。解除する場合は「緊急コントロール」で安全状態を確認してください。
+          </div>
+          <div className="mt-2 text-xs text-red-700">
+            現在のリスク: {emergencyStatus.riskLevel} / 直近ブロック・解除: {emergencyStatus.recentUnfollows}件 / 予約中: {emergencyStatus.scheduledBroadcasts}件
+          </div>
         </div>
       )}
 
