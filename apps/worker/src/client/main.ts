@@ -20,6 +20,7 @@ import { initLinkShopify } from './link-shopify.js';
 import { initEmailLink } from './email-link.js';
 import { initEgift } from './egift.js';
 import { initEgiftApply } from './egift-apply.js';
+import { initShop } from './shop.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -394,6 +395,8 @@ async function main() {
       await initEgift();
     } else if (page === 'egift-apply') {
       await initEgiftApply();
+    } else if (page === 'shop') {
+      await initShop();
     } else {
       await linkAndAddFlow();
     }
