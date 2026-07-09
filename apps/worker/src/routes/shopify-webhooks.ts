@@ -10,6 +10,8 @@ import {
   determineRank,
   calculatePoints,
   recordAffiliateProgramOrder,
+  getFriendByLineUserId,
+  type LoyaltyRank,
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js';
@@ -18,6 +20,8 @@ import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const shopifyWebhooks = new Hono<Env>();
+const PAY_FORWARD_REWARD_POINTS = 500;
+const PAY_FORWARD_MIN_ORDER_AMOUNT = 3000;
 
 function verifyTokenParam(url: string, expected: string): boolean {
   try {
@@ -59,6 +63,128 @@ function extractAffiliateCodeFromOrder(order: {
     if (propValue) return { code: propValue, source: 'note_attribute' };
   }
   return { code: null, source: 'cart_attribute' };
+}
+
+async function ensureShopifyOnlyFriend(db: D1Database, shopifyCustomerId: string): Promise<string> {
+  const lineUserId = `shopify:${shopifyCustomerId}`;
+  const existing = await getFriendByLineUserId(db, lineUserId);
+  if (existing) return existing.id;
+
+  const id = crypto.randomUUID();
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00');
+  await db
+    .prepare(
+      `INSERT INTO friends (id, line_user_id, display_name, picture_url, status_message, is_following, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, NULL, 0, ?, ?)`,
+    )
+    .bind(id, lineUserId, `Shopify顧客 ${shopifyCustomerId}`, now, now)
+    .run();
+  return id;
+}
+
+async function awardPayForwardReferrer(
+  db: D1Database,
+  input: {
+    referredCustomerId: string;
+    orderId: string;
+    orderAmount: number;
+  },
+): Promise<{ rewarded: boolean; reason?: string; referrerCustomerId?: string }> {
+  if (input.orderAmount < PAY_FORWARD_MIN_ORDER_AMOUNT) {
+    return { rewarded: false, reason: 'below_min_order' };
+  }
+
+  const referral = await db
+    .prepare(
+      `SELECT id, referrer_customer_id, referred_customer_id, status
+       FROM pay_forward_referrals
+       WHERE referred_customer_id = ?
+         AND status = 'claimed'
+       LIMIT 1`,
+    )
+    .bind(input.referredCustomerId)
+    .first<{ id: string; referrer_customer_id: string; referred_customer_id: string; status: string }>();
+  if (!referral) return { rewarded: false, reason: 'no_claimed_referral' };
+
+  const priorOrder = await db
+    .prepare(
+      `SELECT 1
+       FROM shopify_orders
+       WHERE shopify_customer_id = ?
+         AND shopify_order_id <> ?
+         AND cancelled_at IS NULL
+       LIMIT 1`,
+    )
+    .bind(input.referredCustomerId, input.orderId)
+    .first();
+  if (priorOrder) {
+    await db
+      .prepare(
+        `UPDATE pay_forward_referrals
+         SET status = 'ineligible',
+             first_order_id = ?,
+             first_order_amount = ?,
+             ineligible_reason = 'not_first_purchase',
+             updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+         WHERE id = ? AND status = 'claimed'`,
+      )
+      .bind(input.orderId, input.orderAmount, referral.id)
+      .run();
+    return { rewarded: false, reason: 'not_first_purchase' };
+  }
+
+  const rewardOrderId = `pay-forward-reward-${input.orderId}`;
+  const existingReward = await db
+    .prepare(`SELECT 1 FROM loyalty_transactions WHERE order_id = ? LIMIT 1`)
+    .bind(rewardOrderId)
+    .first();
+  if (existingReward) return { rewarded: false, reason: 'already_rewarded' };
+
+  const existingPoint = await getLoyaltyPointByShopifyCustomerId(db, referral.referrer_customer_id);
+  const referrerFriendId = existingPoint?.friend_id ?? (await ensureShopifyOnlyFriend(db, referral.referrer_customer_id));
+  const current = existingPoint && existingPoint.friend_id === referrerFriendId
+    ? existingPoint
+    : await getLoyaltyPoint(db, referrerFriendId);
+  const regularAfter = (current?.balance ?? 0) + PAY_FORWARD_REWARD_POINTS;
+  const limitedAfter = current?.limited_balance ?? 0;
+
+  await upsertLoyaltyPoint(db, referrerFriendId, {
+    balance: regularAfter,
+    totalSpent: current?.total_spent ?? 0,
+    rank: (current?.rank as LoyaltyRank | undefined) ?? 'レギュラー',
+    shopifyCustomerId: referral.referrer_customer_id,
+  });
+
+  await addLoyaltyTransaction(db, {
+    friendId: referrerFriendId,
+    type: 'award',
+    points: PAY_FORWARD_REWARD_POINTS,
+    balanceAfter: regularAfter + limitedAfter,
+    reason: `Pay Forward紹介ありがとう特典: +${PAY_FORWARD_REWARD_POINTS}pt`,
+    orderId: rewardOrderId,
+    expiryDays: 0,
+  });
+
+  const rewardTx = await db
+    .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? AND friend_id = ? ORDER BY created_at DESC LIMIT 1`)
+    .bind(rewardOrderId, referrerFriendId)
+    .first<{ id: string }>();
+  await db
+    .prepare(
+      `UPDATE pay_forward_referrals
+       SET status = 'reward_sent',
+           first_order_id = ?,
+           first_order_amount = ?,
+           reward_points = ?,
+           reward_transaction_id = ?,
+           reward_sent_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'),
+           updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+       WHERE id = ? AND status = 'claimed'`,
+    )
+    .bind(input.orderId, input.orderAmount, PAY_FORWARD_REWARD_POINTS, rewardTx?.id ?? null, referral.id)
+    .run();
+
+  return { rewarded: true, referrerCustomerId: referral.referrer_customer_id };
 }
 
 // POST /api/shopify/webhooks/orders-paid — Shopify 注文支払完了 Webhook
@@ -221,6 +347,17 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
     expiryDays,
   });
 
+  let payForwardReward: { rewarded: boolean; reason?: string; referrerCustomerId?: string } | null = null;
+  try {
+    payForwardReward = await awardPayForwardReferrer(c.env.DB, {
+      referredCustomerId: shopifyCustomerId,
+      orderId,
+      orderAmount,
+    });
+  } catch (err) {
+    console.error('[pay-forward] referrer reward failed:', { orderId, shopifyCustomerId, err });
+  }
+
   // ── バグB 安全網(B1): 注文確定時、未使用のポイント割引コードが残っていたら自動返還 ──
   // この注文でコードを「使った」場合は Shopify の usage_count が増えているため、
   // refundUnusedPointCode 内で used 判定され返金されない（＝正常利用は守られる）。
@@ -255,7 +392,7 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
 
   return c.json({
     success: true,
-    data: { earnedPoints, balance: newBalance, rank: newRank, appliedCampaigns },
+    data: { earnedPoints, balance: newBalance, rank: newRank, appliedCampaigns, payForwardReward },
   });
 });
 
