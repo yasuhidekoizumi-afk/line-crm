@@ -322,9 +322,12 @@ export const api = {
       }),
   },
   broadcasts: {
-    list: (params?: { accountId?: string }) => {
-      const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
-      return fetchApi<ApiResponse<ApiBroadcast[]>>('/api/broadcasts' + query)
+    list: (params?: { accountId?: string; archived?: 'true' | 'false' | 'all' }) => {
+      const query = new URLSearchParams()
+      if (params?.accountId) query.set('lineAccountId', params.accountId)
+      if (params?.archived) query.set('archived', params.archived)
+      const suffix = query.toString() ? `?${query}` : ''
+      return fetchApi<ApiResponse<ApiBroadcast[]>>('/api/broadcasts' + suffix)
     },
     get: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`),
@@ -371,6 +374,10 @@ export const api = {
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/send`, { method: 'POST' }),
     reset: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/reset`, { method: 'POST' }),
+    archive: (id: string) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/archive`, { method: 'POST' }),
+    unarchive: (id: string) =>
+      fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}/unarchive`, { method: 'POST' }),
     targetCount: (params: {
       targetType: ApiBroadcast['targetType']
       targetTagId?: string | null

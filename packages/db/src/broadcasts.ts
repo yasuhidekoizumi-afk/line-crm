@@ -26,6 +26,7 @@ export interface Broadcast {
   error_summary: string | null;
   line_account_id: string | null;
   alt_text: string | null;
+  archived_at: string | null;
   created_at: string;
 }
 
@@ -103,6 +104,7 @@ export type UpdateBroadcastInput = Partial<
     | 'status'
     | 'scheduled_at'
     | 'alt_text'
+    | 'archived_at'
   >
 >;
 
@@ -153,6 +155,10 @@ export async function updateBroadcast(
   if (updates.alt_text !== undefined) {
     fields.push('alt_text = ?');
     values.push(updates.alt_text);
+  }
+  if (updates.archived_at !== undefined) {
+    fields.push('archived_at = ?');
+    values.push(updates.archived_at);
   }
 
   if (fields.length > 0) {

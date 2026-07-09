@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import type { Tag } from '@line-crm/shared'
@@ -73,6 +73,24 @@ const statusConfig: Record<
   scheduled: { label: '予約済み', className: 'bg-blue-100 text-blue-700' },
   sending: { label: '送信中', className: 'bg-yellow-100 text-yellow-700' },
   sent: { label: '送信完了', className: 'bg-green-100 text-green-700' },
+}
+
+type BroadcastListTab = 'active' | 'sent' | 'failed' | 'test' | 'archived'
+
+const broadcastTabs: { value: BroadcastListTab; label: string }[] = [
+  { value: 'active', label: '未完了' },
+  { value: 'sent', label: '送信済み' },
+  { value: 'failed', label: '失敗あり' },
+  { value: 'test', label: 'テスト配信' },
+  { value: 'archived', label: 'アーカイブ' },
+]
+
+function hasFailure(broadcast: ApiBroadcast): boolean {
+  return (broadcast.failedCount ?? 0) > 0 || !!broadcast.errorSummary
+}
+
+function hasTestKeyword(value: string): boolean {
+  return /テスト|test/i.test(value)
 }
 
 function formatDatetime(iso: string | null): string {
@@ -356,6 +374,8 @@ function BroadcastsPageInner() {
   const [selectedDetail, setSelectedDetail] = useState<ApiBroadcastDetail | null>(null)
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
   const [sendingId, setSendingId] = useState<string | null>(null)
+  const [archivingId, setArchivingId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<BroadcastListTab>('active')
   const [aiDrafting, setAiDrafting] = useState(false)
   const [aiDraftError, setAiDraftError] = useState<string | null>(null)
   const [aiDraftElapsed, setAiDraftElapsed] = useState(0)
@@ -435,7 +455,7 @@ function BroadcastsPageInner() {
     setError('')
     try {
       const [broadcastsRes, tagsRes, segmentsRes] = await Promise.all([
-        api.broadcasts.list({ accountId: selectedAccountId || undefined }),
+        api.broadcasts.list({ accountId: selectedAccountId || undefined, archived: 'all' }),
         api.tags.list(),
         fermentApi.segments.list(),
       ])
@@ -472,6 +492,30 @@ function BroadcastsPageInner() {
       load()
     } catch {
       setError('削除に失敗しました')
+    }
+  }
+
+  const handleArchive = async (id: string) => {
+    setArchivingId(id)
+    try {
+      await api.broadcasts.archive(id)
+      load()
+    } catch {
+      setError('アーカイブに失敗しました')
+    } finally {
+      setArchivingId(null)
+    }
+  }
+
+  const handleUnarchive = async (id: string) => {
+    setArchivingId(id)
+    try {
+      await api.broadcasts.unarchive(id)
+      load()
+    } catch {
+      setError('アーカイブから戻せませんでした')
+    } finally {
+      setArchivingId(null)
     }
   }
 
@@ -545,6 +589,41 @@ function BroadcastsPageInner() {
     }
     return '-'
   }
+
+  const isTestBroadcast = useCallback((broadcast: ApiBroadcast) => {
+    return hasTestKeyword(broadcast.title) || hasTestKeyword(getTargetLabel(broadcast))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tags, segments])
+
+  const tabCounts = useMemo(() => {
+    return broadcasts.reduce<Record<BroadcastListTab, number>>((acc, broadcast) => {
+      const archived = !!broadcast.archivedAt
+      const failed = hasFailure(broadcast)
+      if (archived) {
+        acc.archived += 1
+      } else {
+        if (broadcast.status !== 'sent') acc.active += 1
+        if (broadcast.status === 'sent' && !failed) acc.sent += 1
+        if (failed) acc.failed += 1
+        if (isTestBroadcast(broadcast)) acc.test += 1
+      }
+      return acc
+    }, { active: 0, sent: 0, failed: 0, test: 0, archived: 0 })
+  }, [broadcasts, isTestBroadcast])
+
+  const displayedBroadcasts = useMemo(() => {
+    return broadcasts.filter((broadcast) => {
+      const archived = !!broadcast.archivedAt
+      const failed = hasFailure(broadcast)
+      if (activeTab === 'archived') return archived
+      if (archived) return false
+      if (activeTab === 'active') return broadcast.status !== 'sent'
+      if (activeTab === 'sent') return broadcast.status === 'sent' && !failed
+      if (activeTab === 'failed') return failed
+      if (activeTab === 'test') return isTestBroadcast(broadcast)
+      return true
+    })
+  }, [activeTab, broadcasts, isTestBroadcast])
 
   return (
     <div>
@@ -753,6 +832,33 @@ function BroadcastsPageInner() {
         </div>
       )}
 
+      {!showCreate && !editingBroadcast && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {broadcastTabs.map((tab) => {
+            const selected = activeTab === tab.value
+            return (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setActiveTab(tab.value)}
+                className={`inline-flex min-h-[40px] items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                  selected
+                    ? 'border-green-500 bg-green-50 text-green-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] ${
+                  selected ? 'bg-white text-green-700' : 'bg-gray-100 text-gray-500'
+                }`}>
+                  {tabCounts[tab.value].toLocaleString('ja-JP')}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Loading */}
       {loading ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -767,9 +873,13 @@ function BroadcastsPageInner() {
             </div>
           ))}
         </div>
-      ) : broadcasts.length === 0 && !showCreate ? (
+      ) : displayedBroadcasts.length === 0 && !showCreate ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
-          <p className="text-gray-500">配信がありません。「新規配信」から作成してください。</p>
+          <p className="text-gray-500">
+            {broadcasts.length === 0
+              ? '配信がありません。「新規配信」から作成してください。'
+              : `${broadcastTabs.find((tab) => tab.value === activeTab)?.label ?? 'この条件'}の配信はありません。`}
+          </p>
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -799,9 +909,10 @@ function BroadcastsPageInner() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {broadcasts.map((broadcast) => {
+              {displayedBroadcasts.map((broadcast) => {
                 const statusInfo = statusConfig[broadcast.status]
                 const isSending = sendingId === broadcast.id
+                const isArchiving = archivingId === broadcast.id
 
                 return (
                   <tr key={broadcast.id} className="hover:bg-gray-50 transition-colors">
@@ -811,6 +922,7 @@ function BroadcastsPageInner() {
                         <p className="text-sm font-medium text-gray-900">{broadcast.title}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {formatMessageType(broadcast.messageType)}
+                          {broadcast.archivedAt ? ' / アーカイブ済み' : ''}
                         </p>
                       </div>
                     </td>
@@ -899,6 +1011,23 @@ function BroadcastsPageInner() {
                             className="px-3 py-1 min-h-[44px] text-xs font-medium text-orange-600 hover:text-orange-800 bg-orange-50 hover:bg-orange-100 rounded-md transition-colors"
                           >
                             ドラフトに戻す
+                          </button>
+                        )}
+                        {broadcast.archivedAt ? (
+                          <button
+                            onClick={() => handleUnarchive(broadcast.id)}
+                            disabled={isArchiving}
+                            className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 rounded-md disabled:opacity-50 transition-colors"
+                          >
+                            {isArchiving ? '処理中...' : '戻す'}
+                          </button>
+                        ) : broadcast.status === 'sent' && (
+                          <button
+                            onClick={() => handleArchive(broadcast.id)}
+                            disabled={isArchiving}
+                            className="px-3 py-1 min-h-[44px] text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50 transition-colors"
+                          >
+                            {isArchiving ? '処理中...' : 'アーカイブ'}
                           </button>
                         )}
                         {(broadcast.status === 'draft' || broadcast.status === 'scheduled' || broadcast.status === 'sending') && (
