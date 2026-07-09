@@ -48,6 +48,24 @@ import type { Env } from '../index.js';
 const loyalty = new Hono<Env>();
 const BIRTHDAY_REGISTERED_TAG_NAME = '誕生日登録済み';
 const BIRTHDAY_REGISTERED_TAG_COLOR = '#EAB308';
+const POINT_CHARGE_WORKER_URL = 'https://point-charge.oryzae.workers.dev';
+
+async function ensureShopifyOnlyFriend(db: D1Database, shopifyCustomerId: string): Promise<string> {
+  const lineUserId = `shopify:${shopifyCustomerId}`;
+  const existing = await getFriendByLineUserId(db, lineUserId);
+  if (existing) return existing.id;
+
+  const id = crypto.randomUUID();
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00');
+  await db
+    .prepare(
+      `INSERT INTO friends (id, line_user_id, display_name, picture_url, status_message, is_following, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, NULL, 0, ?, ?)`,
+    )
+    .bind(id, lineUserId, `Shopify顧客 ${shopifyCustomerId}`, now, now)
+    .run();
+  return id;
+}
 
 async function ensureBirthdayRegisteredTag(db: D1Database): Promise<string> {
   const existing = (await getTags(db)).find((tag) => tag.name === BIRTHDAY_REGISTERED_TAG_NAME);
@@ -2076,6 +2094,93 @@ loyalty.post('/api/loyalty/admin/points-pilot/award', async (c) => {
 const CAMPAIGN_AWARD_RULES: Record<string, { points: number; label: string }> = {
   '8th_anniversary_88pt': { points: 388, label: '8周年キャンペーンLINE連携特典' },
 };
+
+// POST /api/pay-forward/claim — Pay Forward受け取りを現行ポイント台帳へ反映
+//
+// 既存の point-charge Worker は紹介コード・紹介成立レコードを持っているため、
+// まずそちらへ claim を通し、その後この Worker の loyalty_points に1,000ptを付与する。
+// Shopify新規アカウントでLINE未連携の場合は shopify:<customerId> の内部友だちを作る。
+loyalty.post('/api/pay-forward/claim', async (c) => {
+  try {
+    const body = await c.req.json<{ code: string; referredCustomerId: string }>();
+    const code = body.code?.trim();
+    const referredCustomerId = body.referredCustomerId?.trim();
+
+    if (!code || !referredCustomerId) {
+      return c.json({ success: false, error: 'code, referredCustomerId は必須です' }, 400);
+    }
+
+    const existingPoint = await getLoyaltyPointByShopifyCustomerId(c.env.DB, referredCustomerId);
+    const existingFriendId = existingPoint?.friend_id ?? null;
+    const orderId = `pay-forward-claim-${code}-${referredCustomerId}`;
+
+    const existingTx = await c.env.DB
+      .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? LIMIT 1`)
+      .bind(orderId)
+      .first<{ id: string }>();
+    if (existingTx) {
+      return c.json({
+        success: true,
+        data: {
+          already_claimed: true,
+          friend_id: existingFriendId,
+        },
+      });
+    }
+
+    const referralResult = await fetch(`${POINT_CHARGE_WORKER_URL}/api/pay-forward/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, referredCustomerId }),
+    }).then((r) => r.json() as Promise<{ success: boolean; error?: string; data?: { claimed?: boolean; already_claimed?: boolean } }>);
+
+    if (!referralResult.success) {
+      return c.json({ success: false, error: referralResult.error ?? '紹介コードの確認に失敗しました' }, 400);
+    }
+
+    let friendId = existingFriendId;
+    if (!friendId) {
+      friendId = await ensureShopifyOnlyFriend(c.env.DB, referredCustomerId);
+    }
+
+    const expiryConfig = await c.env.DB
+      .prepare(`SELECT expiry_days FROM campaign_expiry_config WHERE campaign_key = ? AND is_active = 1`)
+      .bind('referral_bonus')
+      .first<{ expiry_days: number }>();
+    const expiryDays = expiryConfig?.expiry_days ?? 60;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + (9 * 60 + expiryDays * 24 * 60) * 60 * 1000)
+      .toISOString()
+      .replace('Z', '+09:00');
+
+    const mutation = await mutateLoyaltyPoint(c.env.DB, {
+      friendId,
+      deltaLimited: 1000,
+      limitedExpiresAt: expiresAt,
+      expiryPolicy: 'replace',
+      txType: 'award',
+      reason: `Pay Forward紹介特典: +1,000pt（${expiryDays}日期限）`,
+      orderId,
+      shopifyCustomerId: referredCustomerId,
+      txExpiresAt: expiresAt,
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        claimed: true,
+        friend_id: friendId,
+        balance: mutation.grandTotalAfter,
+        limited_balance: mutation.limitedAfter,
+        limited_expires_at: expiresAt,
+        expiry_days: expiryDays,
+      },
+    });
+  } catch (err) {
+    console.error('POST /api/pay-forward/claim error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
 
 loyalty.post('/api/loyalty/campaign-award', async (c) => {
   try {
