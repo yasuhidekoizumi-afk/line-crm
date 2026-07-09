@@ -2101,6 +2101,7 @@ const CAMPAIGN_AWARD_RULES: Record<string, { points: number; label: string }> = 
 // まずそちらへ claim を通し、その後この Worker の loyalty_points に1,000ptを付与する。
 // Shopify新規アカウントでLINE未連携の場合は shopify:<customerId> の内部友だちを作る。
 loyalty.post('/api/pay-forward/claim', async (c) => {
+  let step = 'start';
   try {
     const body = await c.req.json<{ code: string; referredCustomerId: string }>();
     const code = body.code?.trim();
@@ -2114,6 +2115,7 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
     const existingFriendId = existingPoint?.friend_id ?? null;
     const orderId = `pay-forward-claim-${code}-${referredCustomerId}`;
 
+    step = 'check-existing-transaction';
     const existingTx = await c.env.DB
       .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? LIMIT 1`)
       .bind(orderId)
@@ -2128,6 +2130,7 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
       });
     }
 
+    step = 'claim-referral-worker';
     const referralResult = await fetch(`${POINT_CHARGE_WORKER_URL}/api/pay-forward/claim`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2140,9 +2143,11 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
 
     let friendId = existingFriendId;
     if (!friendId) {
+      step = 'ensure-shopify-only-friend';
       friendId = await ensureShopifyOnlyFriend(c.env.DB, referredCustomerId);
     }
 
+    step = 'load-expiry-config';
     const expiryConfig = await c.env.DB
       .prepare(`SELECT expiry_days FROM campaign_expiry_config WHERE campaign_key = ? AND is_active = 1`)
       .bind('referral_bonus')
@@ -2153,16 +2158,31 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
       .toISOString()
       .replace('Z', '+09:00');
 
-    const mutation = await mutateLoyaltyPoint(c.env.DB, {
-      friendId,
-      deltaLimited: 1000,
+    step = 'upsert-loyalty-point';
+    const currentPoint = existingPoint && existingPoint.friend_id === friendId
+      ? existingPoint
+      : await getLoyaltyPoint(c.env.DB, friendId);
+    const regularAfter = currentPoint?.balance ?? 0;
+    const limitedAfter = (currentPoint?.limited_balance ?? 0) + 1000;
+    const grandTotalAfter = regularAfter + limitedAfter;
+    await upsertLoyaltyPoint(c.env.DB, friendId, {
+      balance: regularAfter,
+      limitedBalance: limitedAfter,
       limitedExpiresAt: expiresAt,
-      expiryPolicy: 'replace',
-      txType: 'award',
+      totalSpent: currentPoint?.total_spent ?? 0,
+      rank: (currentPoint?.rank as LoyaltyRank | undefined) ?? 'レギュラー',
+      shopifyCustomerId: referredCustomerId,
+    });
+
+    step = 'add-loyalty-transaction';
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId,
+      type: 'award',
+      points: 1000,
+      balanceAfter: grandTotalAfter,
       reason: `Pay Forward紹介特典: +1,000pt（${expiryDays}日期限）`,
       orderId,
-      shopifyCustomerId: referredCustomerId,
-      txExpiresAt: expiresAt,
+      expiryDays,
     });
 
     return c.json({
@@ -2170,14 +2190,14 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
       data: {
         claimed: true,
         friend_id: friendId,
-        balance: mutation.grandTotalAfter,
-        limited_balance: mutation.limitedAfter,
+        balance: grandTotalAfter,
+        limited_balance: limitedAfter,
         limited_expires_at: expiresAt,
         expiry_days: expiryDays,
       },
     });
   } catch (err) {
-    console.error('POST /api/pay-forward/claim error:', err);
+    console.error('POST /api/pay-forward/claim error:', { step, err });
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
