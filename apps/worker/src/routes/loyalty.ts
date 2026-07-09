@@ -48,7 +48,7 @@ import type { Env } from '../index.js';
 const loyalty = new Hono<Env>();
 const BIRTHDAY_REGISTERED_TAG_NAME = '誕生日登録済み';
 const BIRTHDAY_REGISTERED_TAG_COLOR = '#EAB308';
-const POINT_CHARGE_WORKER_URL = 'https://point-charge.oryzae.workers.dev';
+const PAY_FORWARD_CLAIM_POINTS = 1000;
 
 async function ensureShopifyOnlyFriend(db: D1Database, shopifyCustomerId: string): Promise<string> {
   const lineUserId = `shopify:${shopifyCustomerId}`;
@@ -65,6 +65,102 @@ async function ensureShopifyOnlyFriend(db: D1Database, shopifyCustomerId: string
     .bind(id, lineUserId, `Shopify顧客 ${shopifyCustomerId}`, now, now)
     .run();
   return id;
+}
+
+function generatePayForwardCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let suffix = '';
+  const values = new Uint8Array(8);
+  crypto.getRandomValues(values);
+  for (const value of values) suffix += alphabet[value % alphabet.length];
+  return `PAYFWD-${suffix}`;
+}
+
+async function ensurePayForwardCode(db: D1Database, customerId: string): Promise<string> {
+  const existing = await db
+    .prepare(`SELECT code FROM pay_forward_codes WHERE referrer_customer_id = ? AND is_active = 1 LIMIT 1`)
+    .bind(customerId)
+    .first<{ code: string }>();
+  if (existing?.code) return existing.code;
+
+  const legacy = await db
+    .prepare(`SELECT code FROM referral_codes WHERE customer_id = ? AND is_active = 1 LIMIT 1`)
+    .bind(customerId)
+    .first<{ code: string }>();
+  if (legacy?.code) {
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO pay_forward_codes (code, referrer_customer_id)
+         VALUES (?, ?)`,
+      )
+      .bind(legacy.code, customerId)
+      .run();
+    return legacy.code;
+  }
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = generatePayForwardCode();
+    try {
+      await db
+        .prepare(
+          `INSERT INTO pay_forward_codes (code, referrer_customer_id)
+           VALUES (?, ?)`,
+        )
+        .bind(code, customerId)
+        .run();
+      return code;
+    } catch (err) {
+      if (err instanceof Error && /UNIQUE|constraint/i.test(err.message)) continue;
+      throw err;
+    }
+  }
+
+  throw new Error('Pay Forward紹介コードを発行できませんでした');
+}
+
+function buildPayForwardReferralUrl(code: string): string {
+  return `https://oryzae.shop/pages/pay-forward?ref=${encodeURIComponent(code)}`;
+}
+
+async function hasAnyShopifyOrder(db: D1Database, shopifyCustomerId: string): Promise<boolean> {
+  const existing = await db
+    .prepare(
+      `SELECT 1
+       FROM shopify_orders
+       WHERE shopify_customer_id = ?
+         AND cancelled_at IS NULL
+       LIMIT 1`,
+    )
+    .bind(shopifyCustomerId)
+    .first();
+  return Boolean(existing);
+}
+
+async function hasAnyPayForwardClaim(db: D1Database, shopifyCustomerId: string): Promise<boolean> {
+  const referral = await db
+    .prepare(`SELECT 1 FROM pay_forward_referrals WHERE referred_customer_id = ? LIMIT 1`)
+    .bind(shopifyCustomerId)
+    .first();
+  if (referral) return true;
+
+  const legacyTx = await db
+    .prepare(
+      `SELECT 1
+       FROM loyalty_transactions t
+       JOIN loyalty_points lp ON lp.friend_id = t.friend_id
+       WHERE lp.shopify_customer_id = ?
+         AND t.type = 'award'
+         AND t.reason LIKE 'Pay Forward紹介特典:%'
+       LIMIT 1`,
+    )
+    .bind(shopifyCustomerId)
+    .first();
+  return Boolean(legacyTx);
+}
+
+function laterIsoDate(a: string | null | undefined, b: string): string {
+  if (!a) return b;
+  return new Date(a).getTime() >= new Date(b).getTime() ? a : b;
 }
 
 async function ensureBirthdayRegisteredTag(db: D1Database): Promise<string> {
@@ -2095,11 +2191,57 @@ const CAMPAIGN_AWARD_RULES: Record<string, { points: number; label: string }> = 
   '8th_anniversary_88pt': { points: 388, label: '8周年キャンペーンLINE連携特典' },
 };
 
+// GET /api/pay-forward/:shopifyCustomerId — 紹介リンク + 紹介履歴
+loyalty.get('/api/pay-forward/:shopifyCustomerId', async (c) => {
+  try {
+    const shopifyCustomerId = c.req.param('shopifyCustomerId').trim();
+    if (!shopifyCustomerId) {
+      return c.json({ success: false, error: 'shopifyCustomerId は必須です' }, 400);
+    }
+
+    const code = await ensurePayForwardCode(c.env.DB, shopifyCustomerId);
+    const historyRows = await c.env.DB
+      .prepare(
+        `SELECT status, claimed_at, reward_sent_at, reward_points
+         FROM pay_forward_referrals
+         WHERE referrer_customer_id = ?
+         ORDER BY created_at DESC
+         LIMIT 20`,
+      )
+      .bind(shopifyCustomerId)
+      .all<{ status: string; claimed_at: string | null; reward_sent_at: string | null; reward_points: number }>();
+    const total = await c.env.DB
+      .prepare(
+        `SELECT COALESCE(SUM(reward_points), 0) AS total
+         FROM pay_forward_referrals
+         WHERE referrer_customer_id = ?`,
+      )
+      .bind(shopifyCustomerId)
+      .first<{ total: number }>();
+
+    return c.json({
+      success: true,
+      data: {
+        referral_code: code,
+        referral_url: buildPayForwardReferralUrl(code),
+        total_reward_pt: total?.total ?? 0,
+        history: (historyRows.results ?? []).map((row) => ({
+          status: row.status,
+          reward_pt: row.reward_points ?? 0,
+          created_at: row.reward_sent_at ?? row.claimed_at,
+        })),
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/pay-forward/:shopifyCustomerId error:', err);
+    return c.json({ success: false, error: 'Failed to fetch Pay Forward info' }, 500);
+  }
+});
+
 // POST /api/pay-forward/claim — Pay Forward受け取りを現行ポイント台帳へ反映
 //
-// 既存の point-charge Worker は紹介コード・紹介成立レコードを持っているため、
-// まずそちらへ claim を通し、その後この Worker の loyalty_points に1,000ptを付与する。
-// Shopify新規アカウントでLINE未連携の場合は shopify:<customerId> の内部友だちを作る。
+// Pay Forwardのポイント残高は line-crm を正とする。
+// 旧 point-charge Worker には書き込まず、紹介関係もこの Worker のD1に記録する。
 loyalty.post('/api/pay-forward/claim', async (c) => {
   let step = 'start';
   try {
@@ -2111,16 +2253,40 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
       return c.json({ success: false, error: 'code, referredCustomerId は必須です' }, 400);
     }
 
+    step = 'load-referral-code';
+    const refCode = await c.env.DB
+      .prepare(`SELECT code, referrer_customer_id FROM pay_forward_codes WHERE code = ? AND is_active = 1 LIMIT 1`)
+      .bind(code)
+      .first<{ code: string; referrer_customer_id: string }>();
+    let resolvedRefCode = refCode;
+    if (!resolvedRefCode) {
+      const legacyRefCode = await c.env.DB
+        .prepare(`SELECT code, customer_id AS referrer_customer_id FROM referral_codes WHERE code = ? AND is_active = 1 LIMIT 1`)
+        .bind(code)
+        .first<{ code: string; referrer_customer_id: string }>();
+      if (legacyRefCode) {
+        await c.env.DB
+          .prepare(
+            `INSERT OR IGNORE INTO pay_forward_codes (code, referrer_customer_id)
+             VALUES (?, ?)`,
+          )
+          .bind(legacyRefCode.code, legacyRefCode.referrer_customer_id)
+          .run();
+        resolvedRefCode = legacyRefCode;
+      }
+    }
+    if (!resolvedRefCode) {
+      return c.json({ success: false, error: '紹介コードが見つかりません' }, 404);
+    }
+
+    if (resolvedRefCode.referrer_customer_id === referredCustomerId) {
+      return c.json({ success: false, error: 'ご自身の紹介コードは利用できません' }, 400);
+    }
+
+    step = 'check-existing-claim';
     const existingPoint = await getLoyaltyPointByShopifyCustomerId(c.env.DB, referredCustomerId);
     const existingFriendId = existingPoint?.friend_id ?? null;
-    const orderId = `pay-forward-claim-${code}-${referredCustomerId}`;
-
-    step = 'check-existing-transaction';
-    const existingTx = await c.env.DB
-      .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? LIMIT 1`)
-      .bind(orderId)
-      .first<{ id: string }>();
-    if (existingTx) {
+    if (await hasAnyPayForwardClaim(c.env.DB, referredCustomerId)) {
       return c.json({
         success: true,
         data: {
@@ -2130,15 +2296,17 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
       });
     }
 
-    step = 'claim-referral-worker';
-    const referralResult = await fetch(`${POINT_CHARGE_WORKER_URL}/api/pay-forward/claim`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, referredCustomerId }),
-    }).then((r) => r.json() as Promise<{ success: boolean; error?: string; data?: { claimed?: boolean; already_claimed?: boolean } }>);
-
-    if (!referralResult.success) {
-      return c.json({ success: false, error: referralResult.error ?? '紹介コードの確認に失敗しました' }, 400);
+    step = 'check-first-purchase';
+    if (await hasAnyShopifyOrder(c.env.DB, referredCustomerId)) {
+      await c.env.DB
+        .prepare(
+          `INSERT OR IGNORE INTO pay_forward_referrals
+           (id, code, referrer_customer_id, referred_customer_id, status, claim_points, ineligible_reason)
+           VALUES (?, ?, ?, ?, 'ineligible', 0, ?)`,
+        )
+        .bind(crypto.randomUUID(), code, resolvedRefCode.referrer_customer_id, referredCustomerId, 'already_purchased')
+        .run();
+      return c.json({ success: false, error: 'この紹介特典は、オリゼ公式ショップで初めてお買い物される方向けです' }, 400);
     }
 
     let friendId = existingFriendId;
@@ -2163,27 +2331,43 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
       ? existingPoint
       : await getLoyaltyPoint(c.env.DB, friendId);
     const regularAfter = currentPoint?.balance ?? 0;
-    const limitedAfter = (currentPoint?.limited_balance ?? 0) + 1000;
+    const limitedAfter = (currentPoint?.limited_balance ?? 0) + PAY_FORWARD_CLAIM_POINTS;
+    const limitedExpiresAt = laterIsoDate(currentPoint?.limited_expires_at, expiresAt);
     const grandTotalAfter = regularAfter + limitedAfter;
     await upsertLoyaltyPoint(c.env.DB, friendId, {
       balance: regularAfter,
       limitedBalance: limitedAfter,
-      limitedExpiresAt: expiresAt,
+      limitedExpiresAt,
       totalSpent: currentPoint?.total_spent ?? 0,
       rank: (currentPoint?.rank as LoyaltyRank | undefined) ?? 'レギュラー',
       shopifyCustomerId: referredCustomerId,
     });
 
     step = 'add-loyalty-transaction';
+    const orderId = `pay-forward-claim-${referredCustomerId}`;
     await addLoyaltyTransaction(c.env.DB, {
       friendId,
       type: 'award',
-      points: 1000,
+      points: PAY_FORWARD_CLAIM_POINTS,
       balanceAfter: grandTotalAfter,
       reason: `Pay Forward紹介特典: +1,000pt（${expiryDays}日期限）`,
       orderId,
       expiryDays,
     });
+
+    step = 'record-referral';
+    const claimTx = await c.env.DB
+      .prepare(`SELECT id FROM loyalty_transactions WHERE order_id = ? AND friend_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .bind(orderId, friendId)
+      .first<{ id: string }>();
+    await c.env.DB
+      .prepare(
+        `INSERT INTO pay_forward_referrals
+         (id, code, referrer_customer_id, referred_customer_id, status, claim_points, claim_transaction_id)
+         VALUES (?, ?, ?, ?, 'claimed', ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), code, resolvedRefCode.referrer_customer_id, referredCustomerId, PAY_FORWARD_CLAIM_POINTS, claimTx?.id ?? null)
+      .run();
 
     return c.json({
       success: true,
@@ -2192,7 +2376,7 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
         friend_id: friendId,
         balance: grandTotalAfter,
         limited_balance: limitedAfter,
-        limited_expires_at: expiresAt,
+        limited_expires_at: limitedExpiresAt,
         expiry_days: expiryDays,
       },
     });
