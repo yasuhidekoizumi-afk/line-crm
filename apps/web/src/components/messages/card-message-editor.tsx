@@ -95,7 +95,8 @@ export function cardsToFlexContent(cards: Card[]): string {
       bubble.body = {
         type: 'box',
         layout: 'vertical',
-        minHeight: '126px',
+        // minHeight はLINE Flex Message仕様に存在しない（400エラーになる）ため、
+        // カード高さの揃えはプレビュー側のCSSでのみ行う
         paddingAll: '14px',
         paddingBottom: '8px',
         contents: bodyContents,
