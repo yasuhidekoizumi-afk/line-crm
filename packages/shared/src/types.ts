@@ -184,6 +184,8 @@ export interface Broadcast {
   errorSummary: string | null;
   /** Flex / リッチメッセージの代替テキスト */
   altText: string | null;
+  /** アーカイブ日時 (ISO 8601、未アーカイブの場合は null) */
+  archivedAt: string | null;
   /** 作成日時 (ISO 8601) */
   createdAt: string;
 }

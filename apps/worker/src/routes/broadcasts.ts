@@ -91,6 +91,7 @@ function serializeBroadcast(row: DbBroadcast) {
     failedCount: row.failed_count ?? 0,
     errorSummary: row.error_summary ?? null,
     altText: (row as unknown as { alt_text?: string | null }).alt_text ?? null,
+    archivedAt: (row as unknown as { archived_at?: string | null }).archived_at ?? null,
     createdAt: row.created_at,
   };
 }
@@ -252,19 +253,60 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
 broadcasts.get('/api/broadcasts', async (c) => {
   try {
     const lineAccountId = c.req.query('lineAccountId');
+    const archived = c.req.query('archived');
+    const archivedWhere = archived === 'true'
+      ? 'archived_at IS NOT NULL'
+      : archived === 'all'
+        ? '1 = 1'
+        : 'archived_at IS NULL';
     let items: DbBroadcast[];
     if (lineAccountId) {
       const result = await c.env.DB
-        .prepare(`SELECT * FROM broadcasts WHERE line_account_id = ? ORDER BY created_at DESC`)
+        .prepare(`SELECT * FROM broadcasts WHERE line_account_id = ? AND ${archivedWhere} ORDER BY created_at DESC`)
         .bind(lineAccountId)
         .all<DbBroadcast>();
       items = result.results;
     } else {
-      items = await getBroadcasts(c.env.DB);
+      const result = await c.env.DB
+        .prepare(`SELECT * FROM broadcasts WHERE ${archivedWhere} ORDER BY created_at DESC`)
+        .all<DbBroadcast>();
+      items = result.results;
     }
     return c.json({ success: true, data: items.map(serializeBroadcast) });
   } catch (err) {
     console.error('GET /api/broadcasts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/broadcasts/:id/archive - 一覧から片付ける（履歴は保持）
+broadcasts.post('/api/broadcasts/:id/archive', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const existing = await getBroadcastById(c.env.DB, id);
+    if (!existing) {
+      return c.json({ success: false, error: 'Broadcast not found' }, 404);
+    }
+    const updated = await updateBroadcast(c.env.DB, id, { archived_at: new Date().toISOString() });
+    return c.json({ success: true, data: updated ? serializeBroadcast(updated) : null });
+  } catch (err) {
+    console.error('POST /api/broadcasts/:id/archive error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/broadcasts/:id/unarchive - アーカイブから戻す
+broadcasts.post('/api/broadcasts/:id/unarchive', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const existing = await getBroadcastById(c.env.DB, id);
+    if (!existing) {
+      return c.json({ success: false, error: 'Broadcast not found' }, 404);
+    }
+    const updated = await updateBroadcast(c.env.DB, id, { archived_at: null });
+    return c.json({ success: true, data: updated ? serializeBroadcast(updated) : null });
+  } catch (err) {
+    console.error('POST /api/broadcasts/:id/unarchive error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
