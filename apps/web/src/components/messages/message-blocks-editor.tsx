@@ -11,7 +11,6 @@
 
 import { useState } from 'react'
 import ImageUploader from '@/components/messages/image-uploader'
-import FlexTemplates from '@/components/messages/flex-templates'
 import FlexEditor from '@/components/messages/flex-editor'
 import ImageMapEditor, {
   DEFAULT_IMAGEMAP_VALUE,
@@ -220,7 +219,9 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                       ? '画像'
                       : b.type === 'imagemap'
                         ? 'リッチ'
-                        : 'Flex'}
+                        : isCarouselJson(b.contents)
+                          ? 'カード'
+                          : 'Flex'}
                 </span>
                 <span className="ml-2 text-xs text-gray-500 truncate inline-block max-w-[300px] align-middle">
                   {summarize(b)}
@@ -323,25 +324,21 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                   <div className="space-y-3">
                     {!b.contents.trim() && (
                       <div className="space-y-3">
-                        <p className="text-xs text-gray-500">テンプレートを選択するか、JSONを直接編集してください</p>
-                        <FlexTemplates onSelect={(json) => updateBlock(b.id, { contents: json })} />
-                        <div className="border-t border-gray-200 pt-3">
-                          <p className="text-xs text-gray-500 mb-2">
-                            または、専用エディタで作成：
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateBlock(b.id, {
-                                contents: cardsToFlexContent([{ ...DEFAULT_CARD }]),
-                                altText: 'カードタイプメッセージ',
-                              })
-                            }
-                            className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
-                          >
-                            🎴 カードタイプメッセージを作る
-                          </button>
-                        </div>
+                        <p className="text-xs text-gray-500">
+                          横にスライドできるカード型メッセージを作成します。画像・タイトル・本文・ボタンをカードごとに設定できます。
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateBlock(b.id, {
+                              contents: cardsToFlexContent([{ ...DEFAULT_CARD }]),
+                              altText: 'カードタイプメッセージ',
+                            })
+                          }
+                          className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
+                        >
+                          🃏 カード型カルーセルを作る
+                        </button>
                       </div>
                     )}
                     {b.contents.trim() && isCarouselJson(b.contents) && (
@@ -359,7 +356,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                         onClick={() => updateBlock(b.id, { contents: '' })}
                         className="text-xs text-gray-400 hover:text-gray-600 underline"
                       >
-                        テンプレートを選び直す
+                        カード作成をやり直す
                       </button>
                     )}
                   </div>
@@ -396,10 +393,10 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => addBlock('flex')}
+            onClick={addCardBlock}
             className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
           >
-            ▢ Flex
+            🃏 カード型カルーセル
           </button>
           <button
             type="button"
@@ -407,13 +404,6 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
             className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
           >
             📐 リッチメッセージ
-          </button>
-          <button
-            type="button"
-            onClick={addCardBlock}
-            className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
-          >
-            🎴 カードタイプ
           </button>
           <span className="text-xs text-gray-400 self-center ml-2">
             {value.length} / {MAX_BLOCKS}
@@ -433,10 +423,10 @@ function summarize(b: Block): string {
   if (b.type === 'image') return b.originalContentUrl || '（画像未設定）'
   if (b.type === 'imagemap') return b.value.baseUrl ? b.value.altText : '（画像未設定）'
   // flex
-  if (!b.contents.trim()) return '（テンプレ未選択）'
+  if (!b.contents.trim()) return '（カード未作成）'
   if (isCarouselJson(b.contents)) {
     const n = countCarouselBubbles(b.contents)
-    return `カードタイプメッセージ（${n}枚）`
+    return `カード型カルーセル（${n}枚）`
   }
   try {
     const j = JSON.parse(b.contents) as { altText?: string; type?: string }
