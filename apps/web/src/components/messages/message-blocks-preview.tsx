@@ -41,7 +41,7 @@ export default function MessageBlocksPreview({ blocks }: Props) {
             <div key={b.id} className="flex">
               {/* 自分側風（右寄せ・緑）。配信は実際には公式アカウント発信なので左寄せ白がより正確だが、
                   視認性優先でテキスト/画像はLINE標準の「相手の吹き出し（白・左寄せ）」スタイル */}
-              <div className="max-w-[85%]">
+              <div className={b.type === 'flex' ? 'w-full min-w-0' : 'max-w-[85%]'}>
                 {b.type === 'text' && (
                   <div className="bg-white text-gray-800 text-sm px-3 py-2 rounded-2xl rounded-tl-sm whitespace-pre-wrap break-words shadow-sm">
                     {b.text}
@@ -67,8 +67,8 @@ export default function MessageBlocksPreview({ blocks }: Props) {
                   </div>
                 )}
                 {b.type === 'flex' && (
-                  <div className="rounded-xl overflow-hidden shadow-sm bg-white">
-                    <FlexPreviewComponent content={b.contents} maxWidth={280} />
+                  <div className="overflow-hidden">
+                    <FlexPreviewComponent content={b.contents} />
                   </div>
                 )}
                 {b.type === 'imagemap' && (
