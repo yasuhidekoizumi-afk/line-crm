@@ -168,6 +168,8 @@ export interface Broadcast {
   targetSegmentId: string | null;
   /** 対象友だちIDリスト (targetType が 'individual' の場合のみ使用、JSON配列) */
   targetFriendIds: string[] | null;
+  /** テスト配信かどうか */
+  isTest: boolean;
   /** 配信ステータス */
   status: BroadcastStatus;
   /** 予約配信日時 (ISO 8601、即時配信の場合は null) */

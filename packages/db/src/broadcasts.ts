@@ -15,6 +15,7 @@ export interface Broadcast {
   target_tag_id: string | null;
   target_segment_id: string | null;
   target_friend_ids: string | null;
+  is_test: number | null;
   status: BroadcastStatus;
   scheduled_at: string | null;
   sent_at: string | null;
@@ -56,6 +57,7 @@ export interface CreateBroadcastInput {
   targetSegmentId?: string | null;
   targetFriendIds?: string[] | null;
   scheduledAt?: string | null;
+  isTest?: boolean;
 }
 
 export async function createBroadcast(
@@ -88,6 +90,10 @@ export async function createBroadcast(
     )
     .run();
 
+  if (input.isTest) {
+    await db.prepare(`UPDATE broadcasts SET is_test = 1 WHERE id = ?`).bind(id).run();
+  }
+
   return (await getBroadcastById(db, id))!;
 }
 
@@ -103,6 +109,7 @@ export type UpdateBroadcastInput = Partial<
     | 'target_friend_ids'
     | 'status'
     | 'scheduled_at'
+    | 'is_test'
     | 'alt_text'
     | 'archived_at'
   >
@@ -151,6 +158,10 @@ export async function updateBroadcast(
   if (updates.scheduled_at !== undefined) {
     fields.push('scheduled_at = ?');
     values.push(updates.scheduled_at);
+  }
+  if (updates.is_test !== undefined) {
+    fields.push('is_test = ?');
+    values.push(updates.is_test);
   }
   if (updates.alt_text !== undefined) {
     fields.push('alt_text = ?');

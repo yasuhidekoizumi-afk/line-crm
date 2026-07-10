@@ -260,11 +260,13 @@ export async function processBroadcastSend(
   await assertLineBroadcastAllowed(db, current.line_account_id);
   const broadcast = await claimBroadcastForSending(db, broadcastId);
   const dedupeDate = getBroadcastDedupeDate(broadcast);
-  const activeDedupeContext =
-    dedupeContext ?? {
-      date: dedupeDate,
-      sentLineUserIds: await getSentLineUserIdsForDate(db, dedupeDate, broadcast.line_account_id),
-    };
+  const isTestBroadcast = Boolean((broadcast as unknown as { is_test?: number | null }).is_test);
+  const activeDedupeContext = isTestBroadcast
+    ? undefined
+    : dedupeContext ?? {
+        date: dedupeDate,
+        sentLineUserIds: await getSentLineUserIdsForDate(db, dedupeDate, broadcast.line_account_id),
+      };
 
   // Auto-wrap URLs with tracking links (text with URLs → Flex with button)
   let finalType: string = broadcast.message_type;
@@ -308,10 +310,7 @@ export async function processBroadcastSend(
           (!broadcast.line_account_id ||
             (f as unknown as { line_account_id?: string | null }).line_account_id === broadcast.line_account_id),
       );
-      const followingFriends = uniqueBySendableLineUserId(
-        rawFollowingFriends,
-        activeDedupeContext,
-      );
+      const followingFriends = uniqueBySendableLineUserId(rawFollowingFriends, activeDedupeContext);
       if (followingFriends.length !== rawFollowingFriends.length) {
         console.warn(
           `Broadcast ${broadcastId} skipped ${rawFollowingFriends.length - followingFriends.length} duplicate line_user_id recipients`,
@@ -345,13 +344,15 @@ export async function processBroadcastSend(
 
         try {
           await lineClient.multicast(lineUserIds, batchMessages);
-          try {
-            await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, lineUserIds, now);
-          } catch (dedupeLogErr) {
-            console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
-          }
-          for (const lineUserId of lineUserIds) {
-            activeDedupeContext.sentLineUserIds.add(lineUserId);
+          if (activeDedupeContext) {
+            try {
+              await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, lineUserIds, now);
+            } catch (dedupeLogErr) {
+              console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
+            }
+            for (const lineUserId of lineUserIds) {
+              activeDedupeContext.sentLineUserIds.add(lineUserId);
+            }
           }
           successCount += batch.length;
         } catch (err) {
@@ -402,13 +403,15 @@ export async function processBroadcastSend(
         const batchUserIds = batch.map((f) => normalizeSendableLineUserId(f.line_user_id));
         try {
           await lineClient.multicast(batchUserIds, messages);
-          try {
-            await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batchUserIds, now);
-          } catch (dedupeLogErr) {
-            console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
-          }
-          for (const lineUserId of batchUserIds) {
-            activeDedupeContext.sentLineUserIds.add(lineUserId);
+          if (activeDedupeContext) {
+            try {
+              await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batchUserIds, now);
+            } catch (dedupeLogErr) {
+              console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
+            }
+            for (const lineUserId of batchUserIds) {
+              activeDedupeContext.sentLineUserIds.add(lineUserId);
+            }
           }
           successCount += batch.length;
         } catch (err) {
@@ -464,13 +467,15 @@ export async function processBroadcastSend(
 
         try {
           await lineClient.multicast(batch, batchMessages);
-          try {
-            await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batch, now);
-          } catch (dedupeLogErr) {
-            console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
-          }
-          for (const lineUserId of batch) {
-            activeDedupeContext.sentLineUserIds.add(lineUserId);
+          if (activeDedupeContext) {
+            try {
+              await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batch, now);
+            } catch (dedupeLogErr) {
+              console.warn(`broadcast_recipient_sends INSERT failed (LINE送信は成功済み):`, dedupeLogErr);
+            }
+            for (const lineUserId of batch) {
+              activeDedupeContext.sentLineUserIds.add(lineUserId);
+            }
           }
           successCount += batch.length;
         } catch (err) {
@@ -543,6 +548,10 @@ export async function processScheduledBroadcasts(
   for (const broadcast of scheduled) {
     try {
       const lineClient = await resolveBroadcastLineClient(db, defaultAccessToken, broadcast);
+      if ((broadcast as unknown as { is_test?: number | null }).is_test) {
+        await processBroadcastSend(db, lineClient, broadcast.id, workerUrl);
+        continue;
+      }
       const dedupeDate = getBroadcastDedupeDate(broadcast);
       const dedupeKey = `${dedupeDate}:${broadcast.line_account_id ?? ''}`;
       let dedupeContext = dedupeContextsByDateAndAccount.get(dedupeKey);
