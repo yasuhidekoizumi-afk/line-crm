@@ -185,9 +185,11 @@ function bubbleToCard(bubble: Record<string, unknown>): Card {
 interface Props {
   value: Card[]
   onChange: (next: Card[]) => void
+  altText?: string
+  onAltTextChange?: (next: string) => void
 }
 
-export default function CardMessageEditor({ value, onChange }: Props) {
+export default function CardMessageEditor({ value, onChange, altText = '', onAltTextChange }: Props) {
   const cards = useMemo(() => (value.length === 0 ? [{ ...DEFAULT_CARD }] : value), [value])
 
   const updateCard = (idx: number, patch: Partial<Card>) => {
@@ -236,6 +238,23 @@ export default function CardMessageEditor({ value, onChange }: Props) {
       <p className="text-xs text-gray-500">
         カードを横スクロールで複数並べます（最大{MAX_CARDS}枚）。
       </p>
+
+      <div className="space-y-1">
+        <label className="block text-xs text-gray-500">
+          📱 通知・トーク一覧に表示される文言
+        </label>
+        <input
+          type="text"
+          maxLength={400}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          placeholder="カードタイプメッセージ"
+          value={altText}
+          onChange={(e) => onAltTextChange?.(e.target.value)}
+        />
+        <p className="text-[11px] text-gray-400">
+          ※ カードは通知やトーク一覧に本文を出せないため、代わりにこの文言が表示されます（例：新商品オートミールクランチのお知らせ🌾）
+        </p>
+      </div>
 
       {cards.map((card, idx) => {
         const isFirst = idx === 0

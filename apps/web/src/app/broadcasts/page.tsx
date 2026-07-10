@@ -15,6 +15,7 @@ interface BroadcastDraft {
   title?: string
   messageType?: ApiBroadcast['messageType']
   messageContent?: string
+  altText?: string | null
   targetType?: ApiBroadcast['targetType']
   targetTagId?: string
   targetSegmentId?: string
@@ -359,7 +360,7 @@ function BroadcastsPageInner() {
   const aiActionToken = searchParams.get('ai_action')
   const aiAction = decodeBase64Json<AiAction>(aiActionToken)
   const [broadcasts, setBroadcasts] = useState<ApiBroadcast[]>([])
-  const [tags, setTags] = useState<Tag[]>([])
+  const [tags, setTags] = useState<Array<Tag & { friendCount: number }>>([])
   const [segments, setSegments] = useState<Segment[]>([])
   const [emergencyStatus, setEmergencyStatus] = useState<EmergencyStatus | null>(null)
   const [loading, setLoading] = useState(true)
@@ -457,7 +458,7 @@ function BroadcastsPageInner() {
     try {
       const [broadcastsRes, tagsRes, segmentsRes, emergencyRes] = await Promise.all([
         api.broadcasts.list({ accountId: selectedAccountId || undefined, archived: 'all' }),
-        api.tags.list(),
+        api.tags.listWithCount(),
         fermentApi.segments.list(),
         api.emergency.status(),
       ])
@@ -544,6 +545,7 @@ function BroadcastsPageInner() {
       title: `${broadcast.title}（コピー）`,
       messageType: broadcast.messageType,
       messageContent: broadcast.messageContent,
+      altText: broadcast.altText,
       targetType: broadcast.targetType,
       targetTagId: broadcast.targetTagId ?? '',
       targetSegmentId: broadcast.targetSegmentId ?? '',
@@ -591,6 +593,22 @@ function BroadcastsPageInner() {
       return name ? `🎯 ${name}` : 'セグメント指定'
     }
     return '-'
+  }
+
+  // 配信対象が何名なのかを返す。
+  // 送信済みは実際に配信した件数（actual=true）、未送信は現在の対象人数の見積もり（actual=false）。
+  const getTargetCount = (b: ApiBroadcast): { count: number | null; actual: boolean } => {
+    if (b.status === 'sent') return { count: b.totalCount, actual: true }
+    if (b.targetType === 'tag') {
+      const tag = tags.find((t) => t.id === b.targetTagId)
+      return { count: tag?.friendCount ?? null, actual: false }
+    }
+    if (b.targetType === 'segment') {
+      const seg = segments.find((s) => s.segment_id === b.targetSegmentId)
+      return { count: seg?.customer_count ?? null, actual: false }
+    }
+    // 全員：未送信時は人数を持っていないため表示しない
+    return { count: null, actual: false }
   }
 
   const isTestBroadcast = useCallback((broadcast: ApiBroadcast) => {
@@ -673,6 +691,7 @@ function BroadcastsPageInner() {
             title: editingBroadcast.title,
             messageType: editingBroadcast.messageType,
             messageContent: editingBroadcast.messageContent,
+            altText: editingBroadcast.altText,
             targetType: editingBroadcast.targetType,
             targetTagId: editingBroadcast.targetTagId ?? '',
             targetSegmentId: editingBroadcast.targetSegmentId ?? '',
@@ -951,7 +970,17 @@ function BroadcastsPageInner() {
 
                     {/* Target */}
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {getTargetLabel(broadcast)}
+                      <div>{getTargetLabel(broadcast)}</div>
+                      {(() => {
+                        const { count, actual } = getTargetCount(broadcast)
+                        if (count === null) return null
+                        return (
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {actual ? '配信' : '対象 約'}
+                            {count.toLocaleString('ja-JP')}名
+                          </div>
+                        )
+                      })()}
                     </td>
 
                     {/* Scheduled */}
