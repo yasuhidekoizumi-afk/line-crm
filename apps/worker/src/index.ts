@@ -356,24 +356,14 @@ app.notFound((c) => {
   return c.notFound();
 });
 
-async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: ExecutionContext): Promise<void> {
-  const cronExpr = (_event as ScheduledEvent).cron;
-
-  // 予約配信は分単位で拾う。Cloudflare の cron は数分の揺れが出るので、
-  // 5分粒度の本体 cron とは別に軽量な 1分 cron を持たせる。
-  if (cronExpr === '* * * * *') {
-    await Promise.allSettled([
-      processScheduledBroadcasts(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, env.WORKER_URL),
-      checkAccountHealth(env.DB),
-      refreshLineAccessTokens(env.DB),
-    ]);
-    return;
-  }
-
+async function buildCommonCronJobs(env: Env['Bindings']): Promise<Promise<void>[]> {
   const dbAccounts = await getLineAccounts(env.DB);
   const activeTokens = new Set<string>();
   activeTokens.add(env.LINE_CHANNEL_ACCESS_TOKEN);
-  for (const account of dbAccounts) { if (account.is_active) activeTokens.add(account.channel_access_token); }
+  for (const account of dbAccounts) {
+    if (account.is_active) activeTokens.add(account.channel_access_token);
+  }
+
   const jobs: Promise<void>[] = [];
   for (const token of activeTokens) {
     const lineClient = new LineClient(token);
@@ -384,7 +374,23 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
   jobs.push(processLoyaltyExpirations(env.DB));
-  jobs.push(expireGifts(env.DB).then(n => { if (n > 0) console.log(`[egift] expired ${n} gifts`); }).catch(() => {}).then(() => {}));
+  jobs.push(expireGifts(env.DB).then((n) => {
+    if (n > 0) console.log(`[egift] expired ${n} gifts`);
+  }).catch(() => {}).then(() => {}));
+  return jobs;
+}
+
+async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: ExecutionContext): Promise<void> {
+  const cronExpr = (_event as ScheduledEvent).cron;
+
+  // 予約配信は分単位で拾う。Cloudflare の cron は数分の揺れが出るので、
+  // 5分粒度だったハートビートを 1分粒度へ置き換える。
+  if (cronExpr === '* * * * *') {
+    await Promise.allSettled(await buildCommonCronJobs(env));
+    return;
+  }
+
+  const jobs = await buildCommonCronJobs(env);
   if (cronExpr === '*/10 * * * *') {
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
