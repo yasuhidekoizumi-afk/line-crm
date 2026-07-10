@@ -2191,6 +2191,62 @@ const CAMPAIGN_AWARD_RULES: Record<string, { points: number; label: string }> = 
   '8th_anniversary_88pt': { points: 388, label: '8周年キャンペーンLINE連携特典' },
 };
 
+// GET /api/pay-forward/claim-status — 受け取り済み表示のサーバー判定
+loyalty.get('/api/pay-forward/claim-status', async (c) => {
+  try {
+    const referredCustomerId = (c.req.query('referredCustomerId') ?? '').trim();
+    if (!referredCustomerId) {
+      return c.json({ success: false, error: 'referredCustomerId は必須です' }, 400);
+    }
+
+    const referral = await c.env.DB
+      .prepare(
+        `SELECT status, code
+         FROM pay_forward_referrals
+         WHERE referred_customer_id = ?
+         LIMIT 1`,
+      )
+      .bind(referredCustomerId)
+      .first<{ status: string; code: string }>();
+    if (referral) {
+      return c.json({
+        success: true,
+        data: {
+          claimed: referral.status === 'claimed' || referral.status === 'reward_sent',
+          ineligible: referral.status === 'ineligible',
+          status: referral.status,
+          code: referral.code,
+        },
+      });
+    }
+
+    const legacyTx = await c.env.DB
+      .prepare(
+        `SELECT 1
+         FROM loyalty_transactions t
+         JOIN loyalty_points lp ON lp.friend_id = t.friend_id
+         WHERE lp.shopify_customer_id = ?
+           AND t.type = 'award'
+           AND t.reason LIKE 'Pay Forward紹介特典:%'
+         LIMIT 1`,
+      )
+      .bind(referredCustomerId)
+      .first();
+
+    return c.json({
+      success: true,
+      data: {
+        claimed: Boolean(legacyTx),
+        ineligible: false,
+        status: legacyTx ? 'claimed' : 'none',
+      },
+    });
+  } catch (err) {
+    console.error('GET /api/pay-forward/claim-status error:', err);
+    return c.json({ success: false, error: 'Failed to fetch Pay Forward claim status' }, 500);
+  }
+});
+
 // GET /api/pay-forward/:shopifyCustomerId — 紹介リンク + 紹介履歴
 loyalty.get('/api/pay-forward/:shopifyCustomerId', async (c) => {
   try {
