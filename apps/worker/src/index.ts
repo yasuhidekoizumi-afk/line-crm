@@ -357,6 +357,19 @@ app.notFound((c) => {
 });
 
 async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: ExecutionContext): Promise<void> {
+  const cronExpr = (_event as ScheduledEvent).cron;
+
+  // 予約配信は分単位で拾う。Cloudflare の cron は数分の揺れが出るので、
+  // 5分粒度の本体 cron とは別に軽量な 1分 cron を持たせる。
+  if (cronExpr === '* * * * *') {
+    await Promise.allSettled([
+      processScheduledBroadcasts(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, env.WORKER_URL),
+      checkAccountHealth(env.DB),
+      refreshLineAccessTokens(env.DB),
+    ]);
+    return;
+  }
+
   const dbAccounts = await getLineAccounts(env.DB);
   const activeTokens = new Set<string>();
   activeTokens.add(env.LINE_CHANNEL_ACCESS_TOKEN);
@@ -372,7 +385,6 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
   jobs.push(refreshLineAccessTokens(env.DB));
   jobs.push(processLoyaltyExpirations(env.DB));
   jobs.push(expireGifts(env.DB).then(n => { if (n > 0) console.log(`[egift] expired ${n} gifts`); }).catch(() => {}).then(() => {}));
-  const cronExpr = (_event as ScheduledEvent).cron;
   if (cronExpr === '*/10 * * * *') {
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));
