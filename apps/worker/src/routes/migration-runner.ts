@@ -44,6 +44,9 @@ migrationRunner.post('/api/admin/run-migration-broadcast-stats', async (c) => {
   try { await c.env.DB.prepare("ALTER TABLE broadcasts ADD COLUMN error_summary TEXT").run(); results.push('OK: error_summary'); }
   catch(e:any){ if(e.message?.includes('duplicate')) results.push('SKIP: error_summary'); else errors.push('FAIL: error_summary: '+e.message); }
 
+  try { await c.env.DB.prepare("ALTER TABLE broadcasts ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0").run(); results.push('OK: is_test'); }
+  catch(e:any){ if(e.message?.includes('duplicate')) results.push('SKIP: is_test'); else errors.push('FAIL: is_test: '+e.message); }
+
   return c.json({ success: errors.length===0, results, errors });
 });
 
@@ -101,6 +104,7 @@ migrationRunner.post('/api/admin/run-migration-multi-message', async (c) => {
         error_summary   TEXT,
         line_account_id TEXT,
         alt_text        TEXT,
+        is_test         INTEGER NOT NULL DEFAULT 0,
         created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
       )`).run();
       results.push('OK: new broadcasts created');
@@ -109,12 +113,12 @@ migrationRunner.post('/api/admin/run-migration-multi-message', async (c) => {
       await c.env.DB.prepare(`INSERT INTO broadcasts (
         id, title, message_type, message_content, target_type, target_tag_id,
         target_segment_id, target_friend_ids, status, scheduled_at, sent_at,
-        total_count, success_count, line_account_id, alt_text, created_at
+        total_count, success_count, line_account_id, alt_text, is_test, created_at
       )
       SELECT
         id, title, message_type, message_content, target_type, target_tag_id,
         target_segment_id, target_friend_ids, status, scheduled_at, sent_at,
-        total_count, success_count, line_account_id, alt_text, created_at
+        total_count, success_count, line_account_id, alt_text, 0, created_at
       FROM broadcasts_old`).run();
       results.push('OK: data migrated');
 

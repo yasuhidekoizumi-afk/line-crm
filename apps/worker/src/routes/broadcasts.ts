@@ -83,6 +83,7 @@ function serializeBroadcast(row: DbBroadcast) {
     targetTagId: row.target_tag_id,
     targetSegmentId: row.target_segment_id,
     targetFriendIds,
+    isTest: (row as unknown as { is_test?: number | null }).is_test === 1,
     status: row.status,
     scheduledAt: row.scheduled_at,
     sentAt: row.sent_at,
@@ -385,6 +386,7 @@ broadcasts.post('/api/broadcasts', async (c) => {
       scheduledAt?: string | null;
       lineAccountId?: string | null;
       altText?: string | null;
+      isTest?: boolean;
     }>();
 
     if (!body.title || !body.messageType || !body.messageContent || !body.targetType) {
@@ -424,13 +426,15 @@ broadcasts.post('/api/broadcasts', async (c) => {
       targetSegmentId: body.targetSegmentId ?? null,
       targetFriendIds: body.targetFriendIds ?? null,
       scheduledAt: body.scheduledAt ?? null,
+      isTest: body.isTest ?? false,
     });
 
-    // Save line_account_id and alt_text if provided
+    // Save line_account_id, alt_text, is_test if provided
     const updates: string[] = [];
     const binds: unknown[] = [];
     if (body.lineAccountId) { updates.push('line_account_id = ?'); binds.push(body.lineAccountId); }
     if (body.altText) { updates.push('alt_text = ?'); binds.push(body.altText); }
+    if (body.isTest !== undefined) { updates.push('is_test = ?'); binds.push(body.isTest ? 1 : 0); }
     if (updates.length > 0) {
       binds.push(broadcast.id);
       await c.env.DB.prepare(`UPDATE broadcasts SET ${updates.join(', ')} WHERE id = ?`)
@@ -468,6 +472,7 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
       targetFriendIds?: string[] | null;
       scheduledAt?: string | null;
       altText?: string | null;
+      isTest?: boolean;
     }>();
 
     // Keep status in sync with scheduledAt changes
@@ -487,6 +492,7 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
         ? (body.targetFriendIds ? JSON.stringify(body.targetFriendIds) : null)
         : undefined,
       scheduled_at: body.scheduledAt,
+      is_test: body.isTest !== undefined ? (body.isTest ? 1 : 0) : undefined,
       ...((body as { altText?: string | null }).altText !== undefined
         ? { alt_text: (body as { altText?: string | null }).altText }
         : {}),

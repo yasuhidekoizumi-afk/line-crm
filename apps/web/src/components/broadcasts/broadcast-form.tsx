@@ -36,6 +36,7 @@ interface FormState {
   targetFriendIds: string[]
   scheduledAt: string
   sendMode: SendMode
+  isTest: boolean
 }
 
 export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft, segments = [], editId }: BroadcastFormProps) {
@@ -60,6 +61,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     targetFriendIds: (initialDraft as FormState | undefined)?.targetFriendIds ?? [],
     scheduledAt: initialDraft?.scheduledAt ?? '',
     sendMode: 'draft',
+    isTest: initialDraft?.isTest ?? false,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -201,6 +203,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
         scheduledAt: form.sendMode === 'scheduled' && form.scheduledAt
           ? form.scheduledAt + ':00.000+09:00'
           : null,
+        isTest: form.isTest,
       }
       const res = editId
         ? await api.broadcasts.update(editId, payload)
@@ -245,6 +248,18 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
+          <label className="mt-2 flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+              checked={form.isTest}
+              onChange={(e) => setForm({ ...form, isTest: e.target.checked })}
+            />
+            テスト配信
+          </label>
+          <p className="mt-1 text-[11px] leading-5 text-gray-500">
+            テスト配信は同日重複除外の対象外にします。送信先の人数集計は通常配信と同じです。
+          </p>
         </div>
 
         {/* メッセージ（複数ブロック）＋プレビュー。広い画面では左右2カラムで並び、

@@ -16,6 +16,7 @@ interface BroadcastDraft {
   messageType?: ApiBroadcast['messageType']
   messageContent?: string
   altText?: string | null
+  isTest?: boolean
   targetType?: ApiBroadcast['targetType']
   targetTagId?: string
   targetSegmentId?: string
@@ -546,6 +547,7 @@ function BroadcastsPageInner() {
       messageType: broadcast.messageType,
       messageContent: broadcast.messageContent,
       altText: broadcast.altText,
+      isTest: broadcast.isTest,
       targetType: broadcast.targetType,
       targetTagId: broadcast.targetTagId ?? '',
       targetSegmentId: broadcast.targetSegmentId ?? '',
@@ -612,7 +614,7 @@ function BroadcastsPageInner() {
   }
 
   const isTestBroadcast = useCallback((broadcast: ApiBroadcast) => {
-    return hasTestKeyword(broadcast.title) || hasTestKeyword(getTargetLabel(broadcast))
+    return broadcast.isTest || hasTestKeyword(broadcast.title) || hasTestKeyword(getTargetLabel(broadcast))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tags, segments])
 
@@ -692,6 +694,7 @@ function BroadcastsPageInner() {
             messageType: editingBroadcast.messageType,
             messageContent: editingBroadcast.messageContent,
             altText: editingBroadcast.altText,
+            isTest: editingBroadcast.isTest,
             targetType: editingBroadcast.targetType,
             targetTagId: editingBroadcast.targetTagId ?? '',
             targetSegmentId: editingBroadcast.targetSegmentId ?? '',
@@ -743,6 +746,11 @@ function BroadcastsPageInner() {
                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[selectedDetail.status].className}`}>
                   {statusConfig[selectedDetail.status].label}
                 </span>
+                {selectedDetail.isTest && (
+                  <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                    テスト
+                  </span>
+                )}
                 <span className="text-xs text-gray-500">{formatMessageType(selectedDetail.messageType)}</span>
               </div>
               <h2 className="text-lg font-semibold text-gray-900">{selectedDetail.title}</h2>
@@ -956,6 +964,7 @@ function BroadcastsPageInner() {
                         <p className="text-sm font-medium text-gray-900">{broadcast.title}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {formatMessageType(broadcast.messageType)}
+                          {broadcast.isTest ? ' / テスト' : ''}
                           {broadcast.archivedAt ? ' / アーカイブ済み' : ''}
                         </p>
                       </div>

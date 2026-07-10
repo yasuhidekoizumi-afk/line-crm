@@ -345,6 +345,7 @@ export const api = {
       status?: ApiBroadcast['status']
       lineAccountId?: string | null
       altText?: string | null
+      isTest?: boolean
     }) =>
       fetchApi<ApiResponse<ApiBroadcast>>('/api/broadcasts', {
         method: 'POST',
@@ -362,6 +363,7 @@ export const api = {
         targetFriendIds?: string[] | null
         scheduledAt?: string | null
         altText?: string | null
+        isTest?: boolean
       }
     ) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`, {
