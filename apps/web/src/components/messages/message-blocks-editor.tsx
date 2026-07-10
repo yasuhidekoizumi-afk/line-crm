@@ -106,7 +106,7 @@ export function blocksToPayload(blocks: Block[]): {
 /**
  * 保存形式 → Block配列に復元（編集時の初期値用）
  */
-export function payloadToBlocks(messageType: string, messageContent: string): Block[] {
+export function payloadToBlocks(messageType: string, messageContent: string, altText?: string | null): Block[] {
   if (messageType === 'multi') {
     try {
       const arr = JSON.parse(messageContent) as Array<{ type: string; content: string; altText?: string }>
@@ -116,7 +116,7 @@ export function payloadToBlocks(messageType: string, messageContent: string): Bl
       return []
     }
   }
-  const b = contentToBlock(messageType, messageContent)
+  const b = contentToBlock(messageType, messageContent, altText ?? undefined)
   return b ? [b] : []
 }
 
@@ -344,6 +344,8 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                     {b.contents.trim() && isCarouselJson(b.contents) && (
                       <CardMessageEditor
                         value={cardsFromFlexContent(b.contents)}
+                        altText={b.altText ?? ''}
+                        onAltTextChange={(next) => updateBlock(b.id, { altText: next || undefined })}
                         onChange={(cards) => updateBlock(b.id, { contents: cardsToFlexContent(cards) })}
                       />
                     )}

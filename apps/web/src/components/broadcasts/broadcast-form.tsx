@@ -16,7 +16,7 @@ interface BroadcastFormProps {
   tags: Tag[]
   onSuccess: () => void
   onCancel: () => void
-  initialDraft?: Partial<FormState> | null
+  initialDraft?: (Partial<FormState> & { altText?: string | null }) | null
   segments?: Segment[]
   editId?: string | null
 }
@@ -45,7 +45,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     const t = initialDraft?.messageType ?? 'text'
     const c = initialDraft?.messageContent ?? ''
     if (!c.trim()) return [{ id: 'b_init', type: 'text', text: '' } as Block]
-    const blocks = payloadToBlocks(t, c)
+    const blocks = payloadToBlocks(t, c, initialDraft?.altText ?? null)
     return blocks.length > 0 ? blocks : [{ id: 'b_init', type: 'text', text: '' } as Block]
   })()
 
