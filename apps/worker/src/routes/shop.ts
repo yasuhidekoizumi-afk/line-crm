@@ -10,10 +10,6 @@ import { Hono } from 'hono';
 import {
   getFriendByLineUserId,
   getLoyaltyPoint,
-  upsertLoyaltyPoint,
-  addLoyaltyTransaction,
-  determineRank,
-  getLoyaltySetting,
 } from '@line-crm/db';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
@@ -228,11 +224,12 @@ shop.post('/api/shop/checkout', async (c) => {
       return c.json({ success: false, error: 'Shopifyアカウントと連携されていません。マイページからLINE連携を行ってください。' }, 400);
     }
 
-    // 割引コード生成（ORYZAE-{下6桁}-{タイムスタンプ}）
-    const pointValueSetting = await getLoyaltySetting(c.env.DB, 'point_value').catch(() => null);
-    const pointValue = parseFloat(pointValueSetting ?? '1') || 1;
-    const discountAmount = Math.floor(usePoints * pointValue);
-    const code = `ORYZAE-${shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
+    // 割引額 = ポイント数（1pt = ¥1）
+    const discountAmount = usePoints;
+
+    // 割引コード生成（ポイント数を埋め込む: ORYZAE-{pt}-{cid6}-{ts}）
+    // ポイント消費は注文支払完了Webhook（orders-paid）で行う
+    const code = `ORYZAE-${usePoints}-${shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
 
     // Shopify Price Rule 作成
     const priceRuleRes = await fetch(
@@ -289,39 +286,8 @@ shop.post('/api/shop/checkout', async (c) => {
       return c.json({ success: false, error: '割引コードの発行に失敗しました' }, 500);
     }
 
-    // ポイント消費（期間限定 → 通常の順）
-    const limitedToUse = Math.min(point.limited_balance ?? 0, usePoints);
-    const balanceToUse = usePoints - limitedToUse;
-    const newBalance = point.balance - balanceToUse;
-    const newLimitedBalance = (point.limited_balance ?? 0) - limitedToUse;
-    const newRank = determineRank(point.total_spent);
-
-    const newLimitedExpiresAt =
-      newLimitedBalance > 0 ? point.limited_expires_at : null;
-
-    await upsertLoyaltyPoint(c.env.DB, point.friend_id, {
-      balance: newBalance,
-      limitedBalance: newLimitedBalance,
-      totalSpent: point.total_spent,
-      rank: newRank,
-      shopifyCustomerId: point.shopify_customer_id ?? undefined,
-      limitedExpiresAt: newLimitedExpiresAt ?? undefined,
-    });
-
-    const grandTotalAfter = newBalance + newLimitedBalance;
-    const limitedPart = limitedToUse > 0 ? `limited=${limitedToUse}` : 'limited=0';
-    const balancePart = balanceToUse > 0 ? `balance=${balanceToUse}` : 'balance=0';
-    const expPart = point.limited_expires_at
-      ? `exp=${point.limited_expires_at}`
-      : 'exp=none';
-
-    await addLoyaltyTransaction(c.env.DB, {
-      friendId: point.friend_id,
-      type: 'redeem',
-      points: -usePoints,
-      balanceAfter: grandTotalAfter,
-      reason: `ポイント利用（¥${discountAmount}割引 / コード: ${code}）[内訳:${limitedPart},${balancePart},${expPart}]`,
-    });
+    // NOTE: ポイント消費はここでは行わない。実際の消費は
+    // Shopify Webhook orders-paid で、注文が確定してから行う。
 
     // カートURL生成
     const cartUrl = `https://${shopDomain}/cart/${body.variantId}:1?discount=${encodeURIComponent(code)}`;
@@ -332,7 +298,7 @@ shop.post('/api/shop/checkout', async (c) => {
         cartUrl,
         code,
         discountAmount,
-        newBalance: grandTotalAfter,
+        newBalance: totalBalance, // 消費前の残高（消費は注文確定後）
       },
     });
   } catch (e) {

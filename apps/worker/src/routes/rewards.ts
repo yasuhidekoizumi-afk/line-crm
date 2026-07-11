@@ -74,6 +74,14 @@ rewards.post('/api/rewards/:id/exchange', async (c) => {
       }, 400);
     }
 
+    // 購入履歴必須チェック
+    if (item.requires_purchase_history && (point.total_spent ?? 0) <= 0) {
+      return c.json({
+        success: false,
+        error: 'このアイテムは購入実績のある方限定です',
+      }, 400);
+    }
+
     // 在庫チェック＆デクリメント
     const stockOk = await decrementRewardStock(c.env.DB, itemId);
     if (!stockOk) return c.json({ success: false, error: '在庫がありません' }, 400);
@@ -136,6 +144,7 @@ rewards.post('/api/rewards/admin', async (c) => {
       track_inventory?: boolean;
       stock?: number | null;
       requires_shipping?: boolean;
+      requires_purchase_history?: boolean;
     }>();
     if (!body.name?.trim()) return c.json({ success: false, error: 'name は必須です' }, 400);
     if (typeof body.required_points !== 'number' || body.required_points < 0) {

@@ -207,6 +207,7 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
     currency?: string;
     customer?: { id?: number | string; tags?: string; email?: string | null };
     line_items?: Array<{ product_id?: number; product_type?: string; vendor?: string; properties?: Array<{ name: string; value: string }> }>;
+    discount_codes?: Array<{ code: string; type?: string; amount?: string }>;
     note_attributes?: Array<{ name: string; value: string }>;
     financial_status?: string;
     cancelled_at?: string | null;
@@ -376,6 +377,52 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
       }
     })(),
   );
+
+  // ── LIFF Shop ポイント割引コードの消費 ──
+  // コード形式: ORYZAE-{pts}-{cid6}-{ts}
+  const discountCodes = order.discount_codes ?? [];
+  for (const dc of discountCodes) {
+    const match = dc.code?.match(/^ORYZAE-(\d+)-(\w+)-(\w+)$/);
+    if (!match) continue;
+    const redeemPoints = parseInt(match[1], 10);
+    if (redeemPoints <= 0) continue;
+
+    try {
+      const lp = await getLoyaltyPoint(c.env.DB, existing.friend_id);
+      if (!lp) continue;
+      const redeemTotal = lp.balance + (lp.limited_balance ?? 0);
+      if (redeemTotal < redeemPoints) {
+        console.warn(`[LIFF Shop] insufficient balance for ${dc.code}: need ${redeemPoints} have ${redeemTotal}`);
+        continue;
+      }
+      const limitedToUse = Math.min(lp.limited_balance ?? 0, redeemPoints);
+      const balanceToUse = redeemPoints - limitedToUse;
+      const afterLimited = (lp.limited_balance ?? 0) - limitedToUse;
+      const afterBalance = lp.balance - balanceToUse;
+      const newTotalAfter = afterBalance + afterLimited;
+
+      await upsertLoyaltyPoint(c.env.DB, lp.friend_id, {
+        balance: afterBalance,
+        limitedBalance: afterLimited,
+        totalSpent: lp.total_spent,
+        rank: newRank,
+        shopifyCustomerId: shopifyCustomerId,
+        limitedExpiresAt: afterLimited > 0 ? lp.limited_expires_at : null,
+      });
+
+      await addLoyaltyTransaction(c.env.DB, {
+        friendId: lp.friend_id,
+        type: 'redeem',
+        points: -redeemPoints,
+        balanceAfter: newTotalAfter,
+        reason: `LIFF Shop ポイント利用 (¥${redeemPoints}割引 / コード: ${dc.code}) [order: ${orderId}]`,
+      });
+
+      console.log(`[LIFF Shop] redeemed ${redeemPoints}pt via ${dc.code} (order=${orderId} balance=${newTotalAfter})`);
+    } catch (err) {
+      console.error(`[LIFF Shop] redeem failed for ${dc.code}:`, err);
+    }
+  }
 
   const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
   const adminToken = await getShopifyAdminToken(c.env);

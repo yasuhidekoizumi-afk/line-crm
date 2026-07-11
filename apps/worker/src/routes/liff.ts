@@ -1555,4 +1555,4 @@ async function resolveXHarnessToken(
   }
 }
 
-export { liffRoutes };
+// TEMP: debug endpoint to get LIFF_URL

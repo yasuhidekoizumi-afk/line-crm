@@ -2026,7 +2026,7 @@ loyalty.post('/api/loyalty/admin/points-pilot/award', async (c) => {
     const limit = Math.max(1, Math.min(Number.isFinite(body.limit) ? Number(body.limit) : 50, 100));
     const campaignKeys = (body.campaignKeys?.length
       ? body.campaignKeys
-      : ['monthly_osusowake_202507_pilot', 'active_thanks_202507_pilot'])
+      : ['monthly_osusowake_202508', 'active_thanks_202508'])
       .map((key: string) => key.trim())
       .filter(Boolean);
 

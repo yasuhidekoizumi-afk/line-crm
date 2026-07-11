@@ -13,6 +13,7 @@ export interface RewardItemRow {
   track_inventory: number; // 0 | 1
   stock: number | null;
   requires_shipping: number; // 0 | 1
+  requires_purchase_history: number; // 0 | 1 — 購入実績（total_spent > 0）必須
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +66,7 @@ export async function createRewardItem(
     track_inventory?: boolean;
     stock?: number | null;
     requires_shipping?: boolean;
+    requires_purchase_history?: boolean;
   },
 ): Promise<string> {
   const id = crypto.randomUUID();
@@ -72,8 +74,8 @@ export async function createRewardItem(
   await db
     .prepare(
       `INSERT INTO reward_items
-         (id, name, description, image_url, required_points, status, track_inventory, stock, requires_shipping, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, name, description, image_url, required_points, status, track_inventory, stock, requires_shipping, requires_purchase_history, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -85,6 +87,7 @@ export async function createRewardItem(
       input.track_inventory ? 1 : 0,
       input.stock ?? null,
       input.requires_shipping ? 1 : 0,
+      input.requires_purchase_history ? 1 : 0,
       now,
       now,
     )
@@ -104,13 +107,14 @@ export async function updateRewardItem(
     track_inventory: boolean;
     stock: number | null;
     requires_shipping: boolean;
+    requires_purchase_history: boolean;
   }>,
 ): Promise<void> {
   const now = jstNow();
   const fields: string[] = [];
   const values: unknown[] = [];
   for (const [k, v] of Object.entries(updates)) {
-    if (k === 'track_inventory' || k === 'requires_shipping') {
+    if (k === 'track_inventory' || k === 'requires_shipping' || k === 'requires_purchase_history') {
       fields.push(`${k} = ?`);
       values.push(v ? 1 : 0);
     } else {
