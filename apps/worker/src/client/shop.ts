@@ -4,7 +4,7 @@
  * Called from: LIFF_URL?page=shop
  * Flow:
  *   1. LIFF認証 → LINE userId 取得
- *   2. GET /api/shop/balance → ポイント残高表示
+ *   2. POST /api/shop/balance → ポイント残高表示
  *   3. 商品を選んで「ポイントで買う」→ POST /api/shop/checkout
  *   4. ShopifyカートURLを受け取り、リダイレクト
  */
@@ -48,7 +48,6 @@ async function fetchBalance(lineUserId: string): Promise<ShopBalance> {
   });
   const data = await res.json() as { success: boolean; data?: ShopBalance; error?: string };
   if (res.status === 404) {
-    // LINE連携（friends）が見つからない
     const err = new Error(data.error || 'LINE連携が見つかりません');
     (err as Error & { code?: string }).code = 'NOT_LINKED';
     throw err;
@@ -114,52 +113,67 @@ function renderShop(products: Product[]): void {
   const expiry = formatExpiry(balance.limitedExpiresAt);
 
   const productCards = products.map((p) => {
-    const discount = Math.min(totalBalance, p.price);
-    const effectivePrice = p.price - discount;
     const maxUsable = Math.min(totalBalance, Math.floor(p.price / 100) * 100);
+    const effectivePrice = p.price - maxUsable;
 
     return `
       <div class="product-card">
-        <div class="product-info">
-          <div class="product-title">${escapeHtml(p.title)}</div>
-          <div class="product-price">
-            <span class="original-price">${formatPrice(p.price)}</span>
-            ${totalBalance > 0 ? `
-              <span class="arrow">→</span>
-              <span class="effective-price">実質 ${formatPrice(effectivePrice)}</span>
-            ` : ''}
-          </div>
-          ${totalBalance > 0 ? `<div class="points-note">💮 ${maxUsable}pt利用可能</div>` : ''}
+        <div class="product-image">
+          ${p.imageUrl
+            ? `<img src="${p.imageUrl}" alt="${escapeHtml(p.title)}" loading="lazy" />`
+            : `<div class="product-image-placeholder">${escapeHtml(p.title.charAt(0))}</div>`
+          }
         </div>
-        <button
-          class="buy-btn"
-          data-variant="${p.variantId}"
-          ${totalBalance === 0 ? 'disabled' : ''}
-        >
-          ${totalBalance > 0 ? 'ポイントで買う' : 'ポイントがありません'}
-        </button>
+        <div class="product-body">
+          <div class="product-title">${escapeHtml(p.title)}</div>
+          <div class="product-price-row">
+            ${totalBalance > 0 && maxUsable > 0 ? `
+              <span class="product-price-original">${formatPrice(p.price)}</span>
+              <span class="product-price-badge">-${maxUsable.toLocaleString()}pt</span>
+            ` : ''}
+            <div class="product-price-final">${totalBalance > 0 && maxUsable > 0 ? formatPrice(effectivePrice) : formatPrice(p.price)}</div>
+          </div>
+          <button
+            class="buy-btn"
+            data-variant="${p.variantId}"
+            ${totalBalance === 0 || maxUsable === 0 ? 'disabled' : ''}
+          >
+            ${totalBalance > 0 && maxUsable > 0 ? 'ポイントで買う' : 'ポイントがありません'}
+          </button>
+        </div>
       </div>
     `;
   }).join('');
 
   render(`
-    <div class="shop-container">
+    <div class="shop-page">
+      <!-- ヘッダー -->
+      <div class="shop-header">
+        <div class="shop-logo">ORYZAE</div>
+        <div class="shop-subtitle">ポイントで買う</div>
+      </div>
+
+      <!-- 残高カード -->
       <div class="balance-card">
-        <div class="balance-icon">💮</div>
-        <div class="balance-amount">${totalBalance.toLocaleString()}pt</div>
-        ${expiry ? `<div class="balance-expiry">${expiry}</div>` : ''}
-        <div class="balance-detail">
+        <div class="balance-label">保有ポイント</div>
+        <div class="balance-row">
+          <span class="balance-value">${totalBalance.toLocaleString()}</span>
+          <span class="balance-unit">pt</span>
+        </div>
+        ${expiry ? `<div class="balance-expiry">⚠ ${expiry}</div>` : ''}
+        <div class="balance-breakdown">
           通常 ${balance.balance.toLocaleString()}pt
-          ${balance.limitedBalance > 0 ? ` + 期間限定 ${balance.limitedBalance.toLocaleString()}pt` : ''}
+          ${balance.limitedBalance > 0 ? `<span class="balance-limited">+ 期間限定 ${balance.limitedBalance.toLocaleString()}pt</span>` : ''}
         </div>
       </div>
 
+      <!-- 商品一覧 -->
       <div class="products-section">
-        <h3>ポイントで買える商品</h3>
+        <div class="products-title">商品を選ぶ</div>
         <div class="product-list">
           ${productCards}
         </div>
-        <p class="shop-note">※ タップ後、Shopifyのチェックアウト画面で配送先とお支払いを入力してください</p>
+        <p class="shop-note">※ タップ後、Shopifyのお支払い画面に進みます</p>
       </div>
     </div>
   `);
@@ -176,7 +190,9 @@ function renderShop(products: Product[]): void {
 
       try {
         const profile = await liff.getProfile();
-        const usePoints = Math.min(totalBalance, Math.floor(products.find(p => p.variantId === variantId)?.price ?? 0 / 100) * 100);
+        const product = products.find(p => p.variantId === variantId);
+        if (!product) throw new Error('商品が見つかりません');
+        const usePoints = Math.min(totalBalance, Math.floor(product.price / 100) * 100);
         const url = await checkout(profile.userId, variantId, usePoints);
         window.location.href = url;
       } catch (err) {
@@ -212,6 +228,17 @@ export async function initShop(): Promise<void> {
 
     renderShop(products);
   } catch (err) {
-    renderError(err instanceof Error ? err.message : '読み込みに失敗しました');
+    const code = (err as Error & { code?: string })?.code;
+    if (code === 'NOT_LINKED') {
+      render(`
+        <div class="card">
+          <h2>友だち追加が必要です</h2>
+          <p class="message">ポイントを利用するには、ORYZAE公式LINEの友だち追加が必要です。</p>
+          <a href="https://line.me/R/ti/p/@oryzae_foodcosme" class="add-friend-btn">友だち追加する</a>
+        </div>
+      `);
+    } else {
+      renderError(err instanceof Error ? err.message : '読み込みに失敗しました');
+    }
   }
 }

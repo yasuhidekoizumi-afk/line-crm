@@ -410,6 +410,180 @@
     .close-btn:active {
       background: #e8faf0;
     }
+
+    /* ========== LIFF Shop Page ========== */
+    .shop-page {
+      animation: fadeIn 0.3s ease;
+    }
+    .shop-header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .shop-logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: #06C755;
+      letter-spacing: 2px;
+    }
+    .shop-subtitle {
+      font-size: 13px;
+      color: #999;
+      margin-top: 2px;
+    }
+    .balance-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      text-align: center;
+      margin-bottom: 20px;
+      border: 1.5px solid #06C755;
+    }
+    .balance-label {
+      font-size: 12px;
+      color: #999;
+      margin-bottom: 4px;
+    }
+    .balance-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 4px;
+    }
+    .balance-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #06C755;
+    }
+    .balance-unit {
+      font-size: 16px;
+      font-weight: 600;
+      color: #06C755;
+    }
+    .balance-expiry {
+      font-size: 12px;
+      color: #e53e3e;
+      margin-top: 4px;
+    }
+    .balance-breakdown {
+      font-size: 12px;
+      color: #999;
+      margin-top: 8px;
+    }
+    .balance-limited {
+      color: #06C755;
+      font-weight: 600;
+    }
+    .products-section {
+      margin-bottom: 20px;
+    }
+    .products-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 12px;
+    }
+    .product-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .product-card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      overflow: hidden;
+      display: flex;
+      transition: opacity 0.15s;
+    }
+    .product-card:active {
+      opacity: 0.9;
+    }
+    .product-image {
+      width: 96px;
+      min-height: 96px;
+      background: #f0f0f0;
+      flex-shrink: 0;
+    }
+    .product-image img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .product-image-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: #ccc;
+    }
+    .product-body {
+      flex: 1;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .product-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 6px;
+    }
+    .product-price-row {
+      margin-bottom: 10px;
+    }
+    .product-price-original {
+      font-size: 12px;
+      color: #999;
+      text-decoration: line-through;
+      margin-right: 6px;
+    }
+    .product-price-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #fff;
+      background: #06C755;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-right: 6px;
+    }
+    .product-price-final {
+      font-size: 18px;
+      font-weight: 700;
+      color: #333;
+    }
+    .buy-btn {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      background: #06C755;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      font-family: inherit;
+    }
+    .buy-btn:active {
+      opacity: 0.85;
+    }
+    .buy-btn:disabled {
+      background: #ddd;
+      color: #999;
+      cursor: not-allowed;
+    }
+    .shop-note {
+      font-size: 12px;
+      color: #999;
+      margin-top: 12px;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
