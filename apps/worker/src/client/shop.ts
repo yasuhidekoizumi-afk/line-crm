@@ -38,7 +38,16 @@ interface ShopBalance {
 
 let balance: ShopBalance | null = null;
 
-// ── API ──────────────────────────────────────────
+async function fetchProducts(lineUserId: string): Promise<Product[]> {
+  const res = await fetch('/api/shop/products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lineUserId }),
+  });
+  const data = await res.json() as { success: boolean; data?: Product[]; error?: string };
+  if (!data.success || !data.data) throw new Error(data.error || '商品情報の取得に失敗しました');
+  return data.data;
+}
 
 async function fetchBalance(lineUserId: string): Promise<ShopBalance> {
   const res = await fetch('/api/shop/balance', {
@@ -218,13 +227,8 @@ export async function initShop(): Promise<void> {
     // fetchBalance() 側で lineUserId → friends → loyalty_points を確認し、未連携ならエラーにする。
     balance = await fetchBalance(profile.userId);
 
-    // 商品データ（VITE_LIFF_ID as of 550g sold out, use 200g staple）
-    const products: Product[] = [
-      { variantId: '45285682806943', title: 'PLAIN プレーン 200g', price: 1080 },
-      { variantId: '62613611020447', title: 'BANANA COCONUTS 200g', price: 1080 },
-      { variantId: '45285711675551', title: 'DRIED FRUIT 200g', price: 1080 },
-      { variantId: '40611894853791', title: '人気3種セット（プレーン/チョコ/バナナココナッツ）', price: 3240 },
-    ];
+    // 商品一覧（購入履歴に応じてパーソナライズ）
+    const products = await fetchProducts(profile.userId);
 
     renderShop(products);
   } catch (err) {

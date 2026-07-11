@@ -20,13 +20,26 @@ import type { Env } from '../index.js';
 
 const shop = new Hono<Env>();
 
-// 設定可能な商品一覧（variantId は Shopify管理画面 > 商品 > バリエーション から取得）
-const FEATURED_VARIANTS = new Set([
-  '45285682806943', // PLAIN プレーン 200g
-  '62613611020447', // BANANA COCONUTS 200g
-  '45285711675551', // DRIED FRUIT 200g
-  '40611894853791', // 人気3種セット
-]);
+// ── 商品カタログ（表示順＝おすすめ度のフォールバック） ──
+
+interface CatalogProduct {
+  variantId: string;
+  title: string;
+  price: number;
+  category: string;
+}
+
+const CATALOG: CatalogProduct[] = [
+  { variantId: '40611894853791', title: '人気3種セット（プレーン/チョコ/バナナココナッツ）', price: 3240, category: 'セット' },
+  { variantId: '45285682806943', title: 'PLAIN プレーン 200g', price: 1080, category: 'グラノーラ200g' },
+  { variantId: '62613611020447', title: 'BANANA COCONUTS 200g', price: 1080, category: 'グラノーラ200g' },
+  { variantId: '45285711675551', title: 'DRIED FRUIT 200g', price: 1080, category: 'グラノーラ200g' },
+];
+
+const CATALOG_BY_ID = new Map(CATALOG.map(p => [p.variantId, p]));
+
+// 許可されたvariant（checkout時に使う）
+const FEATURED_VARIANTS = new Set(CATALOG.map(p => p.variantId));
 
 // ── POST /api/shop/balance ────────────────────────
 
@@ -67,6 +80,95 @@ shop.post('/api/shop/balance', async (c) => {
   } catch (e) {
     console.error('shop balance error:', e);
     return c.json({ success: false, error: '残高の取得に失敗しました' }, 500);
+  }
+});
+
+// ── POST /api/shop/products ───────────────────────
+
+/** 購入履歴からパーソナライズされた商品一覧を返す */
+shop.post('/api/shop/products', async (c) => {
+  try {
+    const { lineUserId } = await c.req.json<{ lineUserId: string }>();
+    if (!lineUserId) return c.json({ success: false, error: 'lineUserId は必須です' }, 400);
+
+    const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
+    if (!friend) return c.json({ success: false, error: 'LINE連携がありません' }, 404);
+
+    const point = await getLoyaltyPoint(c.env.DB, friend.id);
+    const shopifyCustomerId = point?.shopify_customer_id;
+
+    // 購入済みvariant IDを取得（Shopify Admin API、非同期）
+    let purchasedVariantIds = new Set<string>();
+    if (shopifyCustomerId) {
+      try {
+        const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+        const adminToken = await getShopifyAdminToken(c.env);
+        if (shopDomain && adminToken) {
+          const ordersRes = await fetch(
+            `https://${shopDomain}/admin/api/2024-10/orders.json?customer_id=${shopifyCustomerId}&status=any&limit=30&fields=id,line_items`,
+            { headers: { 'X-Shopify-Access-Token': adminToken } },
+          );
+          if (ordersRes.ok) {
+            const ordersData = await ordersRes.json() as {
+              orders: Array<{ line_items: Array<{ variant_id: number }> }>;
+            };
+            for (const order of ordersData.orders) {
+              for (const li of order.line_items) {
+                const vid = String(li.variant_id);
+                if (FEATURED_VARIANTS.has(vid)) purchasedVariantIds.add(vid);
+              }
+            }
+          }
+        }
+      } catch { /* fallback to bestsellers */ }
+    }
+
+    // ── レコメンドロジック ──
+    // ルール1: 購入済み商品を最優先（知ってるものに使う）
+    // ルール2: 同じカテゴリの未購入品を1つ追加（ソフトクロスセル）
+    // ルール3: 購入履歴ゼロならベストセラー順
+
+    const purchased: CatalogProduct[] = [];
+    const unpurchased: CatalogProduct[] = [];
+
+    for (const p of CATALOG) {
+      if (purchasedVariantIds.has(p.variantId)) {
+        purchased.push(p);
+      } else {
+        unpurchased.push(p);
+      }
+    }
+
+    let products: CatalogProduct[];
+
+    if (purchased.length > 0) {
+      // 購入済みを先頭に、同じカテゴリの未購入品を1つ追加
+      const purchasedCategories = new Set(purchased.map(p => p.category));
+      const similar = unpurchased.find(p => purchasedCategories.has(p.category));
+
+      products = [...purchased];
+      if (similar) products.push(similar);
+      // それでも3商品未満なら、ベストセラー順で補完
+      for (const p of unpurchased) {
+        if (products.length >= 3) break;
+        if (!products.includes(p)) products.push(p);
+      }
+    } else {
+      // 購入履歴なし → ベストセラー（カタログ定義順 = 人気3種セットが先頭）
+      products = [...CATALOG];
+    }
+
+    return c.json({
+      success: true,
+      data: products.map(p => ({
+        variantId: p.variantId,
+        title: p.title,
+        price: p.price,
+      })),
+    });
+  } catch (e) {
+    console.error('shop products error:', e);
+    return c.json({ success: false, error: '商品一覧の取得に失敗しました' }, 500);
   }
 });
 
