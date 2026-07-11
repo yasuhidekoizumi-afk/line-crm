@@ -27,14 +27,29 @@ interface CatalogProduct {
 }
 
 const CATALOG: CatalogProduct[] = [
-  { variantId: '40611894853791', title: '人気3種セット（プレーン/チョコ/バナナココナッツ）', price: 3240, category: 'セット',
-    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A0295.jpg?v=1741329747' },
-  { variantId: '45285682806943', title: 'PLAIN プレーン 200g', price: 1080, category: 'グラノーラ200g',
+  // グラノーラ200g
+  { variantId: '45285682806943', title: 'PLAIN プレーン 200g', price: 1080, category: 'グラノーラ',
     imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
-  { variantId: '62613611020447', title: 'BANANA COCONUTS 200g', price: 1080, category: 'グラノーラ200g',
+  { variantId: '62613611020447', title: 'BANANA COCONUTS 200g', price: 1080, category: 'グラノーラ',
     imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/33_1d355fd0-c79a-4e8d-8e8a-12cfdefc58fa.png' },
-  { variantId: '45285711675551', title: 'DRIED FRUIT 200g', price: 1080, category: 'グラノーラ200g',
+  { variantId: '45285711675551', title: 'DRIED FRUIT 200g', price: 1080, category: 'グラノーラ',
     imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/35_e5dc6afb-a252-4bba-8d1f-dcc339b0b992.png' },
+  // グラノーラ700g
+  { variantId: '45285682839711', title: 'PLAIN プレーン 700g', price: 2980, category: 'グラノーラ',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
+  { variantId: '62613611053215', title: 'BANANA COCONUTS 700g', price: 2980, category: 'グラノーラ',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/33_1d355fd0-c79a-4e8d-8e8a-12cfdefc58fa.png' },
+  { variantId: '45285711708319', title: 'DRIED FRUIT 700g', price: 2980, category: 'グラノーラ',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/35_e5dc6afb-a252-4bba-8d1f-dcc339b0b992.png' },
+  // セット
+  { variantId: '40611894853791', title: '人気3種セット', price: 3240, category: 'セット',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A0295.jpg?v=1741329747' },
+  // 甘酒
+  { variantId: '44744722120863', title: '米麹甘酒 プレーン 550g', price: 1120, category: '甘酒',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
+  // ソース・調味料
+  { variantId: '46655182635167', title: '麹マヨ 1本', price: 800, category: 'ソース',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
 ];
 
 const CATALOG_BY_ID = new Map(CATALOG.map(p => [p.variantId, p]));
@@ -125,38 +140,52 @@ shop.post('/api/shop/products', async (c) => {
     }
 
     // ── レコメンドロジック ──
-    // ルール1: 購入済み商品を最優先（知ってるものに使う）
-    // ルール2: 同じカテゴリの未購入品を1つ追加（ソフトクロスセル）
-    // ルール3: 購入履歴ゼロならベストセラー順
-
-    const purchased: CatalogProduct[] = [];
-    const unpurchased: CatalogProduct[] = [];
-
-    for (const p of CATALOG) {
-      if (purchasedVariantIds.has(p.variantId)) {
-        purchased.push(p);
-      } else {
-        unpurchased.push(p);
-      }
-    }
+    // 買ったカテゴリの商品を優先。同じカテゴリ内は価格順。
+    // 購入履歴なし → 全カテゴリから1つずつ代表商品を出す
 
     let products: CatalogProduct[];
 
-    if (purchased.length > 0) {
-      // 購入済みを先頭に、同じカテゴリの未購入品を1つ追加
-      const purchasedCategories = new Set(purchased.map(p => p.category));
-      const similar = unpurchased.find(p => purchasedCategories.has(p.category));
-
-      products = [...purchased];
-      if (similar) products.push(similar);
-      // それでも3商品未満なら、ベストセラー順で補完
-      for (const p of unpurchased) {
-        if (products.length >= 3) break;
-        if (!products.includes(p)) products.push(p);
+    if (purchasedVariantIds.size > 0) {
+      // 買ったことのあるカテゴリを集計
+      const purchasedCategories = new Set<string>();
+      for (const p of CATALOG) {
+        if (purchasedVariantIds.has(p.variantId)) {
+          purchasedCategories.add(p.category);
+        }
       }
+
+      // 買ったカテゴリの商品を先頭に、それ以外を後ろに
+      const sameCategory: CatalogProduct[] = [];
+      const otherCategory: CatalogProduct[] = [];
+
+      for (const p of CATALOG) {
+        if (purchasedCategories.has(p.category)) {
+          sameCategory.push(p);
+        } else {
+          otherCategory.push(p);
+        }
+      }
+
+      // 同じカテゴリ内は価格の安い順
+      sameCategory.sort((a, b) => a.price - b.price);
+      otherCategory.sort((a, b) => a.price - b.price);
+
+      products = [...sameCategory, ...otherCategory];
     } else {
-      // 購入履歴なし → ベストセラー（カタログ定義順 = 人気3種セットが先頭）
-      products = [...CATALOG];
+      // 購入履歴なし → 全商品（カテゴリごとに1アイテムずつ、価格順）
+      const seen = new Set<string>();
+      const picked: CatalogProduct[] = [];
+      for (const p of CATALOG) {
+        if (!seen.has(p.category)) {
+          seen.add(p.category);
+          picked.push(p);
+        }
+      }
+      // 残りも追加
+      for (const p of CATALOG) {
+        if (!picked.includes(p)) picked.push(p);
+      }
+      products = picked;
     }
 
     return c.json({
