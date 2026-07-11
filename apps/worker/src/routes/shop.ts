@@ -23,13 +23,18 @@ interface CatalogProduct {
   title: string;
   price: number;
   category: string;
+  imageUrl?: string;
 }
 
 const CATALOG: CatalogProduct[] = [
-  { variantId: '40611894853791', title: '人気3種セット（プレーン/チョコ/バナナココナッツ）', price: 3240, category: 'セット' },
-  { variantId: '45285682806943', title: 'PLAIN プレーン 200g', price: 1080, category: 'グラノーラ200g' },
-  { variantId: '62613611020447', title: 'BANANA COCONUTS 200g', price: 1080, category: 'グラノーラ200g' },
-  { variantId: '45285711675551', title: 'DRIED FRUIT 200g', price: 1080, category: 'グラノーラ200g' },
+  { variantId: '40611894853791', title: '人気3種セット（プレーン/チョコ/バナナココナッツ）', price: 3240, category: 'セット',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A0295.jpg?v=1741329747' },
+  { variantId: '45285682806943', title: 'PLAIN プレーン 200g', price: 1080, category: 'グラノーラ200g',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
+  { variantId: '62613611020447', title: 'BANANA COCONUTS 200g', price: 1080, category: 'グラノーラ200g',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/33_1d355fd0-c79a-4e8d-8e8a-12cfdefc58fa.png' },
+  { variantId: '45285711675551', title: 'DRIED FRUIT 200g', price: 1080, category: 'グラノーラ200g',
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/35_e5dc6afb-a252-4bba-8d1f-dcc339b0b992.png' },
 ];
 
 const CATALOG_BY_ID = new Map(CATALOG.map(p => [p.variantId, p]));
@@ -160,6 +165,7 @@ shop.post('/api/shop/products', async (c) => {
         variantId: p.variantId,
         title: p.title,
         price: p.price,
+        imageUrl: p.imageUrl,
       })),
     });
   } catch (e) {
