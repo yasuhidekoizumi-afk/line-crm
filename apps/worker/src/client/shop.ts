@@ -132,24 +132,24 @@ function renderShop(products: Product[]): void {
             ? `<img src="${p.imageUrl}" alt="${escapeHtml(p.title)}" loading="lazy" />`
             : `<div class="product-image-placeholder">${escapeHtml(p.title.charAt(0))}</div>`
           }
-        </div>
-        <div class="product-body">
-          <div class="product-title">${escapeHtml(p.title)}</div>
-          <div class="product-price-row">
-            ${totalBalance > 0 && maxUsable > 0 ? `
-              <span class="product-price-original">${formatPrice(p.price)}</span>
-              <span class="product-price-badge">-${maxUsable.toLocaleString()}pt</span>
-            ` : ''}
-            <div class="product-price-final">${totalBalance > 0 && maxUsable > 0 ? formatPrice(effectivePrice) : formatPrice(p.price)}</div>
+          <div class="product-overlay">
+            <div class="product-title">${escapeHtml(p.title)}</div>
+            <div class="product-price-row">
+              ${totalBalance > 0 && maxUsable > 0 ? `
+                <span class="product-price-original">${formatPrice(p.price)}</span>
+                <span class="product-price-badge">-${maxUsable.toLocaleString()}pt</span>
+              ` : ''}
+              <span class="product-price-final">${totalBalance > 0 && maxUsable > 0 ? formatPrice(effectivePrice) : formatPrice(p.price)}</span>
+            </div>
           </div>
-          <button
-            class="buy-btn"
-            data-variant="${p.variantId}"
-            ${totalBalance === 0 || maxUsable === 0 ? 'disabled' : ''}
-          >
-            ${totalBalance > 0 && maxUsable > 0 ? 'ポイントで買う' : 'ポイントがありません'}
-          </button>
         </div>
+        <button
+          class="buy-btn"
+          data-variant="${p.variantId}"
+          ${totalBalance === 0 || maxUsable === 0 ? 'disabled' : ''}
+        >
+          ${totalBalance > 0 && maxUsable > 0 ? 'ポイントで買う' : 'ポイントがありません'}
+        </button>
       </div>
     `;
   }).join('');
