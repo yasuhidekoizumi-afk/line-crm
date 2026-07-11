@@ -16,8 +16,6 @@ declare const liff: {
   closeWindow(): void;
 };
 
-const SHOPIFY_URL = 'https://oryzae.shop/collections/all';
-
 function escapeHtml(str: string): string {
   const div = document.createElement('div');
   div.textContent = str;
@@ -185,9 +183,12 @@ function renderShop(products: Product[]): void {
           ${productCards}
         </div>
         <p class="shop-note">※ タップ後、Shopifyのお支払い画面に進みます</p>
-        <a class="shopify-link" href="${SHOPIFY_URL}" target="_blank">
-          Shopifyで他の商品を見る →
-        </a>
+        <div class="category-links">
+          <a class="shopify-link" href="https://oryzae.shop/collections/granola" target="_blank">グラノーラをもっと見る</a>
+          <a class="shopify-link" href="https://oryzae.shop/collections/amazake" target="_blank">甘酒・ドリンクをもっと見る</a>
+          <a class="shopify-link" href="https://oryzae.shop/collections/sauce-seasoning" target="_blank">ソース・調味料をもっと見る</a>
+          <a class="shopify-link" href="https://oryzae.shop/collections/gift-sets" target="_blank">セット・ギフトをもっと見る</a>
+        </div>
       </div>
     </div>
   `);
