@@ -16,6 +16,8 @@ declare const liff: {
   closeWindow(): void;
 };
 
+const SHOPIFY_URL = 'https://oryzae.shop/collections/all';
+
 function escapeHtml(str: string): string {
   const div = document.createElement('div');
   div.textContent = str;
@@ -183,6 +185,9 @@ function renderShop(products: Product[]): void {
           ${productCards}
         </div>
         <p class="shop-note">※ タップ後、Shopifyのお支払い画面に進みます</p>
+        <a class="shopify-link" href="${SHOPIFY_URL}" target="_blank">
+          Shopifyで他の商品を見る →
+        </a>
       </div>
     </div>
   `);
