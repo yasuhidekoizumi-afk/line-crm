@@ -47,6 +47,12 @@ async function fetchBalance(lineUserId: string): Promise<ShopBalance> {
     body: JSON.stringify({ lineUserId }),
   });
   const data = await res.json() as { success: boolean; data?: ShopBalance; error?: string };
+  if (res.status === 404) {
+    // LINE連携（friends）が見つからない
+    const err = new Error(data.error || 'LINE連携が見つかりません');
+    (err as Error & { code?: string }).code = 'NOT_LINKED';
+    throw err;
+  }
   if (!data.success || !data.data) throw new Error(data.error || '残高の取得に失敗しました');
   return data.data;
 }
@@ -190,24 +196,10 @@ export async function initShop(): Promise<void> {
   try {
     const profile = await liff.getProfile();
 
-    // 友だちチェック
-    let friendFlag = false;
-    try {
-      friendFlag = (await liff.getFriendship()).friendFlag;
-    } catch { /* ignore */ }
-
-    if (!friendFlag) {
-      render(`
-        <div class="card">
-          <h2>友だち追加が必要です</h2>
-          <p>ポイントを利用するには、ORYZAE公式LINEの友だち追加が必要です。</p>
-          <a href="https://line.me/R/ti/p/@oryzae_foodcosme" class="add-friend-btn">友だち追加する</a>
-        </div>
-      `);
-      return;
-    }
-
     // 残高取得
+    // liff.getFriendship() は LINE Login チャネルとMessaging APIチャネルの紐づきや
+    // LIFF起動状態に依存して false になることがあるため、LIFF ShopではDB上の連携状態を正にする。
+    // fetchBalance() 側で lineUserId → friends → loyalty_points を確認し、未連携ならエラーにする。
     balance = await fetchBalance(profile.userId);
 
     // 商品データ（variant ID は後で設定）
