@@ -36,20 +36,20 @@ const CATALOG: CatalogProduct[] = [
     imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/35_e5dc6afb-a252-4bba-8d1f-dcc339b0b992.png' },
   // グラノーラ700g
   { variantId: '45285682839711', title: 'PLAIN プレーン 700g', price: 2980, category: 'グラノーラ',
-    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A7770.jpg?v=1748392863' },
   { variantId: '62613611053215', title: 'BANANA COCONUTS 700g', price: 2980, category: 'グラノーラ',
-    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/33_1d355fd0-c79a-4e8d-8e8a-12cfdefc58fa.png' },
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A7767.jpg?v=1748392888' },
   { variantId: '45285711708319', title: 'DRIED FRUIT 700g', price: 2980, category: 'グラノーラ',
-    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/35_e5dc6afb-a252-4bba-8d1f-dcc339b0b992.png' },
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A7765.jpg?v=1748392941' },
   // セット
   { variantId: '40611894853791', title: '人気3種セット', price: 3240, category: 'セット',
     imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A0295.jpg?v=1741329747' },
   // 甘酒
   { variantId: '44744722120863', title: '米麹甘酒 プレーン 550g', price: 1120, category: '甘酒',
-    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/LINE_2_acdd843a-0eab-4431-884f-c78f744bb4d3.png?v=1722470329' },
   // ソース・調味料
   { variantId: '46655182635167', title: '麹マヨ 1本', price: 800, category: 'ソース',
-    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/31_b0628529-e595-4585-b2ca-bd8a56605925.png' },
+    imageUrl: 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/43a0f90bba95423c9cde9c4ea87cbc2e.png?v=1757663965' },
 ];
 
 const CATALOG_BY_ID = new Map(CATALOG.map(p => [p.variantId, p]));
