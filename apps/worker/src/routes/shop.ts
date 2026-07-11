@@ -22,10 +22,10 @@ const shop = new Hono<Env>();
 
 // 設定可能な商品一覧（variantId は Shopify管理画面 > 商品 > バリエーション から取得）
 const FEATURED_VARIANTS = new Set([
-  '49489292198047', // PLAIN プレーン
-  '49489293017247', // BANANA COCONUTS
-  '49489290576031', // DRIED FRUIT
-  'SET3_PLACEHOLDER', // 人気3種セット（要差し替え）
+  '45285682806943', // PLAIN プレーン 200g
+  '62613611020447', // BANANA COCONUTS 200g
+  '45285711675551', // DRIED FRUIT 200g
+  '40611894853791', // 人気3種セット
 ]);
 
 // ── POST /api/shop/balance ────────────────────────

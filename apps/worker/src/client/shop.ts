@@ -218,12 +218,12 @@ export async function initShop(): Promise<void> {
     // fetchBalance() 側で lineUserId → friends → loyalty_points を確認し、未連携ならエラーにする。
     balance = await fetchBalance(profile.userId);
 
-    // 商品データ（variant ID は後で設定）
+    // 商品データ（VITE_LIFF_ID as of 550g sold out, use 200g staple）
     const products: Product[] = [
-      { variantId: '49489292198047', title: 'PLAIN プレーン 550g', price: 4536 },
-      { variantId: '49489293017247', title: 'BANANA COCONUTS 550g', price: 4536 },
-      { variantId: '49489290576031', title: 'DRIED FRUIT 550g', price: 4536 },
-      { variantId: 'SET3_PLACEHOLDER',   title: '人気3種お試しセット', price: 2980 },
+      { variantId: '45285682806943', title: 'PLAIN プレーン 200g', price: 1080 },
+      { variantId: '62613611020447', title: 'BANANA COCONUTS 200g', price: 1080 },
+      { variantId: '45285711675551', title: 'DRIED FRUIT 200g', price: 1080 },
+      { variantId: '40611894853791', title: '人気3種セット（プレーン/チョコ/バナナココナッツ）', price: 3240 },
     ];
 
     renderShop(products);
