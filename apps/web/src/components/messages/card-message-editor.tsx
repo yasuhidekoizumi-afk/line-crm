@@ -28,6 +28,8 @@ export interface CardButton {
 
 export interface Card {
   imageUrl: string
+  imageAspectRatio: string
+  imageAspectMode: 'cover' | 'fit'
   title: string
   body: string
   buttons: CardButton[]
@@ -38,6 +40,8 @@ const MAX_BUTTONS_PER_CARD = 3
 
 export const DEFAULT_CARD: Card = {
   imageUrl: '',
+  imageAspectRatio: '1:1',
+  imageAspectMode: 'cover',
   title: '',
   body: '',
   buttons: [{ label: '詳しく見る', uri: '' }],
@@ -64,8 +68,8 @@ export function cardsToFlexContent(cards: Card[]): string {
         type: 'image',
         url: c.imageUrl.trim(),
         size: 'full',
-        aspectRatio: '20:13',
-        aspectMode: 'cover',
+        aspectRatio: c.imageAspectRatio?.trim() || '1:1',
+        aspectMode: c.imageAspectMode || 'cover',
       }
     }
 
@@ -153,6 +157,8 @@ function bubbleToCard(bubble: Record<string, unknown>): Card {
   const footer = bubble.footer as Record<string, unknown> | undefined
 
   const imageUrl = typeof hero?.url === 'string' ? hero.url : ''
+  const imageAspectRatio = typeof hero?.aspectRatio === 'string' && hero.aspectRatio.trim() ? hero.aspectRatio : '1:1'
+  const imageAspectMode = hero?.aspectMode === 'fit' ? 'fit' : 'cover'
 
   let title = ''
   let bodyText = ''
@@ -176,6 +182,8 @@ function bubbleToCard(bubble: Record<string, unknown>): Card {
 
   return {
     imageUrl,
+    imageAspectRatio,
+    imageAspectMode,
     title,
     body: bodyText,
     buttons: buttons.length ? buttons : [{ label: '詳しく見る', uri: '' }],
@@ -306,6 +314,32 @@ export default function CardMessageEditor({ value, onChange, altText = '', onAlt
                   value={card.imageUrl}
                   onChange={(e) => updateCard(idx, { imageUrl: e.target.value })}
                 />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] text-gray-400 mb-1">画像比率</label>
+                    <select
+                      className="w-full border border-gray-300 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                      value={card.imageAspectRatio}
+                      onChange={(e) => updateCard(idx, { imageAspectRatio: e.target.value })}
+                    >
+                      <option value="1:1">1:1</option>
+                      <option value="4:3">4:3</option>
+                      <option value="16:9">16:9</option>
+                      <option value="20:13">20:13</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-400 mb-1">表示方法</label>
+                    <select
+                      className="w-full border border-gray-300 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                      value={card.imageAspectMode}
+                      onChange={(e) => updateCard(idx, { imageAspectMode: e.target.value as Card['imageAspectMode'] })}
+                    >
+                      <option value="cover">切り抜き</option>
+                      <option value="fit">全体表示</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               {/* タイトル */}
