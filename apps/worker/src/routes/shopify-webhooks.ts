@@ -15,7 +15,7 @@ import {
 } from '@line-crm/db';
 import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify.js';
 import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js';
-import { refundUnusedPointCode, findPendingCodeByFriendId } from '../services/loyalty-code-refund.js';
+import { refundUnusedPointCode, findPendingCodeByFriendId, markPointCodeUsedByFriendId } from '../services/loyalty-code-refund.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
@@ -370,6 +370,9 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
         const r = await refundUnusedPointCode(c.env, shopifyCustomerId, pendingCode, 'order_paid');
         if (r.refunded) {
           console.log(`[orders-paid] 未使用コード自動返還: ${pendingCode} +${r.refundPoints}pt (cust=${shopifyCustomerId})`);
+        } else if (r.reason === 'used') {
+          await markPointCodeUsedByFriendId(c.env.DB, existing.friend_id, pendingCode);
+          console.log(`[orders-paid] ポイント割引コードを利用済みに更新: ${pendingCode} (cust=${shopifyCustomerId})`);
         }
       } catch (err) {
         console.error('[orders-paid] 未使用コード自動返還に失敗:', err);
