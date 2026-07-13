@@ -1,9 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Header from '@/components/layout/header'
-import { fetchApi } from '@/lib/api'
+import { api, fetchApi } from '@/lib/api'
 import type { ApiResponse } from '@line-crm/shared'
-import type { StaffMember } from '@line-crm/shared'
+import type { StaffMember, LineAccount } from '@line-crm/shared'
 
 type NewApiKey = { apiKey: string; staffId: string }
 
@@ -45,6 +45,8 @@ export default function StaffPage() {
   const [formName, setFormName] = useState('')
   const [formEmail, setFormEmail] = useState('')
   const [formRole, setFormRole] = useState<'owner' | 'admin' | 'staff'>('staff')
+  const [accounts, setAccounts] = useState<LineAccount[]>([])
+  const [assignedAccountId, setAssignedAccountId] = useState('')
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState('')
 
@@ -69,6 +71,7 @@ export default function StaffPage() {
 
   useEffect(() => {
     loadMembers()
+    api.lineAccounts.list().then((res) => { if (res.success) setAccounts(res.data) }).catch(() => {})
     // Read current user's role from localStorage (set during login)
     try {
       const storedRole = localStorage.getItem('lh_staff_role')
@@ -94,12 +97,20 @@ export default function StaffPage() {
         body: JSON.stringify(body),
       })
       if (res.success) {
+        // SNS担当者は作成直後に対象公式LINEだけへ割り当てる。
+        if (formRole === 'staff' && assignedAccountId) {
+          const permission = await fetchApi<ApiResponse<unknown>>(`/api/staff/${res.data.id}/line-accounts/${assignedAccountId}`, {
+            method: 'PUT', body: JSON.stringify({ accountRole: 'operator' }),
+          })
+          if (!permission.success) throw new Error(permission.error ?? 'LINEアカウントの割り当てに失敗しました')
+        }
         if (res.data.apiKey) {
           setNewKey({ apiKey: res.data.apiKey, staffId: res.data.id })
         }
         setFormName('')
         setFormEmail('')
         setFormRole('staff')
+        setAssignedAccountId('')
         setShowForm(false)
         await loadMembers()
       } else {
@@ -230,7 +241,8 @@ export default function StaffPage() {
       {/* Create form */}
       {showForm && (
         <div className="mb-6 p-5 bg-white border border-gray-200 rounded-lg shadow-sm">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">新しいスタッフを追加</h2>
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">スタッフを招待</h2>
+          <p className="text-xs text-gray-500 mb-4">SNS担当者は、ギフティング用LINEだけを操作できる状態で発行します。</p>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
@@ -267,6 +279,16 @@ export default function StaffPage() {
                 </select>
               </div>
             </div>
+            {formRole === 'staff' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">操作を許可する公式LINE</label>
+                <select value={assignedAccountId} onChange={(e) => setAssignedAccountId(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                  <option value="">後で割り当てる</option>
+                  {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">ギフティング用アカウントを選ぶと、他の公式LINEは見えません。</p>
+              </div>
+            )}
             {formError && (
               <p className="text-sm text-red-600">{formError}</p>
             )}
@@ -277,7 +299,7 @@ export default function StaffPage() {
                 className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity hover:opacity-90"
                 style={{ backgroundColor: '#06C755' }}
               >
-                {formLoading ? '作成中...' : '作成'}
+                {formLoading ? '発行中...' : '招待を発行'}
               </button>
               <button
                 type="button"
