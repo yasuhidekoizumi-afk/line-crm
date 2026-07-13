@@ -51,6 +51,26 @@ function showLoading(message: string): void {
   `);
 }
 
+function resolveCloseUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  const returnTo = params.get('returnTo');
+  if (returnTo) return returnTo;
+
+  const liffReferrer = params.get('liff.referrer');
+  if (liffReferrer) {
+    try {
+      const referrerUrl = new URL(liffReferrer);
+      if (referrerUrl.hostname === 'oryzae.shop') {
+        return `${referrerUrl.origin}/pages/mypage`;
+      }
+    } catch {
+      // 不正なreferrerは無視して既定のマイページへ戻す
+    }
+  }
+
+  return 'https://oryzae.shop/pages/mypage';
+}
+
 function showSuccess(data: {
   bonusAwarded: number;
   backfilledOrders: number;
@@ -117,7 +137,7 @@ function showSuccess(data: {
       if (liff.isInClient()) {
         liff.closeWindow();
       } else {
-        window.close();
+        window.location.href = resolveCloseUrl();
       }
     });
   }
