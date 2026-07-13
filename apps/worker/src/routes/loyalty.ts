@@ -182,6 +182,50 @@ async function ensureBirthdayRegisteredTag(db: D1Database): Promise<string> {
   }
 }
 
+type LoyaltyBenefitStatus = {
+  line_linked: boolean;
+  birthday_registered: boolean;
+};
+
+const EMPTY_BENEFIT_STATUS: LoyaltyBenefitStatus = {
+  line_linked: false,
+  birthday_registered: false,
+};
+
+async function getLoyaltyBenefitStatus(db: D1Database, friendId: string): Promise<LoyaltyBenefitStatus> {
+  const row = await db
+    .prepare(
+      `SELECT
+         CASE
+           WHEN f.line_user_id LIKE 'U%' AND length(f.line_user_id) = 33 THEN 1
+           ELSE 0
+         END AS line_linked,
+         CASE
+           WHEN lp.birthday IS NOT NULL AND lp.birthday != '' THEN 1
+           WHEN EXISTS (
+             SELECT 1
+             FROM loyalty_transactions t
+             WHERE t.friend_id = lp.friend_id
+               AND t.type = 'award'
+               AND t.reason LIKE '誕生日登録ボーナス:%'
+             LIMIT 1
+           ) THEN 1
+           ELSE 0
+         END AS birthday_registered
+       FROM loyalty_points lp
+       LEFT JOIN friends f ON f.id = lp.friend_id
+       WHERE lp.friend_id = ?
+       LIMIT 1`,
+    )
+    .bind(friendId)
+    .first<{ line_linked: number; birthday_registered: number }>();
+
+  return {
+    line_linked: row?.line_linked === 1,
+    birthday_registered: row?.birthday_registered === 1,
+  };
+}
+
 // GET /api/loyalty/settings — 設定一覧取得
 loyalty.get('/api/loyalty/settings', async (c) => {
   try {
@@ -930,6 +974,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
           rank: 'レギュラー',
           total_spent: 0,
           pending_code: null,
+          benefits: EMPTY_BENEFIT_STATUS,
           rank_definitions,
           next_rank: { rank: 'シルバー', min_spent: 10_000, remaining: 10_000 },
         },
@@ -958,6 +1003,11 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
     let expiringSoon: { points: number; expires_at: string } | null = null;
     try {
       expiringSoon = await getExpiringSoonPoints(c.env.DB, point.friend_id);
+    } catch (_) {}
+
+    let benefits = EMPTY_BENEFIT_STATUS;
+    try {
+      benefits = await getLoyaltyBenefitStatus(c.env.DB, point.friend_id);
     } catch (_) {}
 
     // ランク定義（顧客向け表示用）
@@ -992,6 +1042,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
         pending_discount: pendingDiscount,
         pending_points: pendingPoints,
         expiring_soon: expiringSoon,
+        benefits,
         rank_definitions,
         next_rank,
       },
