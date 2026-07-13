@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import {
   getSegments,
   getSegmentById,
+  getSegmentAudienceBreakdown,
   createSegment,
   updateSegment,
   deleteSegment,
@@ -123,11 +124,13 @@ segmentRoutes.post('/:id/recompute', async (c) => {
     // Shopify ミラーは Shopify から同期（ルール評価ではない）。1チャンク進める。
     if (existing.source === 'shopify') {
       const sync = await syncShopifySegmentChunk(c.env, id);
-      return c.json({ success: true, data: { customer_count: sync.totalMembers, sync } });
+      const audience_breakdown = await getSegmentAudienceBreakdown(c.env.DB, id);
+      return c.json({ success: true, data: { customer_count: sync.totalMembers, audience_breakdown, sync } });
     }
 
     const count = await computeSegment(id, c.env.DB);
-    return c.json({ success: true, data: { customer_count: count } });
+    const audience_breakdown = await getSegmentAudienceBreakdown(c.env.DB, id);
+    return c.json({ success: true, data: { customer_count: count, audience_breakdown } });
   } catch (err) {
     console.error('[FERMENT] POST /segments/:id/recompute error:', err);
     return c.json({ success: false, error: `再計算エラー: ${String(err)}` }, 500);

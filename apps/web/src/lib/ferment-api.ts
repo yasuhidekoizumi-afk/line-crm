@@ -84,6 +84,13 @@ export interface Segment {
   sync_status?: string | null
   sync_cursor?: string | null
   sync_error?: string | null
+  audience_breakdown?: {
+    segmentMembers: number
+    lineIdHeld: number
+    realLineUsers: number
+    sendableLineUsers: number
+    shopifyPlaceholderLineIds: number
+  } | null
 }
 
 /** Shopify ネイティブの顧客セグメント + ハーネス側の取り込み状況 */
@@ -303,7 +310,7 @@ export const fermentApi = {
     delete: (id: string) =>
       fetchApi<ApiResult<null>>(`/api/segments/${id}`, { method: 'DELETE' }),
     recompute: (id: string) =>
-      fetchApi<ApiResult<{ customer_count: number }>>(`/api/segments/${id}/recompute`, { method: 'POST' }),
+      fetchApi<ApiResult<{ customer_count: number; audience_breakdown?: Segment['audience_breakdown'] }>>(`/api/segments/${id}/recompute`, { method: 'POST' }),
     members: (id: string, opts?: { limit?: number; offset?: number; with_email?: boolean }) => {
       const query = new URLSearchParams()
       if (opts?.limit) query.set('limit', String(opts.limit))
