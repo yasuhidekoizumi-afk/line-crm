@@ -4,7 +4,14 @@ import { useState, useRef } from 'react'
 import { api } from '@/lib/api'
 
 interface ImageUploaderProps {
-  onUploaded: (url: string, meta?: { imagemapBaseUrl?: string }) => void
+  onUploaded: (
+    url: string,
+    meta?: {
+      imagemapBaseUrl?: string
+      width?: number
+      height?: number
+    },
+  ) => void
 }
 
 export default function ImageUploader({ onUploaded }: ImageUploaderProps) {
@@ -25,6 +32,8 @@ export default function ImageUploader({ onUploaded }: ImageUploaderProps) {
       return
     }
 
+    const dimensions = await getImageDimensions(file).catch(() => null)
+
     // Show local preview
     const objectUrl = URL.createObjectURL(file)
     setPreview(objectUrl)
@@ -33,7 +42,11 @@ export default function ImageUploader({ onUploaded }: ImageUploaderProps) {
     try {
       const result = await api.images.upload(file)
       setPreview(result.url)
-      onUploaded(result.url, { imagemapBaseUrl: result.imagemapBaseUrl })
+      onUploaded(result.url, {
+        imagemapBaseUrl: result.imagemapBaseUrl,
+        width: dimensions?.width,
+        height: dimensions?.height,
+      })
     } catch {
       setPreview(null)
       setError('アップロードに失敗しました')
@@ -80,4 +93,23 @@ export default function ImageUploader({ onUploaded }: ImageUploaderProps) {
       )}
     </div>
   )
+}
+
+async function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = await loadImage(objectUrl)
+    return { width: image.width, height: image.height }
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('画像の読み込みに失敗しました'))
+    image.src = src
+  })
 }
