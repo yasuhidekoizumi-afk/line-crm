@@ -9,6 +9,8 @@
  * - FERMENT 既存の events.order_placed / customers.ltv 更新パスは破壊しない。
  */
 
+import { markPointCodeUsedByFriendId } from './loyalty-code-refund.js';
+
 export interface ShopifyOrderPayload {
   id: number | string;
   name?: string;
@@ -38,6 +40,17 @@ export interface ShopifyOrderPayload {
     last_name?: string | null;
     orders_count?: number;
   } | null;
+  discount_codes?: Array<{
+    code?: string | null;
+    amount?: string | number | null;
+    type?: string | null;
+  }>;
+  discount_applications?: Array<{
+    code?: string | null;
+    title?: string | null;
+    value?: string | number | null;
+    type?: string | null;
+  }>;
   billing_address?: {
     name?: string | null;
     phone?: string | null;
@@ -128,6 +141,20 @@ function extractCustomerName(order: ShopifyOrderPayload): string | null {
   if (last) return last;
   
   return null;
+}
+
+function extractPointDiscountCodes(order: ShopifyOrderPayload): string[] {
+  const codes = new Set<string>();
+  for (const discount of order.discount_codes ?? []) {
+    const code = discount.code?.trim().toUpperCase();
+    if (code?.startsWith('ORYZAE-')) codes.add(code);
+  }
+  for (const app of order.discount_applications ?? []) {
+    const raw = app.code ?? app.title ?? '';
+    const match = raw.toUpperCase().match(/ORYZAE-[A-Z0-9-]+/);
+    if (match) codes.add(match[0]);
+  }
+  return [...codes];
 }
 
 /**
@@ -269,6 +296,13 @@ export async function persistShopifyOrder(
       )
       .bind(...flat)
       .run();
+  }
+
+  const pointCodes = extractPointDiscountCodes(order);
+  if (friend_id && pointCodes.length > 0) {
+    for (const code of pointCodes) {
+      await markPointCodeUsedByFriendId(db, friend_id, code);
+    }
   }
 
   return {

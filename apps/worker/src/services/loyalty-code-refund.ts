@@ -248,3 +248,30 @@ export async function findPendingCodeByFriendId(
   const match = latest?.reason?.match(/コード: ([A-Z0-9-]+)/);
   return match ? match[1] : null;
 }
+
+/**
+ * Shopify 注文でポイント割引コードの利用が確認できた redeem を「利用済み」にする。
+ * 返金処理と同じく reason のプレフィックスで pending_code から除外する設計。
+ */
+export async function markPointCodeUsedByFriendId(
+  db: D1Database,
+  friendId: string,
+  code: string,
+): Promise<{ marked: boolean }> {
+  const normalizedCode = code.trim().toUpperCase();
+  if (!normalizedCode) return { marked: false };
+
+  const result = await db
+    .prepare(
+      `UPDATE loyalty_transactions SET reason = '[利用済み] ' || reason
+       WHERE friend_id = ?
+         AND type = 'redeem'
+         AND reason LIKE ?
+         AND reason NOT LIKE '[利用済み]%'
+         AND reason NOT LIKE '[取り消し済み]%'`,
+    )
+    .bind(friendId, `%コード: ${normalizedCode}%`)
+    .run();
+
+  return { marked: (result.meta?.changes ?? 0) > 0 };
+}
