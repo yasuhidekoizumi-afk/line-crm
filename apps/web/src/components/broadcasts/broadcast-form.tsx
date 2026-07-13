@@ -450,25 +450,25 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             {selectedSegment?.audience_breakdown && (
               <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
                 <div className="rounded-md bg-white px-2 py-1.5">
-                  <div className="text-gray-500">{selectedSegment.source === 'shopify' ? 'Shopify対象人数' : '対象人数'}</div>
+                  <div className="text-gray-500">購入者数</div>
                   <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
                     {selectedSegment.audience_breakdown.segmentMembers.toLocaleString('ja-JP')} 人
                   </div>
                 </div>
                 <div className="rounded-md bg-white px-2 py-1.5">
-                  <div className="text-gray-500">LINE連携ID</div>
+                  <div className="text-gray-500">LINEにひも付いた人</div>
                   <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
                     {selectedSegment.audience_breakdown.lineIdHeld.toLocaleString('ja-JP')} 人
                   </div>
                 </div>
                 <div className="rounded-md bg-white px-2 py-1.5">
-                  <div className="text-gray-500">実LINE UID</div>
+                  <div className="text-gray-500">実際に配信できる人</div>
                   <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
                     {selectedSegment.audience_breakdown.realLineUsers.toLocaleString('ja-JP')} 人
                   </div>
                 </div>
                 <div className="rounded-md bg-white px-2 py-1.5">
-                  <div className="text-gray-500">全アカウント送信可能</div>
+                  <div className="text-gray-500">今回送れる人</div>
                   <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
                     {selectedSegment.audience_breakdown.sendableLineUsers.toLocaleString('ja-JP')} 人
                   </div>
@@ -478,12 +478,11 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
               {form.targetType === 'all' && '現在フォロー中の友だち数です。'}
               {form.targetType === 'tag' && '選択したタグが付いた、現在フォロー中の友だち数です。'}
-              {form.targetType === 'segment' && '配信予定人数は、選択したセグメント内で現在フォロー中かつ選択中のLINEアカウントから送信できる友だち数です。'}
+              {form.targetType === 'segment' && '配信予定人数は、選択したセグメントの中で、LINEで受け取れる人だけを数えた人数です。'}
               {form.targetType === 'individual' && '個別指定で選択中の友だち数です。'}
               {selectedSegment?.audience_breakdown && (
                 <>
-                  <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] text-gray-700">shopify:</code>
-                  は購入者の仮IDなので、LINE送信には使いません。
+                  ここでは専門用語を気にしなくて大丈夫です。配信できるかどうかは自動で判定しています。
                 </>
               )}
               {selectedAccountId ? ' 選択中のLINEアカウントで絞り込んでいます。' : ''}
