@@ -197,6 +197,28 @@ interface Props {
   onAltTextChange?: (next: string) => void
 }
 
+function simplifyAspectRatio(width: number, height: number): string {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return '1:1'
+  }
+
+  const gcd = (a: number, b: number): number => {
+    let x = Math.abs(Math.trunc(a))
+    let y = Math.abs(Math.trunc(b))
+    while (y !== 0) {
+      const t = x % y
+      x = y
+      y = t
+    }
+    return x || 1
+  }
+
+  const divisor = gcd(width, height)
+  const normalizedWidth = Math.max(1, Math.round(width / divisor))
+  const normalizedHeight = Math.max(1, Math.round(height / divisor))
+  return `${normalizedWidth}:${normalizedHeight}`
+}
+
 export default function CardMessageEditor({ value, onChange, altText = '', onAltTextChange }: Props) {
   const cards = useMemo(() => (value.length === 0 ? [{ ...DEFAULT_CARD }] : value), [value])
 
@@ -306,7 +328,15 @@ export default function CardMessageEditor({ value, onChange, altText = '', onAlt
               {/* 画像 */}
               <div>
                 <label className="block text-xs text-gray-500 mb-1">画像（任意）</label>
-                <ImageUploader onUploaded={(url) => updateCard(idx, { imageUrl: url })} />
+                <ImageUploader
+                  onUploaded={(url, meta) =>
+                    updateCard(idx, {
+                      imageUrl: url,
+                      imageAspectRatio:
+                        meta?.width && meta?.height ? simplifyAspectRatio(meta.width, meta.height) : card.imageAspectRatio,
+                    })
+                  }
+                />
                 <input
                   type="url"
                   className="w-full mt-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
