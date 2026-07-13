@@ -390,7 +390,16 @@ export const api = {
       if (params.targetTagId) query.set('targetTagId', params.targetTagId)
       if (params.targetSegmentId) query.set('targetSegmentId', params.targetSegmentId)
       if (params.lineAccountId) query.set('lineAccountId', params.lineAccountId)
-      return fetchApi<ApiResponse<{ count: number }>>(`/api/broadcasts/target-count?${query}`)
+      return fetchApi<ApiResponse<{
+        count: number
+        audienceBreakdown?: {
+          segmentMembers: number
+          lineIdHeld: number
+          realLineUsers: number
+          sendableLineUsers: number
+          shopifyPlaceholderLineIds: number
+        } | null
+      }>>(`/api/broadcasts/target-count?${query}`)
     },
   },
 

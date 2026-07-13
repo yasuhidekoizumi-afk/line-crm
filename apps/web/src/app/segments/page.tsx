@@ -262,6 +262,40 @@ export default function SegmentsPage() {
                   {s.description && (
                     <p className="text-sm text-gray-500 mt-0.5">{s.description}</p>
                   )}
+                  {s.audience_breakdown && (
+                    <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+                        <div>
+                          <div className="text-gray-500">対象人数</div>
+                          <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
+                            {s.audience_breakdown.segmentMembers.toLocaleString('ja-JP')} 人
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">LINE連携ID</div>
+                          <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
+                            {s.audience_breakdown.lineIdHeld.toLocaleString('ja-JP')} 人
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">実LINE UID</div>
+                          <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
+                            {s.audience_breakdown.realLineUsers.toLocaleString('ja-JP')} 人
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">実送信可能</div>
+                          <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
+                            {s.audience_breakdown.sendableLineUsers.toLocaleString('ja-JP')} 人
+                          </div>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
+                        <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] text-gray-700">shopify:</code>
+                        で始まるIDは購入者の仮IDです。LINE送信には使えません。
+                      </p>
+                    </div>
+                  )}
                   <p className="text-xs text-gray-400 mt-1">
                     最終計算: {fmt(s.last_computed_at)}
                   </p>

@@ -173,6 +173,18 @@ export interface Segment {
   sync_error: string | null;         // 直近の同期エラー文言
 }
 
+export interface SegmentAudienceBreakdown {
+  segmentMembers: number;
+  lineIdHeld: number;
+  realLineUsers: number;
+  sendableLineUsers: number;
+  shopifyPlaceholderLineIds: number;
+}
+
+export interface SegmentWithAudienceBreakdown extends Segment {
+  audience_breakdown: SegmentAudienceBreakdown;
+}
+
 export interface EmailLog {
   log_id: string;
   customer_id: string | null;
@@ -917,14 +929,59 @@ export async function getSegments(db: D1Database): Promise<Segment[]> {
   const result = await db
     .prepare('SELECT * FROM segments ORDER BY created_at DESC')
     .all<Segment>();
-  return result.results;
+  const items = result.results;
+  const breakdowns = await Promise.all(items.map((segment) => getSegmentAudienceBreakdown(db, segment.segment_id)));
+  return items.map((segment, index) => ({
+    ...segment,
+    audience_breakdown: breakdowns[index],
+  })) as SegmentWithAudienceBreakdown[];
 }
 
 export async function getSegmentById(db: D1Database, segmentId: string): Promise<Segment | null> {
-  return db
+  const segment = await db
     .prepare('SELECT * FROM segments WHERE segment_id = ?')
     .bind(segmentId)
     .first<Segment>();
+  if (!segment) return null;
+  return {
+    ...segment,
+    audience_breakdown: await getSegmentAudienceBreakdown(db, segment.segment_id),
+  } as SegmentWithAudienceBreakdown;
+}
+
+export async function getSegmentAudienceBreakdown(
+  db: D1Database,
+  segmentId: string,
+  lineAccountId?: string | null,
+): Promise<SegmentAudienceBreakdown> {
+  const base = await db
+    .prepare(
+      `SELECT
+         COUNT(*) AS segment_members,
+         COUNT(CASE WHEN c.line_user_id IS NOT NULL AND c.line_user_id != '' THEN 1 END) AS line_id_held,
+         COUNT(CASE WHEN c.line_user_id LIKE 'U%' AND length(c.line_user_id) = 33 THEN 1 END) AS real_line_users,
+         COUNT(CASE WHEN c.line_user_id LIKE 'shopify:%' THEN 1 END) AS shopify_placeholder_line_ids
+       FROM customers c
+       INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
+       WHERE sm.segment_id = ?`,
+    )
+    .bind(segmentId)
+    .first<{
+      segment_members: number;
+      line_id_held: number;
+      real_line_users: number;
+      shopify_placeholder_line_ids: number;
+    }>();
+
+  const sendableLineUsers = (await getSegmentLineUserIds(db, segmentId, lineAccountId)).length;
+
+  return {
+    segmentMembers: base?.segment_members ?? 0,
+    lineIdHeld: base?.line_id_held ?? 0,
+    realLineUsers: base?.real_line_users ?? 0,
+    sendableLineUsers,
+    shopifyPlaceholderLineIds: base?.shopify_placeholder_line_ids ?? 0,
+  };
 }
 
 export async function createSegment(

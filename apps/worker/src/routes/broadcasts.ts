@@ -9,7 +9,7 @@ import {
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
 import { processBroadcastSend, resolveBroadcastLineClient } from '../services/broadcast.js';
-import { getSegmentLineUserIds } from '@line-crm/db';
+import { getSegmentLineUserIds, getSegmentAudienceBreakdown } from '@line-crm/db';
 import type { Env } from '../index.js';
 
 const broadcasts = new Hono<Env>();
@@ -20,7 +20,7 @@ async function countBroadcastTargets(
   targetTagId?: string | null,
   targetSegmentId?: string | null,
   lineAccountId?: string | null,
-): Promise<number> {
+): Promise<{ count: number; audienceBreakdown?: Awaited<ReturnType<typeof getSegmentAudienceBreakdown>> }> {
   if (targetType === 'all') {
     const sql = lineAccountId
       ? `SELECT COUNT(*) AS count FROM friends
@@ -34,11 +34,11 @@ async function countBroadcastTargets(
            AND length(line_user_id) = 33`;
     const row = await (lineAccountId ? db.prepare(sql).bind(lineAccountId) : db.prepare(sql))
       .first<{ count: number }>();
-    return row?.count ?? 0;
+    return { count: row?.count ?? 0 };
   }
 
   if (targetType === 'tag') {
-    if (!targetTagId) return 0;
+    if (!targetTagId) return { count: 0 };
     const sql = lineAccountId
       ? `SELECT COUNT(DISTINCT f.id) AS count
          FROM friends f
@@ -58,15 +58,16 @@ async function countBroadcastTargets(
     const stmt = db.prepare(sql);
     const row = await (lineAccountId ? stmt.bind(targetTagId, lineAccountId) : stmt.bind(targetTagId))
       .first<{ count: number }>();
-    return row?.count ?? 0;
+    return { count: row?.count ?? 0 };
   }
 
   if (targetType === 'segment') {
-    if (!targetSegmentId) return 0;
-    return (await getSegmentLineUserIds(db, targetSegmentId, lineAccountId)).length;
+    if (!targetSegmentId) return { count: 0 };
+    const audienceBreakdown = await getSegmentAudienceBreakdown(db, targetSegmentId, lineAccountId);
+    return { count: audienceBreakdown.sendableLineUsers, audienceBreakdown };
   }
 
-  return 0;
+  return { count: 0 };
 }
 
 function serializeBroadcast(row: DbBroadcast) {
@@ -331,7 +332,7 @@ broadcasts.get('/api/broadcasts/target-count', async (c) => {
       targetSegmentId,
       lineAccountId,
     );
-    return c.json({ success: true, data: { count } });
+    return c.json({ success: true, data: count });
   } catch (err) {
     console.error('GET /api/broadcasts/target-count error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
