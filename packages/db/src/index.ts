@@ -23,6 +23,7 @@ export * from './tracked-links';
 export * from './forms';
 export * from './ad-platforms';
 export * from './staff';
+export * from './account-access';
 export * from './loyalty';
 export * from './rewards';
 // FERMENT: メールマーケティング拡張

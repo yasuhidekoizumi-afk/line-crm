@@ -11,6 +11,7 @@ import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetTyp
 import { processBroadcastSend, resolveBroadcastLineClient } from '../services/broadcast.js';
 import { getSegmentLineUserIds, getSegmentAudienceBreakdown } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { accessibleLineAccountIds, requireLineAccountAccess } from '../middleware/account-access.js';
 
 const broadcasts = new Hono<Env>();
 
@@ -263,14 +264,19 @@ broadcasts.get('/api/broadcasts', async (c) => {
         : 'archived_at IS NULL';
     let items: DbBroadcast[];
     if (lineAccountId) {
+      const denied = await requireLineAccountAccess(c, lineAccountId);
+      if (denied) return denied;
       const result = await c.env.DB
         .prepare(`SELECT * FROM broadcasts WHERE line_account_id = ? AND ${archivedWhere} ORDER BY created_at DESC`)
         .bind(lineAccountId)
         .all<DbBroadcast>();
       items = result.results;
     } else {
+      const ids = await accessibleLineAccountIds(c);
+      if (!ids.length) return c.json({ success: true, data: [] });
       const result = await c.env.DB
-        .prepare(`SELECT * FROM broadcasts WHERE ${archivedWhere} ORDER BY created_at DESC`)
+        .prepare(`SELECT * FROM broadcasts WHERE line_account_id IN (${ids.map(() => '?').join(',')}) AND ${archivedWhere} ORDER BY created_at DESC`)
+        .bind(...ids)
         .all<DbBroadcast>();
       items = result.results;
     }
@@ -320,6 +326,8 @@ broadcasts.get('/api/broadcasts/target-count', async (c) => {
     const targetTagId = c.req.query('targetTagId') ?? null;
     const targetSegmentId = c.req.query('targetSegmentId') ?? null;
     const lineAccountId = c.req.query('lineAccountId') ?? null;
+    const denied = await requireLineAccountAccess(c, lineAccountId);
+    if (denied) return denied;
 
     if (!targetType || !['all', 'tag', 'segment', 'individual'].includes(targetType)) {
       return c.json({ success: false, error: 'targetType is required' }, 400);
@@ -348,6 +356,8 @@ broadcasts.get('/api/broadcasts/:id', async (c) => {
     if (!broadcast) {
       return c.json({ success: false, error: 'Broadcast not found' }, 404);
     }
+    const denied = await requireLineAccountAccess(c, broadcast.line_account_id);
+    if (denied) return denied;
 
     return c.json({ success: true, data: serializeBroadcast(broadcast) });
   } catch (err) {

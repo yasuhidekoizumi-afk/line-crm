@@ -7,6 +7,9 @@ import {
   deleteStaffMember,
   regenerateStaffApiKey,
   countActiveStaffByRole,
+  getAccessibleLineAccountIds,
+  setStaffLineAccountPermission,
+  removeStaffLineAccountPermission,
 } from '@line-crm/db';
 import type { StaffMember } from '@line-crm/db';
 import { requireRole } from '../middleware/role-guard.js';
@@ -67,6 +70,30 @@ staff.get('/api/staff/me', async (c) => {
     console.error('GET /api/staff/me error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
+});
+
+// GET /api/staff/:id/line-accounts — その担当者に割り当て済みの公式LINE
+staff.get('/api/staff/:id/line-accounts', requireRole('owner', 'admin'), async (c) => {
+  const member = await getStaffById(c.env.DB, c.req.param('id'));
+  if (!member) return c.json({ success: false, error: 'Staff member not found' }, 404);
+  const accountIds = await getAccessibleLineAccountIds(c.env.DB, member.id, member.role);
+  return c.json({ success: true, data: accountIds });
+});
+
+// PUT /api/staff/:id/line-accounts/:accountId — SNS担当者を特定公式LINEだけに割り当てる
+staff.put('/api/staff/:id/line-accounts/:accountId', requireRole('owner', 'admin'), async (c) => {
+  const member = await getStaffById(c.env.DB, c.req.param('id'));
+  if (!member) return c.json({ success: false, error: 'Staff member not found' }, 404);
+  const body = await c.req.json<{ accountRole?: 'account_admin' | 'operator' }>();
+  const accountRole = body.accountRole ?? 'operator';
+  if (!['account_admin', 'operator'].includes(accountRole)) return c.json({ success: false, error: 'invalid accountRole' }, 400);
+  await setStaffLineAccountPermission(c.env.DB, member.id, c.req.param('accountId'), accountRole);
+  return c.json({ success: true, data: { staffId: member.id, lineAccountId: c.req.param('accountId'), accountRole } });
+});
+
+staff.delete('/api/staff/:id/line-accounts/:accountId', requireRole('owner', 'admin'), async (c) => {
+  await removeStaffLineAccountPermission(c.env.DB, c.req.param('id'), c.req.param('accountId'));
+  return c.json({ success: true, data: null });
 });
 
 // GET /api/staff — owner & admin. List all staff with masked API keys.
