@@ -279,8 +279,9 @@ export default function SegmentsPage() {
                         </div>
                       </div>
                       <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
-                        購入者の中には、まだLINEでつながっていない人や、配信に使えない仮の連携情報だけ入っている人がいます。
-                        そのため、LINE連携済み・配信可能の人数は購入者数より少なくなります。
+                        購入者数は、Shopifyで「買ったことがある」人の数です。
+                        その中で、実際にLINEで送れる人だけをまとめたのが「LINE連携済み・配信可能」です。
+                        LINE未連携の人や、配信に使えない仮IDだけの人はここには入りません。
                       </p>
                     </div>
                   )}

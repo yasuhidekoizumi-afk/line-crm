@@ -471,6 +471,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
               {selectedSegment?.audience_breakdown && (
                 <>
                   ここでは専門用語を気にしなくて大丈夫です。配信できるかどうかは自動で判定しています。
+                  購入者数と配信可能数が違うのは、LINE未連携の人や仮IDのままの人がいるためです。
                 </>
               )}
               {selectedAccountId ? ' 選択中のLINEアカウントで絞り込んでいます。' : ''}
