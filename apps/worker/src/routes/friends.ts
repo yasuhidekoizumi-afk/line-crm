@@ -20,6 +20,7 @@ import {
   normalizeLineInsightDate,
 } from '../services/line-official-insights.js';
 import type { Env } from '../index.js';
+import { accessibleLineAccountIds, requireLineAccountAccess } from '../middleware/account-access.js';
 
 const friends = new Hono<Env>();
 
@@ -54,7 +55,15 @@ friends.get('/api/friends', async (c) => {
     const conditions: string[] = [];
     const binds: unknown[] = [];
     if (tagId) { conditions.push('EXISTS (SELECT 1 FROM friend_tags ft WHERE ft.friend_id = f.id AND ft.tag_id = ?)'); binds.push(tagId); }
-    if (lineAccountId) { conditions.push('f.line_account_id = ?'); binds.push(lineAccountId); }
+    if (lineAccountId) {
+      const denied = await requireLineAccountAccess(c, lineAccountId);
+      if (denied) return denied;
+      conditions.push('f.line_account_id = ?'); binds.push(lineAccountId);
+    } else {
+      const allowedIds = await accessibleLineAccountIds(c);
+      if (allowedIds.length === 0) return c.json({ success: true, data: { items: [], total: 0, page: 1, limit, hasNextPage: false } });
+      conditions.push(`f.line_account_id IN (${allowedIds.map(() => '?').join(',')})`); binds.push(...allowedIds);
+    }
     if (search) { conditions.push('(f.display_name LIKE ? OR f.line_user_id = ?)'); binds.push(`%${search}%`, search); }
     const lineUserIdQuery = c.req.query('lineUserId') ?? c.req.query('line_user_id') ?? c.req.query('line_uid');
     if (lineUserIdQuery) { conditions.push('f.line_user_id = ?'); binds.push(lineUserIdQuery); }
@@ -83,9 +92,18 @@ friends.get('/api/friends/count', async (c) => {
     const lineAccountId = c.req.query('lineAccountId');
     let count: number;
     if (lineAccountId) {
+      const denied = await requireLineAccountAccess(c, lineAccountId);
+      if (denied) return denied;
       const row = await c.env.DB.prepare('SELECT COUNT(*) as count FROM friends WHERE is_following = 1 AND line_account_id = ?').bind(lineAccountId).first<{ count: number }>();
       count = row?.count ?? 0;
-    } else { count = await getFriendCount(c.env.DB); }
+    } else {
+      const ids = await accessibleLineAccountIds(c);
+      if (!ids.length) count = 0;
+      else {
+        const row = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM friends WHERE is_following=1 AND line_account_id IN (${ids.map(() => '?').join(',')})`).bind(...ids).first<{ count: number }>();
+        count = row?.count ?? 0;
+      }
+    }
     return c.json({ success: true, data: { count } });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });
@@ -135,6 +153,8 @@ friends.get('/api/friends/:id', async (c) => {
     const db = c.env.DB;
     const [friend, tags] = await Promise.all([getFriendById(db, id), getFriendTags(db, id)]);
     if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
+    const denied = await requireLineAccountAccess(c, (friend as unknown as { line_account_id?: string | null }).line_account_id);
+    if (denied) return denied;
     return c.json({ success: true, data: { ...serializeFriend(friend), tags: tags.map(serializeTag) } });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });

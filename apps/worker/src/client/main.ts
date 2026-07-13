@@ -21,6 +21,7 @@ import { initEmailLink } from './email-link.js';
 import { initEgift } from './egift.js';
 import { initEgiftApply } from './egift-apply.js';
 import { initShop } from './shop.js';
+import { initInfluencerProfile } from './influencer-profile.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -110,7 +111,7 @@ function restoreLiffRedirectParams(): void {
     const decoded = decodeURIComponent(redirectUri);
     const redirectParams = new URLSearchParams(decoded.split('?')[1] || '');
     let changed = false;
-    for (const key of ['page', 'egift_token', 'campaign_id', 'ref', 'redirect']) {
+    for (const key of ['page', 'egift_token', 'campaign_id', 'ref', 'redirect', 'account']) {
       const v = redirectParams.get(key);
       if (v && !params.has(key)) {
         params.set(key, v);
@@ -397,6 +398,8 @@ async function main() {
       await initEgiftApply();
     } else if (page === 'shop') {
       await initShop();
+    } else if (page === 'influencer-profile') {
+      await initInfluencerProfile();
     } else {
       await linkAndAddFlow();
     }

@@ -24,6 +24,7 @@ import { affiliateProgram } from './routes/affiliate-program.js';
 import { egift } from './routes/egift.js';
 import { openapi } from './routes/openapi.js';
 import { liffRoutes } from './routes/liff.js';
+import { influencers } from './routes/influencers.js';
 // Round 3 ルート
 import { webhooks } from './routes/webhooks.js';
 import { calendar } from './routes/calendar.js';
@@ -274,6 +275,7 @@ app.route('/', affiliateProgram);
 app.route('/', egift);
 app.route('/', openapi);
 app.route('/', liffRoutes);
+app.route('/', influencers);
 
 // Round 3
 app.route('/', webhooks);

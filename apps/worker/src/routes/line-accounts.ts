@@ -8,6 +8,7 @@ import {
 } from '@line-crm/db';
 import type { LineAccount as DbLineAccount } from '@line-crm/db';
 import { requireRole } from '../middleware/role-guard.js';
+import { accessibleLineAccountIds, requireLineAccountAccess } from '../middleware/account-access.js';
 import type { Env } from '../index.js';
 
 const lineAccounts = new Hono<Env>();
@@ -50,7 +51,8 @@ async function fetchBotProfile(accessToken: string): Promise<{ displayName?: str
 lineAccounts.get('/api/line-accounts', async (c) => {
   try {
     const db = c.env.DB;
-    const items = await getLineAccounts(db);
+    const allowedIds = await accessibleLineAccountIds(c);
+    const items = (await getLineAccounts(db)).filter((item) => allowedIds.includes(item.id));
 
     // Get stats for all accounts in parallel
     const results = await Promise.all(
@@ -93,6 +95,8 @@ lineAccounts.get('/api/line-accounts', async (c) => {
 // GET /api/line-accounts/:id - get single (secrets only for owner/admin)
 lineAccounts.get('/api/line-accounts/:id', async (c) => {
   try {
+    const denied = await requireLineAccountAccess(c, c.req.param('id'));
+    if (denied) return denied;
     const account = await getLineAccountById(c.env.DB, c.req.param('id'));
     if (!account) {
       return c.json({ success: false, error: 'LINE account not found' }, 404);
@@ -179,6 +183,13 @@ lineAccounts.delete('/api/line-accounts/:id', requireRole('owner', 'admin'), asy
 lineAccounts.get('/api/line/quota', async (c) => {
   try {
     const accountId = c.req.query('accountId');
+    if (accountId) {
+      const denied = await requireLineAccountAccess(c, accountId);
+      if (denied) return denied;
+    } else {
+      const ids = await accessibleLineAccountIds(c);
+      if (ids.length !== 1) return c.json({ success: false, error: 'accountIdを指定してください' }, 400);
+    }
     const row = accountId
       ? await c.env.DB.prepare('SELECT channel_access_token FROM line_accounts WHERE id = ? LIMIT 1').bind(accountId).first<{ channel_access_token: string }>()
       : await c.env.DB.prepare('SELECT channel_access_token FROM line_accounts WHERE is_active = 1 ORDER BY created_at ASC LIMIT 1').first<{ channel_access_token: string }>();
