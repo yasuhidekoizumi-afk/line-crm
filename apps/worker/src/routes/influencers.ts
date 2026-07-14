@@ -16,6 +16,14 @@ type AddressInput = {
   recipientName?: string | null; postalCode?: string | null; prefecture?: string | null;
   addressLine1?: string | null; addressLine2?: string | null; phone?: string | null;
 };
+type GiftingLogInput = {
+  friendId?: string; productName?: string; productPageUrl?: string | null;
+  status?: string; requestedAt?: string | null; shippedAt?: string | null;
+  postPublishedAt?: string | null; postType?: string | null; postUrl?: string | null;
+  reach?: number | null; impressions?: number | null; likes?: number | null;
+  comments?: number | null; saves?: number | null; effectNotes?: string | null;
+};
+const GIFTING_STATUSES = new Set(['requested', 'accepted', 'shipped', 'posted', 'declined', 'cancelled']);
 
 function cleanText(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;
@@ -25,6 +33,13 @@ function cleanText(value: unknown, max: number): string | null {
 function cleanList(value: unknown, maxItems = 10): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim().slice(0, 60)).filter(Boolean).slice(0, maxItems);
+}
+function cleanDate(value: unknown): string | null {
+  const date = cleanText(value, 10);
+  return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+}
+function cleanCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 function isValidShippingAddress(address: AddressInput | undefined): boolean {
   if (!address) return false;
@@ -126,6 +141,37 @@ async function profileRow(db: D1Database, friendId: string) {
     LEFT JOIN influencer_shipping_addresses a ON a.friend_id=f.id WHERE f.id=?`).bind(friendId).first<Record<string, unknown>>();
 }
 
+function serializeGiftingLog(row: Record<string, unknown>) {
+  return {
+    id: row.id, friendId: row.friend_id, lineAccountId: row.line_account_id,
+    creatorName: row.display_name, instagramHandle: row.instagram_handle,
+    productName: row.product_name, productPageUrl: row.product_page_url, status: row.status,
+    requestedAt: row.requested_at, shippedAt: row.shipped_at, postPublishedAt: row.post_published_at,
+    postType: row.post_type, postUrl: row.post_url, reach: row.reach, impressions: row.impressions,
+    likes: row.likes, comments: row.comments, saves: row.saves, effectNotes: row.effect_notes,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  };
+}
+
+async function giftingLogRow(db: D1Database, id: string) {
+  return db.prepare(`SELECT g.*, f.display_name, p.instagram_handle
+    FROM influencer_gifting_logs g
+    INNER JOIN friends f ON f.id = g.friend_id
+    LEFT JOIN influencer_profiles p ON p.friend_id = g.friend_id
+    WHERE g.id=?`).bind(id).first<Record<string, unknown>>();
+}
+
+function giftingLogValues(input: GiftingLogInput) {
+  const status = typeof input.status === 'string' && GIFTING_STATUSES.has(input.status) ? input.status : 'requested';
+  return {
+    productName: cleanText(input.productName, 160), productPageUrl: cleanText(input.productPageUrl, 1000), status,
+    requestedAt: cleanDate(input.requestedAt), shippedAt: cleanDate(input.shippedAt), postPublishedAt: cleanDate(input.postPublishedAt),
+    postType: cleanText(input.postType, 40), postUrl: cleanText(input.postUrl, 1000),
+    reach: cleanCount(input.reach), impressions: cleanCount(input.impressions), likes: cleanCount(input.likes),
+    comments: cleanCount(input.comments), saves: cleanCount(input.saves), effectNotes: cleanText(input.effectNotes, 2000),
+  };
+}
+
 // LIFF: 本人だけが自分のプロフィールを取得・更新する。アカウント指定で別公式LINEとの混線を防ぐ。
 influencers.post('/api/liff/influencer-profile', async (c) => {
   const body = await c.req.json<{ accessToken?: string; idToken?: string; lineAccountId?: string }>();
@@ -210,6 +256,57 @@ influencers.patch('/api/influencers/:friendId', async (c) => {
   await upsertProfile(c.env.DB, c.req.param('friendId'), body.profile ?? {}, body.address);
   const updated = await profileRow(c.env.DB, c.req.param('friendId'));
   return c.json({ success: true, data: serialize(updated!) });
+});
+
+// ギフティング案件の台帳。商品ページ、送付日、投稿URLと手入力の効果指標を案件単位で保存する。
+influencers.get('/api/influencer-gifting', async (c) => {
+  const lineAccountId = c.req.query('lineAccountId');
+  const denied = await requireLineAccountAccess(c, lineAccountId);
+  if (denied) return denied;
+  const result = await c.env.DB.prepare(`SELECT g.*, f.display_name, p.instagram_handle
+    FROM influencer_gifting_logs g
+    INNER JOIN friends f ON f.id = g.friend_id
+    LEFT JOIN influencer_profiles p ON p.friend_id = g.friend_id
+    WHERE g.line_account_id=? ORDER BY COALESCE(g.post_published_at, g.shipped_at, g.requested_at, g.created_at) DESC LIMIT 500`)
+    .bind(lineAccountId!).all<Record<string, unknown>>();
+  return c.json({ success: true, data: result.results.map(serializeGiftingLog) });
+});
+
+influencers.post('/api/influencer-gifting', async (c) => {
+  const body = await c.req.json<GiftingLogInput & { lineAccountId?: string }>();
+  const denied = await requireLineAccountAccess(c, body.lineAccountId, true);
+  if (denied) return denied;
+  if (!body.friendId || !cleanText(body.productName, 160)) return c.json({ success: false, error: 'クリエイターと商品名は必須です' }, 400);
+  const friend = await c.env.DB.prepare('SELECT id FROM friends WHERE id=? AND line_account_id=?').bind(body.friendId, body.lineAccountId).first();
+  if (!friend) return c.json({ success: false, error: '選択中のLINEアカウントのクリエイターではありません' }, 400);
+  const values = giftingLogValues(body);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(`INSERT INTO influencer_gifting_logs (
+    id, friend_id, line_account_id, product_name, product_page_url, status, requested_at, shipped_at, post_published_at,
+    post_type, post_url, reach, impressions, likes, comments, saves, effect_notes, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, body.friendId, body.lineAccountId, values.productName, values.productPageUrl, values.status, values.requestedAt,
+      values.shippedAt, values.postPublishedAt, values.postType, values.postUrl, values.reach, values.impressions,
+      values.likes, values.comments, values.saves, values.effectNotes, now, now).run();
+  return c.json({ success: true, data: serializeGiftingLog((await giftingLogRow(c.env.DB, id))!) }, 201);
+});
+
+influencers.patch('/api/influencer-gifting/:id', async (c) => {
+  const existing = await giftingLogRow(c.env.DB, c.req.param('id'));
+  if (!existing) return c.json({ success: false, error: 'ギフティング履歴が見つかりません' }, 404);
+  const denied = await requireLineAccountAccess(c, existing.line_account_id as string, true);
+  if (denied) return denied;
+  const body = await c.req.json<GiftingLogInput>();
+  const values = giftingLogValues({ ...existing, ...body });
+  if (!values.productName) return c.json({ success: false, error: '商品名は必須です' }, 400);
+  await c.env.DB.prepare(`UPDATE influencer_gifting_logs SET
+    product_name=?, product_page_url=?, status=?, requested_at=?, shipped_at=?, post_published_at=?, post_type=?, post_url=?,
+    reach=?, impressions=?, likes=?, comments=?, saves=?, effect_notes=?, updated_at=? WHERE id=?`)
+    .bind(values.productName, values.productPageUrl, values.status, values.requestedAt, values.shippedAt, values.postPublishedAt,
+      values.postType, values.postUrl, values.reach, values.impressions, values.likes, values.comments, values.saves,
+      values.effectNotes, new Date().toISOString(), c.req.param('id')).run();
+  return c.json({ success: true, data: serializeGiftingLog((await giftingLogRow(c.env.DB, c.req.param('id')))!) });
 });
 
 export { influencers };
