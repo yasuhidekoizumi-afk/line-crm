@@ -50,7 +50,7 @@ function render(data?: Record<string, unknown>) {
     event.preventDefault(); const fd = new FormData(form); const message = document.querySelector('#message')!;
     const profileInput = { instagramHandle: fd.get('instagramHandle'), categories: fd.getAll('categories'), followerBand: fd.get('followerBand'), contactEmail: fd.get('contactEmail'), contactPhone: fd.get('contactPhone'), ageGroup: fd.get('ageGroup'), gender: fd.get('gender'), giftingInterests: fd.getAll('giftingInterests'), dietaryNotes: fd.get('dietaryNotes'), hasShopifyPurchase: fd.get('hasShopifyPurchase') === 'on', privacyConsent: fd.get('privacyConsent') === 'on' };
     const address = { recipientName: fd.get('recipientName'), postalCode: fd.get('postalCode'), prefecture: fd.get('prefecture'), addressLine1: fd.get('addressLine1'), addressLine2: fd.get('addressLine2'), phone: fd.get('addressPhone') };
-    try { await request('PUT', { profile: profileInput, address }); message.textContent = '保存しました。ありがとうございます。'; if (liff.isInClient()) setTimeout(() => liff.closeWindow(), 1200); } catch (error) { message.textContent = error instanceof Error ? error.message : '保存できませんでした'; }
+    try { await request('PUT', { profile: profileInput, address }); message.textContent = '保存しました。LINEのトーク画面へ戻ります。'; setTimeout(() => { try { liff.closeWindow(); } catch {} }, 900); } catch (error) { message.textContent = error instanceof Error ? error.message : '保存できませんでした'; }
   });
   const postalCode = form.elements.namedItem('postalCode') as HTMLInputElement;
   postalCode.addEventListener('input', () => {
@@ -62,4 +62,29 @@ function render(data?: Record<string, unknown>) {
 export async function initInfluencerProfile() {
   if (!accountId()) { app().textContent = 'リンクが正しくありません。'; return; }
   try { render(await request('POST', {})); } catch (error) { app().textContent = error instanceof Error ? error.message : 'プロフィールを開けませんでした'; }
+}
+
+async function shippingRequest(method: 'POST' | 'PUT', body: Record<string, unknown>) {
+  const res = await fetch('/api/liff/influencer-shipping-address', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, accessToken: liff.getAccessToken(), idToken: liff.getIDToken(), lineAccountId: accountId() }) });
+  const json = await res.json() as { success: boolean; data?: Record<string, unknown>; error?: string };
+  if (!res.ok || !json.success) throw new Error(json.error || '保存に失敗しました');
+  return json.data;
+}
+
+/** 既存登録者が配送先だけを更新するための専用画面。 */
+export async function initInfluencerShippingAddress() {
+  if (!accountId()) { app().textContent = 'リンクが正しくありません。'; return; }
+  try {
+    const data = await shippingRequest('POST', {});
+    const address = (data?.address as Record<string, string> | null) || {};
+    app().innerHTML = `<main style="max-width:640px;margin:0 auto;padding:24px 18px 44px;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;color:#222"><p style="font-size:12px;letter-spacing:.12em;color:#4d7c5a;font-weight:700">ORYZAE CREATOR</p><h1 style="font-size:25px;margin:8px 0">配送先の変更</h1><p style="line-height:1.65;color:#555;margin-bottom:24px">住所や電話番号が変わった際は、こちらからいつでも更新できます。</p><form id="shipping-form"><label>お名前 <b style="color:#c33">*</b><input required name="recipientName" autocomplete="name" value="${esc(address.recipientName)}"></label><label>郵便番号 <b style="color:#c33">*</b><input required name="postalCode" inputmode="numeric" pattern="[0-9]{3}-[0-9]{4}" placeholder="123-4567（ハイフンあり）" value="${esc(address.postalCode)}"></label><label>都道府県 <b style="color:#c33">*</b><input required name="prefecture" autocomplete="address-level1" placeholder="例：神奈川県" value="${esc(address.prefecture)}"></label><label>市区町村・町名・番地 <b style="color:#c33">*</b><input required name="addressLine1" autocomplete="address-line1" placeholder="例：川崎市高津区下作延7-27-9" value="${esc(address.addressLine1)}"></label><label>建物名・部屋番号 <span>（任意）</span><input name="addressLine2" autocomplete="address-line2" value="${esc(address.addressLine2)}"></label><label>配送先電話番号 <b style="color:#c33">*</b><input required type="tel" name="addressPhone" autocomplete="tel" value="${esc(address.phone)}"></label><button>配送先を更新する</button><p id="message" role="status"></p></form></main><style>label{display:block;font-size:14px;font-weight:650;margin:18px 0 7px}input{display:block;width:100%;box-sizing:border-box;margin-top:7px;border:1px solid #d4d4d4;border-radius:9px;padding:12px;font:inherit;background:#fff}span{font-size:12px;color:#666;font-weight:500}button{width:100%;margin-top:26px;background:#215732;color:#fff;border:0;border-radius:10px;padding:15px;font:inherit;font-weight:700}#message{color:#126b35;font-weight:700}</style>`;
+    const form = document.querySelector<HTMLFormElement>('#shipping-form')!;
+    const postalCode = form.elements.namedItem('postalCode') as HTMLInputElement;
+    postalCode.addEventListener('input', () => { const digits = postalCode.value.replace(/\D/g, '').slice(0, 7); postalCode.value = digits.length > 3 ? `${digits.slice(0, 3)}-${digits.slice(3)}` : digits; });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault(); const fd = new FormData(form); const message = document.querySelector('#message')!;
+      const addressInput = { recipientName: fd.get('recipientName'), postalCode: fd.get('postalCode'), prefecture: fd.get('prefecture'), addressLine1: fd.get('addressLine1'), addressLine2: fd.get('addressLine2'), phone: fd.get('addressPhone') };
+      try { await shippingRequest('PUT', { address: addressInput }); message.textContent = '更新しました。LINEのトーク画面へ戻ります。'; setTimeout(() => { try { liff.closeWindow(); } catch {} }, 900); } catch (error) { message.textContent = error instanceof Error ? error.message : '更新できませんでした'; }
+    });
+  } catch (error) { app().textContent = error instanceof Error ? error.message : '配送先を開けませんでした'; }
 }

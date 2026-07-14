@@ -103,15 +103,18 @@ async function upsertProfile(db: D1Database, friendId: string, profile: ProfileI
       cleanText(profile.contactEmail, 254), cleanText(profile.contactPhone, 30), cleanText(profile.ageGroup, 30), cleanText(profile.gender, 30),
       JSON.stringify(cleanList(profile.giftingInterests)), cleanText(profile.dietaryNotes, 1000), profile.hasShopifyPurchase ? 1 : 0,
       profile.privacyConsent ? now : null, now, now).run();
-  if (address) {
-    await db.prepare(`INSERT INTO influencer_shipping_addresses (friend_id, recipient_name, postal_code, prefecture, address_line1, address_line2, phone, confirmed_at, updated_at)
+  if (address) await upsertShippingAddress(db, friendId, address);
+}
+
+async function upsertShippingAddress(db: D1Database, friendId: string, address: AddressInput) {
+  const now = new Date().toISOString();
+  await db.prepare(`INSERT INTO influencer_shipping_addresses (friend_id, recipient_name, postal_code, prefecture, address_line1, address_line2, phone, confirmed_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(friend_id) DO UPDATE SET recipient_name=excluded.recipient_name, postal_code=excluded.postal_code,
       prefecture=excluded.prefecture, address_line1=excluded.address_line1, address_line2=excluded.address_line2,
       phone=excluded.phone, confirmed_at=excluded.confirmed_at, updated_at=excluded.updated_at`)
-      .bind(friendId, cleanText(address.recipientName, 100), cleanText(address.postalCode, 20), cleanText(address.prefecture, 30),
-        cleanText(address.addressLine1, 200), cleanText(address.addressLine2, 200), cleanText(address.phone, 30), now, now).run();
-  }
+    .bind(friendId, cleanText(address.recipientName, 100), cleanText(address.postalCode, 20), cleanText(address.prefecture, 30),
+      cleanText(address.addressLine1, 200), cleanText(address.addressLine2, 200), cleanText(address.phone, 30), now, now).run();
 }
 
 async function profileRow(db: D1Database, friendId: string) {
@@ -154,6 +157,32 @@ influencers.put('/api/liff/influencer-profile', async (c) => {
     return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403);
   }
   await upsertProfile(c.env.DB, friend.id, body.profile, body.address);
+  return c.json({ success: true, data: serialize((await profileRow(c.env.DB, friend.id))!) });
+});
+
+// 配送先だけをいつでも変更できる専用画面。プロフィール本体は変更しない。
+influencers.post('/api/liff/influencer-shipping-address', async (c) => {
+  const body = await c.req.json<{ accessToken?: string; idToken?: string; lineAccountId?: string }>();
+  if (!body.lineAccountId) return c.json({ success: false, error: 'lineAccountId is required' }, 400);
+  const verified = await verifyLineUserFromToken(c.env, body);
+  if (!verified.ok) return c.json({ success: false, error: verified.error }, verified.status);
+  const lineAccountId = await resolveLineAccountId(c.env.DB, body.lineAccountId);
+  if (!lineAccountId) return c.json({ success: false, error: 'LINE公式アカウントが見つかりません' }, 404);
+  const friend = await findFriendForAccount(c.env.DB, verified.lineUserId, lineAccountId);
+  if (!friend) return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403);
+  return c.json({ success: true, data: serialize((await profileRow(c.env.DB, friend.id))!) });
+});
+
+influencers.put('/api/liff/influencer-shipping-address', async (c) => {
+  const body = await c.req.json<{ accessToken?: string; idToken?: string; lineAccountId?: string; address?: AddressInput }>();
+  if (!body.lineAccountId || !isValidShippingAddress(body.address)) return c.json({ success: false, error: '発送先の必須項目を入力し、郵便番号は123-4567形式で入力してください' }, 400);
+  const verified = await verifyLineUserFromToken(c.env, body);
+  if (!verified.ok) return c.json({ success: false, error: verified.error }, verified.status);
+  const lineAccountId = await resolveLineAccountId(c.env.DB, body.lineAccountId);
+  if (!lineAccountId) return c.json({ success: false, error: 'LINE公式アカウントが見つかりません' }, 404);
+  const friend = await findFriendForAccount(c.env.DB, verified.lineUserId, lineAccountId);
+  if (!friend) return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403);
+  await upsertShippingAddress(c.env.DB, friend.id, body.address!);
   return c.json({ success: true, data: serialize((await profileRow(c.env.DB, friend.id))!) });
 });
 
