@@ -55,6 +55,32 @@ async function resolveLineAccountId(db: D1Database, accountReference: string): P
   return byChannelId?.id ?? null;
 }
 
+/** 個人を再識別できない短縮ハッシュで、LIFFとWebhookの照合失敗だけを診断する。 */
+async function identityFingerprint(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].slice(0, 8).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function recordIdentityMismatch(
+  db: D1Database,
+  accountReference: string,
+  lineAccountId: string,
+  lineUserId: string,
+): Promise<void> {
+  const known = await db.prepare('SELECT line_account_id FROM friends WHERE line_user_id=? LIMIT 1')
+    .bind(lineUserId).first<{ line_account_id: string | null }>();
+  const target = await db.prepare('SELECT COUNT(*) AS count FROM friends WHERE line_account_id=? AND is_following=1')
+    .bind(lineAccountId).first<{ count: number }>();
+  await db.prepare(`INSERT INTO influencer_liff_diagnostics (
+      id, line_account_id, account_reference, liff_user_fingerprint,
+      liff_user_known_account_id, target_friend_count, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(
+      crypto.randomUUID(), lineAccountId, accountReference, await identityFingerprint(lineUserId),
+      known?.line_account_id ?? null, target?.count ?? 0, new Date().toISOString(),
+    ).run();
+}
+
 async function upsertProfile(db: D1Database, friendId: string, profile: ProfileInput, address?: AddressInput) {
   const now = new Date().toISOString();
   await db.prepare(`INSERT INTO influencer_profiles (
@@ -98,7 +124,10 @@ influencers.post('/api/liff/influencer-profile', async (c) => {
   const lineAccountId = await resolveLineAccountId(c.env.DB, body.lineAccountId);
   if (!lineAccountId) return c.json({ success: false, error: 'LINE公式アカウントが見つかりません' }, 404);
   const friend = await findFriendForAccount(c.env.DB, verified.lineUserId, lineAccountId);
-  if (!friend) return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403);
+  if (!friend) {
+    await recordIdentityMismatch(c.env.DB, body.lineAccountId, lineAccountId, verified.lineUserId);
+    return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403);
+  }
   const row = await profileRow(c.env.DB, friend.id);
   return c.json({ success: true, data: row ? serialize(row) : null });
 });
@@ -111,7 +140,10 @@ influencers.put('/api/liff/influencer-profile', async (c) => {
   const lineAccountId = await resolveLineAccountId(c.env.DB, body.lineAccountId);
   if (!lineAccountId) return c.json({ success: false, error: 'LINE公式アカウントが見つかりません' }, 404);
   const friend = await findFriendForAccount(c.env.DB, verified.lineUserId, lineAccountId);
-  if (!friend) return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403);
+  if (!friend) {
+    await recordIdentityMismatch(c.env.DB, body.lineAccountId, lineAccountId, verified.lineUserId);
+    return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403);
+  }
   await upsertProfile(c.env.DB, friend.id, body.profile, body.address);
   return c.json({ success: true, data: serialize((await profileRow(c.env.DB, friend.id))!) });
 });
