@@ -1071,6 +1071,70 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId/history', async (c) => {
   }
 });
 
+// POST /api/loyalty/shopify/:shopifyCustomerId/profile-email — メールアドレス更新
+loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-email', async (c) => {
+  try {
+    const sigErr = await checkCustomerSig(c, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
+
+    const shopifyCustomerId = c.req.param('shopifyCustomerId');
+    const body = await c.req.json<{ email?: string }>().catch(() => ({}));
+    const email = String(body.email ?? '').trim().toLowerCase();
+
+    if (!email) {
+      return c.json({ success: false, error: 'メールアドレスを入力してください' }, 400);
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return c.json({ success: false, error: '正しいメールアドレスを入力してください' }, 400);
+    }
+
+    const adminToken = await getShopifyAdminToken(c.env);
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+
+    if (!adminToken) {
+      return c.json({ success: false, error: 'Shopify API token not configured' }, 500);
+    }
+
+    const updateResp = await fetch(
+      `https://${shopDomain}/admin/api/2026-04/customers/${shopifyCustomerId}.json`,
+      {
+        method: 'PUT',
+        headers: {
+          'X-Shopify-Access-Token': adminToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customer: {
+            id: shopifyCustomerId,
+            email,
+          },
+        }),
+      },
+    );
+
+    if (!updateResp.ok) {
+      const errorText = await updateResp.text();
+      console.error('profile-email update failed:', updateResp.status, errorText);
+      return c.json({ success: false, error: 'メールアドレスを更新できませんでした' }, 400);
+    }
+
+    await c.env.DB
+      .prepare(
+        `UPDATE customer_links
+            SET email = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%f','now','+9 hours')
+          WHERE shopify_customer_id = ?`,
+      )
+      .bind(email, shopifyCustomerId)
+      .run();
+
+    return c.json({ success: true, data: { email } });
+  } catch (e) {
+    console.error('profile-email error:', e);
+    return c.json({ success: false, error: 'メールアドレス更新中にエラーが発生しました' }, 500);
+  }
+});
+
 // POST /api/loyalty/shopify/:shopifyCustomerId/profile-birthday — 誕生日登録 + 100pt付与
 loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (c) => {
   try {
