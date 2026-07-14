@@ -32,12 +32,22 @@ const MARKETING_MENU_HREFS = new Set([
   '/email/settings', '/email/logs',
 ])
 
+// ギフティング専用アカウントは、担当者が日々使う3機能だけを表示する。
+// ページや既存データは削除せず、ほかのLINEアカウントを選んだ際は従来どおり利用できる。
+const GIFTING_MENU_HREFS = new Set(['/influencers', '/chats', '/broadcasts'])
+
 function filterMenuByRole(sections: typeof menuSections, role: RoleMode) {
   if (role === 'admin') return sections
   const allowed = role === 'cs' ? CS_MENU_HREFS : MARKETING_MENU_HREFS
   return sections
     .map((s) => ({ ...s, items: s.items.filter((i) => allowed.has(i.href)) }))
     .filter((s) => s.items.length > 0)
+}
+
+function filterMenuForGifting(sections: typeof menuSections) {
+  return sections
+    .map((section) => ({ ...section, items: section.items.filter((item) => GIFTING_MENU_HREFS.has(item.href)) }))
+    .filter((section) => section.items.length > 0)
 }
 
 // ─── メニュー定義 ───
@@ -230,6 +240,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const { selectedAccount } = useAccount()
   const [isOpen, setIsOpen] = useState(false)
   const [staffName, setStaffName] = useState<string | null>(null)
   const [staffRole, setStaffRole] = useState<string | null>(null)
@@ -283,11 +294,12 @@ export default function Sidebar() {
   const isActive = (href: string) => href === '/' ? pathname === '/' : pathname.startsWith(href)
 
   const q = searchQuery.toLowerCase().trim()
+  const isGiftingWorkspace = /ギフティング|gifting/i.test(`${selectedAccount?.displayName || ''} ${selectedAccount?.name || ''}`)
   const displayedSections = useMemo(() => {
-    const roleFiltered = filterMenuByRole(menuSections, roleMode)
-    if (!q) return roleFiltered
-    return roleFiltered.map((s) => ({ ...s, items: s.items.filter((i) => i.label.toLowerCase().includes(q) || i.href.toLowerCase().includes(q)) })).filter((s) => s.items.length > 0)
-  }, [q, roleMode])
+    const filtered = isGiftingWorkspace ? filterMenuForGifting(menuSections) : filterMenuByRole(menuSections, roleMode)
+    if (!q) return filtered
+    return filtered.map((s) => ({ ...s, items: s.items.filter((i) => i.label.toLowerCase().includes(q) || i.href.toLowerCase().includes(q)) })).filter((s) => s.items.length > 0)
+  }, [isGiftingWorkspace, q, roleMode])
 
   const sidebarContent = (
     <>
@@ -298,8 +310,8 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* ─── ロールモード切替 ─── */}
-      <div className="px-3 pt-3 pb-1 border-b border-gray-200">
+      {/* ─── ロールモード切替（ギフティング専用画面では表示しない） ─── */}
+      {!isGiftingWorkspace && <div className="px-3 pt-3 pb-1 border-b border-gray-200">
         <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
           {(['cs', 'marketing', 'admin'] as RoleMode[]).map((mode) => (
             <button key={mode} onClick={() => setRoleMode(mode)}
@@ -310,7 +322,7 @@ export default function Sidebar() {
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       <AccountSwitcher />
       <div className="px-3 pt-3">
@@ -320,7 +332,7 @@ export default function Sidebar() {
             className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-gray-50 focus:bg-white focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-200 transition-colors" aria-label="メニューを検索" />
           {searchQuery && <button onClick={() => { setSearchQuery(''); searchRef.current?.focus() }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" aria-label="検索をクリア"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>}
         </div>
-        <p className="text-[10px] text-gray-400 mt-1 px-1">{ROLE_LABELS[roleMode]}</p>
+        <p className="text-[10px] text-gray-400 mt-1 px-1">{isGiftingWorkspace ? 'ギフティング運用' : ROLE_LABELS[roleMode]}</p>
       </div>
       <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
         {displayedSections.map((section, si) => (
