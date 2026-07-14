@@ -10,7 +10,7 @@ type ProfileInput = {
   instagramHandle?: string | null; categories?: string[]; followerBand?: string | null;
   contactEmail?: string | null; contactPhone?: string | null; ageGroup?: string | null;
   gender?: string | null; giftingInterests?: string[]; dietaryNotes?: string | null;
-  privacyConsent?: boolean;
+  hasShopifyPurchase?: boolean; privacyConsent?: boolean;
 };
 type AddressInput = {
   recipientName?: string | null; postalCode?: string | null; prefecture?: string | null;
@@ -26,6 +26,12 @@ function cleanList(value: unknown, maxItems = 10): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim().slice(0, 60)).filter(Boolean).slice(0, maxItems);
 }
+function isValidShippingAddress(address: AddressInput | undefined): boolean {
+  if (!address) return false;
+  const required = [address.recipientName, address.prefecture, address.addressLine1, address.phone];
+  return required.every((value) => Boolean(cleanText(value, 200)))
+    && /^\d{3}-\d{4}$/.test(cleanText(address.postalCode, 8) ?? '');
+}
 function serialize(row: Record<string, unknown>) {
   return {
     friendId: row.friend_id, displayName: row.display_name, pictureUrl: row.picture_url,
@@ -33,7 +39,7 @@ function serialize(row: Record<string, unknown>) {
     instagramHandle: row.instagram_handle, categories: JSON.parse((row.categories_json as string) || '[]'),
     followerBand: row.follower_band, contactEmail: row.contact_email, contactPhone: row.contact_phone,
     ageGroup: row.age_group, gender: row.gender, giftingInterests: JSON.parse((row.gifting_interests_json as string) || '[]'),
-    dietaryNotes: row.dietary_notes, privacyConsentAt: row.privacy_consent_at,
+    dietaryNotes: row.dietary_notes, hasShopifyPurchase: Boolean(row.has_shopify_purchase), privacyConsentAt: row.privacy_consent_at,
     profileCompletedAt: row.profile_completed_at, updatedAt: row.profile_updated_at,
     address: row.recipient_name ? { recipientName: row.recipient_name, postalCode: row.postal_code, prefecture: row.prefecture, addressLine1: row.address_line1, addressLine2: row.address_line2, phone: row.address_phone, confirmedAt: row.confirmed_at } : null,
   };
@@ -85,16 +91,18 @@ async function upsertProfile(db: D1Database, friendId: string, profile: ProfileI
   const now = new Date().toISOString();
   await db.prepare(`INSERT INTO influencer_profiles (
       friend_id, instagram_handle, categories_json, follower_band, contact_email, contact_phone, age_group, gender,
-      gifting_interests_json, dietary_notes, privacy_consent_at, profile_completed_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      gifting_interests_json, dietary_notes, has_shopify_purchase, privacy_consent_at, profile_completed_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(friend_id) DO UPDATE SET instagram_handle=excluded.instagram_handle, categories_json=excluded.categories_json,
       follower_band=excluded.follower_band, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
       age_group=excluded.age_group, gender=excluded.gender, gifting_interests_json=excluded.gifting_interests_json,
-      dietary_notes=excluded.dietary_notes, privacy_consent_at=COALESCE(influencer_profiles.privacy_consent_at, excluded.privacy_consent_at),
+      dietary_notes=excluded.dietary_notes, has_shopify_purchase=excluded.has_shopify_purchase,
+      privacy_consent_at=COALESCE(influencer_profiles.privacy_consent_at, excluded.privacy_consent_at),
       profile_completed_at=excluded.profile_completed_at, updated_at=excluded.updated_at`)
     .bind(friendId, cleanText(profile.instagramHandle, 80), JSON.stringify(cleanList(profile.categories)), cleanText(profile.followerBand, 40),
       cleanText(profile.contactEmail, 254), cleanText(profile.contactPhone, 30), cleanText(profile.ageGroup, 30), cleanText(profile.gender, 30),
-      JSON.stringify(cleanList(profile.giftingInterests)), cleanText(profile.dietaryNotes, 1000), profile.privacyConsent ? now : null, now, now).run();
+      JSON.stringify(cleanList(profile.giftingInterests)), cleanText(profile.dietaryNotes, 1000), profile.hasShopifyPurchase ? 1 : 0,
+      profile.privacyConsent ? now : null, now, now).run();
   if (address) {
     await db.prepare(`INSERT INTO influencer_shipping_addresses (friend_id, recipient_name, postal_code, prefecture, address_line1, address_line2, phone, confirmed_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -109,7 +117,7 @@ async function upsertProfile(db: D1Database, friendId: string, profile: ProfileI
 async function profileRow(db: D1Database, friendId: string) {
   return db.prepare(`SELECT f.id AS friend_id, f.display_name, f.picture_url, f.line_account_id, f.is_following,
       p.instagram_handle, p.categories_json, p.follower_band, p.contact_email, p.contact_phone, p.age_group, p.gender,
-      p.gifting_interests_json, p.dietary_notes, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
+      p.gifting_interests_json, p.dietary_notes, p.has_shopify_purchase, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
       a.recipient_name, a.postal_code, a.prefecture, a.address_line1, a.address_line2, a.phone AS address_phone, a.confirmed_at
     FROM friends f LEFT JOIN influencer_profiles p ON p.friend_id=f.id
     LEFT JOIN influencer_shipping_addresses a ON a.friend_id=f.id WHERE f.id=?`).bind(friendId).first<Record<string, unknown>>();
@@ -135,6 +143,7 @@ influencers.post('/api/liff/influencer-profile', async (c) => {
 influencers.put('/api/liff/influencer-profile', async (c) => {
   const body = await c.req.json<{ accessToken?: string; idToken?: string; lineAccountId?: string; profile?: ProfileInput; address?: AddressInput }>();
   if (!body.lineAccountId || !body.profile?.privacyConsent) return c.json({ success: false, error: '同意とlineAccountIdは必須です' }, 400);
+  if (!isValidShippingAddress(body.address)) return c.json({ success: false, error: '発送先の必須項目を入力し、郵便番号は123-4567形式で入力してください' }, 400);
   const verified = await verifyLineUserFromToken(c.env, body);
   if (!verified.ok) return c.json({ success: false, error: verified.error }, verified.status);
   const lineAccountId = await resolveLineAccountId(c.env.DB, body.lineAccountId);
@@ -155,7 +164,7 @@ influencers.get('/api/influencers', async (c) => {
   const q = cleanText(c.req.query('q'), 100);
   const result = await c.env.DB.prepare(`SELECT f.id AS friend_id, f.display_name, f.picture_url, f.line_account_id, f.is_following,
       p.instagram_handle, p.categories_json, p.follower_band, p.contact_email, p.contact_phone, p.age_group, p.gender,
-      p.gifting_interests_json, p.dietary_notes, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
+      p.gifting_interests_json, p.dietary_notes, p.has_shopify_purchase, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
       a.recipient_name, a.postal_code, a.prefecture, a.address_line1, a.address_line2, a.phone AS address_phone, a.confirmed_at
     FROM friends f INNER JOIN influencer_profiles p ON p.friend_id=f.id
     LEFT JOIN influencer_shipping_addresses a ON a.friend_id=f.id
