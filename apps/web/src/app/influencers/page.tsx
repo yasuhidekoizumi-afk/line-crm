@@ -4,7 +4,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAccount } from '@/contexts/account-context'
 import { fetchApi } from '@/lib/api'
 
-type Influencer = { friendId: string; displayName: string | null; instagramHandle: string | null; categories: string[]; followerBand: string | null; contactEmail: string | null; contactPhone: string | null; profileCompletedAt: string | null; address: { prefecture: string | null } | null }
+type Address = { recipientName: string | null; postalCode: string | null; prefecture: string | null; addressLine1: string | null; addressLine2: string | null; phone: string | null; confirmedAt: string | null }
+type Influencer = {
+  friendId: string; displayName: string | null; instagramHandle: string | null; categories: string[]; followerBand: string | null
+  contactEmail: string | null; contactPhone: string | null; ageGroup: string | null; gender: string | null
+  giftingInterests: string[]; dietaryNotes: string | null; hasShopifyPurchase: boolean; profileCompletedAt: string | null; address: Address | null
+}
+
+function Field({ label, value }: { label: string; value: string | null | undefined }) {
+  return <div><dt className="text-xs font-medium tracking-wide text-slate-500">{label}</dt><dd className="mt-1 break-words text-sm font-medium text-slate-900">{value || '—'}</dd></div>
+}
 
 export default function InfluencersPage() {
   const { selectedAccountId, selectedAccount, loading: accountsLoading } = useAccount()
@@ -12,11 +21,16 @@ export default function InfluencersPage() {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selected, setSelected] = useState<Influencer | null>(null)
   useEffect(() => {
     if (!selectedAccountId) return
     setLoading(true); setError('')
     const q = new URLSearchParams({ lineAccountId: selectedAccountId }); if (query) q.set('q', query)
-    fetchApi<{ success: boolean; data: Influencer[] }>(`/api/influencers?${q}`).then((res) => setItems(res.data || [])).catch(() => setError('一覧を取得できませんでした。権限または接続を確認してください。')).finally(() => setLoading(false))
+    fetchApi<{ success: boolean; data: Influencer[] }>(`/api/influencers?${q}`).then((res) => {
+      const next = res.data || []
+      setItems(next)
+      setSelected((current) => current ? next.find((item) => item.friendId === current.friendId) || null : null)
+    }).catch(() => setError('一覧を取得できませんでした。権限または接続を確認してください。')).finally(() => setLoading(false))
   }, [selectedAccountId, query])
   const complete = useMemo(() => items.filter((item) => item.profileCompletedAt).length, [items])
   if (accountsLoading) return <div className="p-8">読み込み中…</div>
@@ -25,6 +39,7 @@ export default function InfluencersPage() {
     <div className="flex flex-wrap items-end justify-between gap-4 mb-7"><div><p className="text-xs font-semibold tracking-widest text-emerald-700">CREATOR GIFTING</p><h1 className="text-2xl font-bold mt-1">インフルエンサー管理</h1><p className="text-sm text-gray-500 mt-1">{selectedAccount?.displayName || selectedAccount?.name} のプロフィール登録・進行管理</p></div><div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">登録済み <b className="text-lg">{complete}</b> / {items.length} 名</div></div>
     <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="名前・Instagramアカウントで検索" className="w-full max-w-md border rounded-lg px-3 py-2 mb-5" />
     {error && <p className="text-red-600 mb-4">{error}</p>}
-    <div className="overflow-x-auto bg-white border rounded-xl"><table className="w-full text-sm"><thead className="bg-gray-50 text-left text-gray-500"><tr><th className="p-3">クリエイター</th><th className="p-3">ジャンル</th><th className="p-3">フォロワー数</th><th className="p-3">連絡先</th><th className="p-3">発送先</th><th className="p-3">状態</th></tr></thead><tbody>{items.map((item) => <tr key={item.friendId} className="border-t"><td className="p-3 font-medium">{item.displayName || '名称未登録'}<div className="text-xs font-normal text-gray-500">{item.instagramHandle || 'Instagram未登録'}</div></td><td className="p-3">{item.categories.join('・') || '—'}</td><td className="p-3">{item.followerBand || '—'}</td><td className="p-3">{item.contactEmail || item.contactPhone || '—'}</td><td className="p-3">{item.address?.prefecture || '未登録'}</td><td className="p-3"><span className={`rounded-full px-2 py-1 text-xs ${item.profileCompletedAt ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{item.profileCompletedAt ? '登録済み' : '未登録'}</span></td></tr>)}</tbody></table>{!loading && !items.length && <p className="p-8 text-center text-gray-500">まだプロフィール登録者はいません。</p>}</div>
+    <div className="overflow-x-auto bg-white border rounded-xl"><table className="w-full text-sm"><thead className="bg-gray-50 text-left text-gray-500"><tr><th className="p-3">クリエイター</th><th className="p-3">ジャンル</th><th className="p-3">フォロワー数</th><th className="p-3">連絡先</th><th className="p-3">発送先</th><th className="p-3">状態</th></tr></thead><tbody>{items.map((item) => <tr key={item.friendId} onClick={() => setSelected(item)} className={`cursor-pointer border-t transition hover:bg-emerald-50 ${selected?.friendId === item.friendId ? 'bg-emerald-50' : ''}`}><td className="p-3 font-medium">{item.displayName || '名称未登録'}<div className="text-xs font-normal text-gray-500">{item.instagramHandle || 'Instagram未登録'}</div></td><td className="p-3">{item.categories.join('・') || '—'}</td><td className="p-3">{item.followerBand || '—'}</td><td className="p-3">{item.contactEmail || item.contactPhone || '—'}</td><td className="p-3">{item.address?.prefecture || '未登録'}</td><td className="p-3"><span className={`rounded-full px-2 py-1 text-xs ${item.profileCompletedAt ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{item.profileCompletedAt ? '登録済み' : '未登録'}</span></td></tr>)}</tbody></table>{!loading && !items.length && <p className="p-8 text-center text-gray-500">まだプロフィール登録者はいません。</p>}</div>
+    {selected && <section className="mt-6 overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-sm"><div className="flex items-start justify-between gap-4 border-b border-emerald-100 bg-emerald-50 px-5 py-4"><div><p className="text-xs font-semibold tracking-widest text-emerald-700">CREATOR RECORD</p><h2 className="mt-1 text-xl font-bold">{selected.displayName || '名称未登録'} <span className="font-normal text-slate-500">{selected.instagramHandle || ''}</span></h2></div><button onClick={() => setSelected(null)} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-100">閉じる</button></div><div className="grid gap-6 p-5 lg:grid-cols-2"><div><h3 className="mb-4 border-l-4 border-emerald-500 pl-2 text-sm font-bold">プロフィール・連絡先</h3><dl className="grid grid-cols-2 gap-x-6 gap-y-4"><Field label="Instagramアカウント" value={selected.instagramHandle} /><Field label="フォロワー数" value={selected.followerBand} /><Field label="発信ジャンル" value={selected.categories.join('・')} /><Field label="公式ショップ購入経験" value={selected.hasShopifyPurchase ? 'あり' : 'なし'} /><Field label="メールアドレス" value={selected.contactEmail} /><Field label="連絡先電話番号" value={selected.contactPhone} /><Field label="年代" value={selected.ageGroup} /><Field label="性別" value={selected.gender} /><Field label="興味のあるギフティング" value={selected.giftingInterests.join('・')} /><Field label="アレルギー・避けたい食材" value={selected.dietaryNotes} /></dl></div><div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><h3 className="mb-4 border-l-4 border-amber-500 pl-2 text-sm font-bold text-amber-950">配送先情報</h3>{selected.address ? <dl className="grid grid-cols-2 gap-x-6 gap-y-4"><Field label="お名前" value={selected.address.recipientName} /><Field label="配送先電話番号" value={selected.address.phone} /><Field label="郵便番号" value={selected.address.postalCode} /><Field label="都道府県" value={selected.address.prefecture} /><div className="col-span-2"><Field label="市区町村・町名・番地" value={selected.address.addressLine1} /></div><div className="col-span-2"><Field label="建物名・部屋番号" value={selected.address.addressLine2} /></div></dl> : <p className="text-sm text-amber-900">配送先はまだ登録されていません。</p>}</div></div></section>}
   </main>
 }
