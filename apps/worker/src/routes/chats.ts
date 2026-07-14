@@ -59,7 +59,9 @@ chats.get('/api/chats', async (c) => {
 
     if (status) { conditions.push('c.status = ?'); bindings.push(status); }
     if (operatorId) { conditions.push('c.operator_id = ?'); bindings.push(operatorId); }
-    if (lineAccountId) { conditions.push("(f.line_account_id = ? OR c.channel LIKE 'email_%')"); bindings.push(lineAccountId); }
+    // 選択中の公式LINEだけを表示する。メール問い合わせはアカウントに紐付かないため、
+    // ここで混ぜるとギフティング担当者が別窓口の会話を見られてしまう。
+    if (lineAccountId) { conditions.push('f.line_account_id = ?'); bindings.push(lineAccountId); }
     if (channel === 'email') { conditions.push("c.channel LIKE 'email_%'"); } else if (channel) { conditions.push('c.channel = ?'); bindings.push(channel); }
 
     if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
