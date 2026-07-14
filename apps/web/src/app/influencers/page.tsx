@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { useAccount } from '@/contexts/account-context'
 import { fetchApi } from '@/lib/api'
 
@@ -13,6 +14,23 @@ type Influencer = {
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return <div><dt className="text-xs font-medium tracking-wide text-slate-500">{label}</dt><dd className="mt-1 break-words text-sm font-medium text-slate-900">{value || '—'}</dd></div>
+}
+
+function downloadInfluencers(items: Influencer[]) {
+  const rows = items.map((item) => ({
+    '表示名': item.displayName || '', 'Instagramアカウント': item.instagramHandle || '', '発信ジャンル': item.categories.join('・'),
+    'フォロワー数': item.followerBand || '', 'メールアドレス': item.contactEmail || '', '連絡先電話番号': item.contactPhone || '',
+    '年代': item.ageGroup || '', '性別': item.gender || '', '公式ショップ購入経験': item.hasShopifyPurchase ? 'あり' : 'なし',
+    '興味のあるギフティング': item.giftingInterests.join('・'), 'アレルギー・避けたい食材': item.dietaryNotes || '',
+    '配送先お名前': item.address?.recipientName || '', '郵便番号': item.address?.postalCode || '', '都道府県': item.address?.prefecture || '',
+    '市区町村・町名・番地': item.address?.addressLine1 || '', '建物名・部屋番号': item.address?.addressLine2 || '',
+    '配送先電話番号': item.address?.phone || '', 'プロフィール登録日時': item.profileCompletedAt || '',
+  }))
+  const sheet = XLSX.utils.json_to_sheet(rows)
+  sheet['!cols'] = [14, 24, 24, 16, 30, 18, 10, 10, 18, 26, 32, 18, 12, 12, 32, 24, 18, 24].map((wch) => ({ wch }))
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, 'インフルエンサー一覧')
+  XLSX.writeFile(workbook, `インフルエンサー登録情報_${new Date().toISOString().slice(0, 10)}.xlsx`)
 }
 
 export default function InfluencersPage() {
@@ -36,7 +54,7 @@ export default function InfluencersPage() {
   if (accountsLoading) return <div className="p-8">読み込み中…</div>
   if (!selectedAccountId) return <div className="p-8">利用できるLINEアカウントがありません。</div>
   return <main className="p-6 max-w-6xl mx-auto">
-    <div className="flex flex-wrap items-end justify-between gap-4 mb-7"><div><p className="text-xs font-semibold tracking-widest text-emerald-700">CREATOR GIFTING</p><h1 className="text-2xl font-bold mt-1">インフルエンサー管理</h1><p className="text-sm text-gray-500 mt-1">{selectedAccount?.displayName || selectedAccount?.name} のプロフィール登録・進行管理</p></div><div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">登録済み <b className="text-lg">{complete}</b> / {items.length} 名</div></div>
+    <div className="flex flex-wrap items-end justify-between gap-4 mb-7"><div><p className="text-xs font-semibold tracking-widest text-emerald-700">CREATOR GIFTING</p><h1 className="text-2xl font-bold mt-1">インフルエンサー管理</h1><p className="text-sm text-gray-500 mt-1">{selectedAccount?.displayName || selectedAccount?.name} のプロフィール登録・進行管理</p></div><div className="flex items-center gap-3"><button type="button" onClick={() => downloadInfluencers(items)} disabled={!items.length} className="rounded-xl border border-emerald-300 bg-white px-4 py-3 text-sm font-medium text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50">Excelをダウンロード</button><div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900">登録済み <b className="text-lg">{complete}</b> / {items.length} 名</div></div></div>
     <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="名前・Instagramアカウントで検索" className="w-full max-w-md border rounded-lg px-3 py-2 mb-5" />
     {error && <p className="text-red-600 mb-4">{error}</p>}
     <div className="overflow-x-auto bg-white border rounded-xl"><table className="w-full text-sm"><thead className="bg-gray-50 text-left text-gray-500"><tr><th className="p-3">クリエイター</th><th className="p-3">ジャンル</th><th className="p-3">フォロワー数</th><th className="p-3">連絡先</th><th className="p-3">発送先</th><th className="p-3">状態</th></tr></thead><tbody>{items.map((item) => <tr key={item.friendId} onClick={() => setSelected(item)} className={`cursor-pointer border-t transition hover:bg-emerald-50 ${selected?.friendId === item.friendId ? 'bg-emerald-50' : ''}`}><td className="p-3 font-medium">{item.displayName || '名称未登録'}<div className="text-xs font-normal text-gray-500">{item.instagramHandle || 'Instagram未登録'}</div></td><td className="p-3">{item.categories.join('・') || '—'}</td><td className="p-3">{item.followerBand || '—'}</td><td className="p-3">{item.contactEmail || item.contactPhone || '—'}</td><td className="p-3">{item.address?.prefecture || '未登録'}</td><td className="p-3"><span className={`rounded-full px-2 py-1 text-xs ${item.profileCompletedAt ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{item.profileCompletedAt ? '登録済み' : '未登録'}</span></td></tr>)}</tbody></table>{!loading && !items.length && <p className="p-8 text-center text-gray-500">まだプロフィール登録者はいません。</p>}</div>
