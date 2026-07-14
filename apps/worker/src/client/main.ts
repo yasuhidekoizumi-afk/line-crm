@@ -21,7 +21,7 @@ import { initEmailLink } from './email-link.js';
 import { initEgift } from './egift.js';
 import { initEgiftApply } from './egift-apply.js';
 import { initShop } from './shop.js';
-import { initInfluencerProfile } from './influencer-profile.js';
+import { initInfluencerProfile, initInfluencerShippingAddress } from './influencer-profile.js';
 
 declare const liff: {
   init(config: { liffId: string }): Promise<void>;
@@ -400,6 +400,8 @@ async function main() {
       await initShop();
     } else if (page === 'influencer-profile') {
       await initInfluencerProfile();
+    } else if (page === 'influencer-shipping-address') {
+      await initInfluencerShippingAddress();
     } else {
       await linkAndAddFlow();
     }
