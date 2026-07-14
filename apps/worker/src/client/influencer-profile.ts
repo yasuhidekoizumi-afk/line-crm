@@ -1,5 +1,6 @@
 /** インフルエンサー本人がLINE内で登録する専用プロフィール画面。 */
 declare const liff: {
+  getAccessToken(): string | null;
   getIDToken(): string | null;
   isInClient(): boolean;
   closeWindow(): void;
@@ -14,7 +15,8 @@ function accountId(): string { return new URLSearchParams(location.search).get('
 function checked(values: string[], value: string): string { return values.includes(value) ? 'checked' : ''; }
 
 async function request(method: 'POST' | 'PUT', body: Record<string, unknown>) {
-  const res = await fetch('/api/liff/influencer-profile', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, idToken: liff.getIDToken(), lineAccountId: accountId() }) });
+  // access token からLINEプロフィールを取得して照合することで、Webhookで取得した友だちIDと同じIDで確認する。
+  const res = await fetch('/api/liff/influencer-profile', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, accessToken: liff.getAccessToken(), idToken: liff.getIDToken(), lineAccountId: accountId() }) });
   const json = await res.json() as { success: boolean; data?: Record<string, unknown>; error?: string };
   if (!res.ok || !json.success) throw new Error(json.error || '保存に失敗しました');
   return json.data;
