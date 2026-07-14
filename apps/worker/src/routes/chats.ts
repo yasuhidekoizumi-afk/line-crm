@@ -143,10 +143,16 @@ chats.post('/api/chats/:id/send', async (c) => {
     if (!chat) return c.json({ success: false, error: 'Chat not found' }, 404);
     const body = await c.req.json<{ messageType?: string; content: string }>();
     if (!body.content) return c.json({ success: false, error: 'content is required' }, 400);
-    const friend = await c.env.DB.prepare(`SELECT * FROM friends WHERE id = ?`).bind(chat.friend_id).first();
+    // 複数公式LINEでは、会話相手が登録した公式LINEのチャネルアクセストークンで送信する。
+    // 環境変数の共通トークンを使うと、別アカウントとして送信されて失敗する。
+    const friend = await c.env.DB.prepare(`SELECT f.*, la.channel_access_token
+      FROM friends f INNER JOIN line_accounts la ON la.id = f.line_account_id
+      WHERE f.id = ?`).bind(chat.friend_id).first();
     if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
+    const token = (friend as { channel_access_token?: string | null }).channel_access_token;
+    if (!token) return c.json({ success: false, error: 'LINE送信設定が見つかりません' }, 400);
     const { LineClient } = await import('@line-crm/line-sdk');
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    const lineClient = new LineClient(token);
     const messageType = body.messageType ?? 'text';
     if (messageType === 'text') { await lineClient.pushTextMessage((friend as any).line_user_id, body.content); }
     else if (messageType === 'flex') { const contents = JSON.parse(body.content); await lineClient.pushFlexMessage((friend as any).line_user_id, extractFlexAltText(contents), contents); }

@@ -77,7 +77,53 @@ shopifyOrders.get('/api/shopify/orders/products-stats', async (c) => {
   return c.json({success:true,data:rows.results??[]});
 });
 
-// 顧客情報パネル — debug情報付き動的検索
+// Shopify顧客を手動で紐付けるための検索。メールアドレスまたは顧客IDで候補を返す。
+shopifyOrders.get('/api/shopify/orders/customer-search', async (c) => {
+  const query = (c.req.query('query') ?? '').trim();
+  if (query.length < 2) return c.json({ success: false, error: 'メールアドレスまたはShopify顧客IDを2文字以上入力してください' }, 400);
+  const like = `%${query.replace(/[%_\\]/g, '\\$&')}%`;
+  const rows = await c.env.DB.prepare(`SELECT shopify_customer_id, MAX(email) AS email,
+    COUNT(*) AS order_count, COALESCE(SUM(total_price),0) AS total_spent,
+    MAX(processed_at) AS last_order_at
+    FROM shopify_orders
+    WHERE shopify_customer_id IS NOT NULL
+      AND (shopify_customer_id LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\')
+    GROUP BY shopify_customer_id
+    ORDER BY last_order_at DESC
+    LIMIT 20`).bind(like, like).all();
+  return c.json({ success: true, data: rows.results ?? [] });
+});
+
+// 運用担当者が確認したShopify顧客をLINE友だちへ明示的に紐付ける。
+shopifyOrders.post('/api/shopify/orders/customer-summary/:friendId/link', async (c) => {
+  const friendId = c.req.param('friendId');
+  const body = await c.req.json<{ shopifyCustomerId?: string }>();
+  const shopifyCustomerId = body.shopifyCustomerId?.trim();
+  if (!shopifyCustomerId) return c.json({ success: false, error: 'Shopify顧客を選択してください' }, 400);
+
+  const friend = await c.env.DB.prepare(`SELECT id, display_name FROM friends WHERE id=?`).bind(friendId).first<{ id: string; display_name: string | null }>();
+  if (!friend) return c.json({ success: false, error: 'LINE顧客が見つかりません' }, 404);
+  const candidate = await c.env.DB.prepare(`SELECT shopify_customer_id, MAX(email) AS email
+    FROM shopify_orders WHERE shopify_customer_id=? GROUP BY shopify_customer_id`).bind(shopifyCustomerId).first<{ shopify_customer_id: string; email: string | null }>();
+  if (!candidate) return c.json({ success: false, error: 'Shopify注文データに存在しない顧客です' }, 404);
+
+  const occupied = await c.env.DB.prepare(`SELECT line_friend_id FROM customer_links WHERE shopify_customer_id=?`).bind(shopifyCustomerId).first<{ line_friend_id: string | null }>();
+  if (occupied?.line_friend_id && occupied.line_friend_id !== friendId) return c.json({ success: false, error: 'このShopify顧客は別のLINEユーザーに紐付いています' }, 409);
+
+  const existing = await c.env.DB.prepare(`SELECT id FROM customer_links WHERE line_friend_id=?`).bind(friendId).first<{ id: string }>();
+  if (existing) {
+    await c.env.DB.prepare(`UPDATE customer_links SET shopify_customer_id=?, email=?, display_name=?, updated_at=strftime('%Y-%m-%dT%H:%M:%f','now','+9 hours') WHERE id=?`)
+      .bind(shopifyCustomerId, candidate.email, friend.display_name, existing.id).run();
+  } else {
+    await c.env.DB.prepare(`INSERT INTO customer_links (id, line_friend_id, email, shopify_customer_id, display_name) VALUES (?, ?, ?, ?, ?)`)
+      .bind(crypto.randomUUID(), friendId, candidate.email, shopifyCustomerId, friend.display_name).run();
+  }
+  // 既存注文も明示的な紐付けとして更新し、購入履歴・売上集計で同じ関係を利用する。
+  await c.env.DB.prepare(`UPDATE shopify_orders SET friend_id=? WHERE shopify_customer_id=?`).bind(friendId, shopifyCustomerId).run();
+  return c.json({ success: true, data: { friendId, shopifyCustomerId, email: candidate.email } });
+});
+
+// 顧客情報パネルの購入履歴
 shopifyOrders.get('/api/shopify/orders/customer-summary/:friendId', async (c) => {
   const friendId = c.req.param('friendId');
   try {
@@ -85,8 +131,9 @@ shopifyOrders.get('/api/shopify/orders/customer-summary/:friendId', async (c) =>
     let email: string|null = null;
     if (f?.metadata) { try { const m = JSON.parse(f.metadata); email = m.email ?? null; } catch {} }
     if (!email && f?.user_id) { const u = await c.env.DB.prepare(`SELECT email FROM users WHERE id=?`).bind(f.user_id).first<{email:string|null}>(); if (u?.email) email = u.email; }
+    const manualLink = await c.env.DB.prepare(`SELECT shopify_customer_id FROM customer_links WHERE line_friend_id=?`).bind(friendId).first<{shopify_customer_id:string|null}>();
     const lp = await c.env.DB.prepare(`SELECT shopify_customer_id FROM loyalty_points WHERE friend_id=?`).bind(friendId).first<{shopify_customer_id:string|null}>();
-    const scId = lp?.shopify_customer_id ?? null;
+    const scId = manualLink?.shopify_customer_id ?? lp?.shopify_customer_id ?? null;
 
     let where = `friend_id = ?`;
     const binds: (string|null)[] = [friendId];
@@ -95,7 +142,7 @@ shopifyOrders.get('/api/shopify/orders/customer-summary/:friendId', async (c) =>
 
     const summary = await c.env.DB.prepare(`SELECT COUNT(*) AS total_orders, COALESCE(SUM(total_price),0) AS total_spent, MIN(processed_at) AS first_order_at, MAX(processed_at) AS last_order_at, COALESCE(SUM(CASE WHEN cancelled_at IS NULL THEN 1 ELSE 0 END),0) AS completed_orders FROM shopify_orders WHERE ${where}`).bind(...binds).first();
     const recentItems = await c.env.DB.prepare(`SELECT oi.title, oi.quantity, oi.price, o.processed_at, oi.shopify_order_id FROM shopify_order_items oi JOIN shopify_orders o ON o.shopify_order_id=oi.shopify_order_id WHERE ${where} ORDER BY o.processed_at DESC LIMIT 5`).bind(...binds).all();
-    return c.json({ success: true, data: { summary: summary ?? { total_orders: 0, total_spent: 0, first_order_at: null, last_order_at: null, completed_orders: 0 }, recent_items: recentItems.results ?? [], _debug: { friendId, displayName: f?.display_name, email, scId, where } } });
+    return c.json({ success: true, data: { summary: summary ?? { total_orders: 0, total_spent: 0, first_order_at: null, last_order_at: null, completed_orders: 0 }, recent_items: recentItems.results ?? [], linked_shopify_customer_id: scId, _debug: { friendId, displayName: f?.display_name, email, scId, where } } });
   } catch (e) { return c.json({ success: false, error: String(e) }); }
 });
 
