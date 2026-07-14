@@ -21,7 +21,9 @@ interface OrderStats {
   order_count: number
   total_revenue: number
   unique_customers: number
-  line_linked_orders: number
+  line_linked_orders: number | null
+  order_source: 'shopify_live' | 'd1'
+  d1_latest_processed_at: string | null
 }
 
 interface CohortRow {
@@ -222,7 +224,20 @@ export default function ShopifyBiTopPage() {
         fetchApi<{ success: boolean; data: TrafficSourceRow[] }>(`/api/customer-journey/traffic-source?${ps}`),
       ])
       // 各APIの結果を個別に処理（1つが失敗しても他は表示）
-      if (results[0].status === 'fulfilled' && results[0].value.success) setStats(results[0].value.data)
+      if (results[0].status === 'fulfilled' && results[0].value.success) {
+        const orderStats = results[0].value.data
+        setStats(orderStats)
+        // 売上はShopify実績を表示できても、LINE紐付け・F2はD1の注文同期が前提。
+        // 同期遅延中に「0」と見せないため、これらの集計は表示しない。
+        if (orderStats.order_source === 'shopify_live' && orderStats.d1_latest_processed_at?.slice(0, 10) < range.to) {
+          setLineOverview(null)
+          setFunnel([])
+          setCohort([])
+          setChannelMatrix([])
+          setTrafficSource([])
+          return
+        }
+      }
       else console.warn('[shopify-bi] stats API failed:', results[0])
       if (results[1].status === 'fulfilled' && results[1].value.success) setLineOverview(results[1].value.data)
       else console.warn('[shopify-bi] line-overview API failed:', results[1])
@@ -441,6 +456,12 @@ export default function ShopifyBiTopPage() {
   const periodLabel = period === 'custom' && range
     ? `${range.from} 〜 ${range.to}`
     : (periodLabelObj?.label ?? '')
+  const isOrderSyncStale = Boolean(
+    stats?.order_source === 'shopify_live' &&
+    stats.d1_latest_processed_at?.slice(0, 10) &&
+    range?.to &&
+    stats.d1_latest_processed_at.slice(0, 10) < range.to,
+  )
 
   return (
     <div>
@@ -498,13 +519,18 @@ export default function ShopifyBiTopPage() {
                 <KpiCard label={`${periodLabel} 注文数`} value={num(stats.order_count)} unit="件" color="blue" />
                 <KpiCard label={`${periodLabel} 売上`} value={yen(stats.total_revenue)} color="green" />
                 <KpiCard label={`${periodLabel} 顧客数`} value={num(stats.unique_customers)} unit="人" color="purple" />
-                <KpiCard label={`${periodLabel} LINE連携比率`} value={stats.order_count > 0 ? `${((stats.line_linked_orders / stats.order_count) * 100).toFixed(1)}%` : '—'} color="pink" />
+                <KpiCard label={`${periodLabel} LINE連携比率`} value={stats.order_count > 0 && typeof stats.line_linked_orders === 'number' ? `${((stats.line_linked_orders / stats.order_count) * 100).toFixed(1)}%` : '—'} color="pink" />
               </div>
             )}
 
+            {isOrderSyncStale && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-semibold">売上・注文数・顧客数はShopify実績を直接表示しています。</p>
+                <p className="mt-1 text-xs">LINE連携率、購入者内訳、F2・コホートは注文同期が {stats?.d1_latest_processed_at?.slice(0, 10)} で止まっているため、誤った「0」表示を避けて非表示にしています。</p>
+              </div>
+            )}
 
-
-            {lineOverview && (
+            {!isOrderSyncStale && lineOverview && (
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-5 py-3 border-b border-gray-200 bg-gray-50">
                   <h2 className="font-bold text-gray-900">🟢 LINE連携の母集団サマリー</h2>

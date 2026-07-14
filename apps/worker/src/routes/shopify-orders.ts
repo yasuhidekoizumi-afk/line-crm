@@ -8,6 +8,81 @@ const shopifyOrders = new Hono<Env>();
 shopifyOrders.use('/api/shopify/orders/*', authMiddleware);
 const BACKFILL_LIMIT = 20, SHOPIFY_API_VERSION = '2024-10';
 
+type LiveOrder = {
+  id: number | string;
+  total_price?: string | number | null;
+  financial_status?: string | null;
+  cancelled_at?: string | null;
+  customer?: { id?: number | string | null } | null;
+};
+
+function isValidLiveOrder(order: LiveOrder): boolean {
+  if (order.cancelled_at) return false;
+  const status = String(order.financial_status ?? '').toLowerCase();
+  return status !== 'refunded' && status !== 'voided';
+}
+
+function nextJstDate(date: string | undefined): string | undefined {
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  const next = new Date(`${date}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+/**
+ * 売上サマリーはD1同期の遅延でゼロ表示にならないよう、Shopifyを正として取得する。
+ * LINE連携率やコホートはD1の顧客紐付けを使うため、同期が追いつくまで null を返す。
+ */
+async function fetchLiveOrderStats(
+  env: Env['Bindings'],
+  from?: string,
+  to?: string,
+): Promise<{ order_count: number; total_revenue: number; unique_customers: number } | null> {
+  const domain = env.SHOPIFY_SHOP_DOMAIN;
+  const token = await getShopifyAdminToken(env);
+  if (!domain || !token) return null;
+
+  const params = new URLSearchParams({
+    status: 'any',
+    limit: '250',
+    order: 'processed_at asc',
+    fields: 'id,total_price,financial_status,cancelled_at,customer',
+  });
+  if (from) params.set('processed_at_min', `${from}T00:00:00+09:00`);
+  if (to) params.set('processed_at_max', `${to}T00:00:00+09:00`);
+
+  let nextUrl: string | null = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/orders.json?${params}`;
+  const customerIds = new Set<string>();
+  let orderCount = 0;
+  let totalRevenue = 0;
+  let pages = 0;
+
+  while (nextUrl && pages < 20) {
+    pages += 1;
+    const response = await fetch(nextUrl, {
+      headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) return null;
+
+    const body = await response.json() as { orders?: LiveOrder[] };
+    for (const order of body.orders ?? []) {
+      if (!isValidLiveOrder(order)) continue;
+      orderCount += 1;
+      const revenue = Number(order.total_price ?? 0);
+      totalRevenue += Number.isFinite(revenue) ? revenue : 0;
+      if (order.customer?.id != null) customerIds.add(String(order.customer.id));
+    }
+
+    const next = (response.headers.get('link') ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .find((part) => part.includes('rel="next"'));
+    nextUrl = next?.match(/<([^>]+)>/)?.[1] ?? null;
+  }
+
+  return { order_count: orderCount, total_revenue: totalRevenue, unique_customers: customerIds.size };
+}
+
 shopifyOrders.post('/api/shopify/orders/backfill', async (c) => {
   const sd = c.env.SHOPIFY_SHOP_DOMAIN, at = await getShopifyAdminToken(c.env);
   if (!sd || !at) return c.json({ success: false, error: 'Shopify credentials not configured' }, 500);
@@ -36,10 +111,36 @@ shopifyOrders.post('/api/shopify/orders/backfill/reset', async (c) => { await c.
 
 shopifyOrders.get('/api/shopify/orders/stats', async (c) => {
   const from = c.req.query('from'), to = c.req.query('to');
+  const toExclusive = nextJstDate(to);
   let w = `cancelled_at IS NULL AND (financial_status IS NULL OR financial_status NOT IN ('refunded','voided'))`;
-  const b: string[] = []; if (from) { w += ` AND processed_at>=?`; b.push(from); } if (to) { w += ` AND processed_at<?`; b.push(to); }
-  const t = await c.env.DB.prepare(`SELECT COUNT(*) AS order_count, COALESCE(SUM(total_price),0) AS total_revenue, COUNT(DISTINCT shopify_customer_id) AS unique_customers, COALESCE(SUM(CASE WHEN customer_orders_count=1 THEN 1 ELSE 0 END),0) AS new_customer_orders, COALESCE(SUM(CASE WHEN friend_id IS NOT NULL THEN 1 ELSE 0 END),0) AS line_linked_orders FROM shopify_orders WHERE ${w}`).bind(...b).first();
-  return c.json({ success: true, data: t ?? null });
+  const b: string[] = []; if (from) { w += ` AND processed_at>=?`; b.push(from); } if (toExclusive) { w += ` AND processed_at<?`; b.push(toExclusive); }
+  const [d1Stats, freshness, liveStats] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) AS order_count, COALESCE(SUM(total_price),0) AS total_revenue, COUNT(DISTINCT shopify_customer_id) AS unique_customers, COALESCE(SUM(CASE WHEN customer_orders_count=1 THEN 1 ELSE 0 END),0) AS new_customer_orders, COALESCE(SUM(CASE WHEN friend_id IS NOT NULL THEN 1 ELSE 0 END),0) AS line_linked_orders FROM shopify_orders WHERE ${w}`).bind(...b).first<any>(),
+    c.env.DB.prepare('SELECT MAX(processed_at) AS latest_processed_at FROM shopify_orders').first<{ latest_processed_at: string | null }>(),
+    fetchLiveOrderStats(c.env, from, toExclusive),
+  ]);
+
+  if (liveStats) {
+    return c.json({
+      success: true,
+      data: {
+        ...liveStats,
+        new_customer_orders: null,
+        line_linked_orders: null,
+        order_source: 'shopify_live',
+        d1_latest_processed_at: freshness?.latest_processed_at ?? null,
+      },
+    });
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      ...(d1Stats ?? { order_count: 0, total_revenue: 0, unique_customers: 0, new_customer_orders: 0, line_linked_orders: 0 }),
+      order_source: 'd1',
+      d1_latest_processed_at: freshness?.latest_processed_at ?? null,
+    },
+  });
 });
 
 shopifyOrders.get('/api/shopify/orders/timeseries', async (c) => {
