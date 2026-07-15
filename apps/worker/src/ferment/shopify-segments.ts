@@ -131,7 +131,36 @@ async function fetchMemberPage(
   env: ShopifySegmentEnv,
   segmentGid: string,
   after: string | null,
-): Promise<{ customerIds: string[]; nextCursor: string | null }> {
+  queryId: string | null,
+): Promise<{ customerIds: string[]; nextCursor: string | null; queryId: string | null; ready: boolean }> {
+  let activeQueryId = queryId;
+  if (!activeQueryId) {
+    try {
+      return await fetchMemberPageWithQuery(env, segmentGid, after, null);
+    } catch (err) {
+      if (!String(err).includes('USE_CUSTOMER_SEGMENT_MEMBERS_QUERY_CREATE_MUTATION')) throw err;
+      const created = await shopifyGraphQL<{ customerSegmentMembersQueryCreate: { customerSegmentMembersQuery: { id: string; done: boolean }; userErrors: Array<{ message: string }> } }>(
+        env,
+        `mutation($input: CustomerSegmentMembersQueryInput!) { customerSegmentMembersQueryCreate(input: $input) { customerSegmentMembersQuery { id done } userErrors { message } } }`,
+        { input: { segmentId: segmentGid } },
+      );
+      const job = created.customerSegmentMembersQueryCreate.customerSegmentMembersQuery;
+      if (!job) throw new Error(created.customerSegmentMembersQueryCreate.userErrors.map((e) => e.message).join(', ') || '非同期セグメント照会を作成できませんでした');
+      activeQueryId = job.id;
+      if (!job.done) return { customerIds: [], nextCursor: after, queryId: activeQueryId, ready: false };
+    }
+  }
+  const status = await shopifyGraphQL<{ customerSegmentMembersQuery: { done: boolean } }>(env, `query($id: ID!) { customerSegmentMembersQuery(id: $id) { done } }`, { id: activeQueryId });
+  if (!status.customerSegmentMembersQuery.done) return { customerIds: [], nextCursor: after, queryId: activeQueryId, ready: false };
+  return fetchMemberPageWithQuery(env, segmentGid, after, activeQueryId);
+}
+
+async function fetchMemberPageWithQuery(
+  env: ShopifySegmentEnv,
+  segmentGid: string,
+  after: string | null,
+  queryId: string | null,
+): Promise<{ customerIds: string[]; nextCursor: string | null; queryId: string | null; ready: boolean }> {
   const data = await shopifyGraphQL<{
     customerSegmentMembers: {
       edges: Array<{ node: { id: string } }>;
@@ -139,13 +168,13 @@ async function fetchMemberPage(
     };
   }>(
     env,
-    `query($segmentId: ID!, $after: String) {
-      customerSegmentMembers(first: 250, segmentId: $segmentId, after: $after) {
+    `query($segmentId: ID, $queryId: ID, $after: String) {
+      customerSegmentMembers(first: 250, segmentId: $segmentId, queryId: $queryId, after: $after) {
         edges { node { id } }
         pageInfo { hasNextPage endCursor }
       }
     }`,
-    { segmentId: segmentGid, after },
+    { segmentId: queryId ? null : segmentGid, queryId, after },
   );
   const conn = data.customerSegmentMembers;
   // node.id = gid://shopify/CustomerSegmentMember/<customerId>（数字部分が顧客ID = legacyResourceId）
@@ -157,7 +186,7 @@ async function fetchMemberPage(
     .filter(Boolean);
   return {
     customerIds,
-    nextCursor: conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null,
+    nextCursor: conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null, queryId, ready: true,
   };
 }
 
@@ -299,8 +328,10 @@ export async function syncShopifySegmentChunk(
   // 再開判定: 'syncing' または cursor 付きの 'error' なら続き。
   // サブリクエスト上限などで落ちた部分同期を、次回に最初から消さない。
   let cursor: string | null;
+  let queryId: string | null = null;
   if (segment.sync_status === 'syncing' || (segment.sync_status === 'error' && segment.sync_cursor)) {
-    cursor = segment.sync_cursor ?? null;
+    try { const state = JSON.parse(segment.sync_cursor ?? '{}'); cursor = state.cursor ?? null; queryId = state.queryId ?? null; }
+    catch { cursor = segment.sync_cursor ?? null; }
     await updateSegment(env.DB, segmentId, { sync_status: 'syncing', sync_error: null });
   } else {
     cursor = null;
@@ -311,7 +342,13 @@ export async function syncShopifySegmentChunk(
   let pages = 0;
   try {
     while (pages < MAX_PAGES_PER_CHUNK) {
-      const { customerIds, nextCursor } = await fetchMemberPage(env, gid, cursor);
+      const page = await fetchMemberPage(env, gid, cursor, queryId);
+      if (!page.ready) {
+        await updateSegment(env.DB, segmentId, { sync_status: 'syncing', sync_cursor: JSON.stringify({ cursor, queryId: page.queryId }), sync_error: null });
+        return { done: false, processedPages: pages, totalMembers: (await env.DB.prepare('SELECT COUNT(*) as n FROM segment_members WHERE segment_id = ?').bind(segmentId).first<{ n: number }>())?.n ?? 0 };
+      }
+      const { customerIds, nextCursor } = page;
+      queryId = page.queryId;
       pages++;
       if (customerIds.length > 0) {
         const harnessIds = await mapToHarnessCustomerIds(env.DB, customerIds);
@@ -343,7 +380,7 @@ export async function syncShopifySegmentChunk(
 
   await updateSegment(env.DB, segmentId, {
     sync_status: done ? null : 'syncing',
-    sync_cursor: done ? null : cursor,
+    sync_cursor: done ? null : JSON.stringify({ cursor, queryId }),
     sync_error: null,
     customer_count: totalMembers,
     last_computed_at: now,
