@@ -19,6 +19,24 @@ interface EgiftKpi {
 
 function pct(v: number) { return (v * 100).toFixed(1) + '%' }
 
+function ProgressBar({ label, current, total, color }: { label: string; current: number; total: number; color: string }) {
+  const ratio = total > 0 ? current / total : 0
+  return (
+    <div className="mb-3">
+      <div className="flex justify-between text-xs mb-0.5">
+        <span className="text-gray-600">{label}</span>
+        <span className="font-semibold">{current}{total > 0 ? ` / ${total}` : ''}</span>
+      </div>
+      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${color}`}
+          style={{ width: `${Math.min(ratio * 100, 100)}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 const GIFT_URL_BASE = 'https://oryzae-line-crm.oryzae.workers.dev/g/'
 
 function buildStaticFallbackApplyUrl(campaignId: string) {
@@ -187,6 +205,16 @@ export default function EgiftPilotPage() {
             <KpiCard label="応募数" value={kpi.applications} />
             <KpiCard label="当選数" value={kpi.winners} />
             <KpiCard label="発行済ギフト" value={kpi.issuedGifts} />
+          </div>
+
+          <h2 className="text-lg font-semibold mb-3">📊 施策進捗</h2>
+          <div className="bg-gray-50 rounded-lg p-4 mb-8">
+            <ProgressBar label="応募 → 当選（抽選率）" current={kpi.winners} total={kpi.applications} color="bg-blue-500" />
+            <ProgressBar label="ギフト開封" current={kpi.openedGifts} total={kpi.issuedGifts} color="bg-sky-400" />
+            <ProgressBar label="LINE友だち化（必須KPI）" current={kpi.lineAddedGifts} total={kpi.openedGifts} color={kpi.openedGifts > 0 && kpi.lineAddedGifts / kpi.openedGifts >= 0.6 ? 'bg-green-500' : 'bg-yellow-400'} />
+            <ProgressBar label="引換完了（住所入力済）" current={kpi.redeemedGifts} total={kpi.lineAddedGifts} color="bg-purple-500" />
+            <ProgressBar label="発送完了" current={kpi.fulfilledGifts} total={kpi.redeemedGifts} color="bg-emerald-500" />
+            <p className="text-xs text-gray-400 mt-1">友だち化率 {pct(kpi.friendAddRate)}（目標60%）／ 引換率 {pct(kpi.redeemRate)}</p>
           </div>
 
           <h2 className="text-lg font-semibold mb-3">ファネル</h2>
