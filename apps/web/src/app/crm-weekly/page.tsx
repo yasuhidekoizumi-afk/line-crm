@@ -28,6 +28,7 @@ interface Summary {
   discountRatio: number
   aov: number
   uniqueCustomers: number
+  salesSource?: 'shopify_live' | 'd1'
 }
 
 interface DailyRow {
@@ -471,6 +472,11 @@ export default function CrmWeeklyPage() {
                     }
                   />
                 </div>
+                <p className={`mt-2 text-xs ${summary.salesSource === 'shopify_live' ? 'text-green-700' : 'text-amber-700'}`}>
+                  {summary.salesSource === 'shopify_live'
+                    ? 'Shopifyの最新注文データを表示中です。'
+                    : '注文台帳データを表示中です。Shopifyへの最新照会に失敗した場合は数値が遅れることがあります。'}
+                </p>
               </section>
             )}
 

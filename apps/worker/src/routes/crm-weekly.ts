@@ -16,8 +16,105 @@
  */
 import { Hono } from 'hono';
 import type { Env } from '../index.js';
+import { getShopifyAdminToken } from '../utils/shopify-token.js';
 
 const crmWeekly = new Hono<Env>();
+
+type SalesRow = {
+  orderCount: number;
+  grossSales: number;
+  totalDiscounts: number;
+  netSales: number;
+  aov: number;
+  uniqueCustomers: number;
+};
+
+type LiveOrder = {
+  id: number | string;
+  total_price?: string | number | null;
+  total_discounts?: string | number | null;
+  financial_status?: string | null;
+  cancelled_at?: string | null;
+  processed_at?: string | null;
+  customer?: { id?: number | string | null; email?: string | null } | null;
+  email?: string | null;
+};
+
+const SHOPIFY_API_VERSION = '2024-10';
+
+function isIncludedOrder(order: LiveOrder): boolean {
+  if (order.cancelled_at) return false;
+  const status = String(order.financial_status ?? '').toLowerCase();
+  return status !== 'refunded' && status !== 'voided';
+}
+
+function jstDate(value: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(value));
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/**
+ * Shopifyを正として期間内の注文を取得する。
+ * 注文Webhookが一時的に止まっても、週次レポートだけはゼロ表示にしないための補完経路。
+ */
+async function fetchLiveOrders(env: Env['Bindings'], start: string, endExclusive: string): Promise<LiveOrder[] | null> {
+  const token = await getShopifyAdminToken(env);
+  const domain = env.SHOPIFY_SHOP_DOMAIN;
+  if (!token || !domain) return null;
+
+  const params = new URLSearchParams({
+    status: 'any',
+    limit: '250',
+    order: 'processed_at asc',
+    processed_at_min: `${start}T00:00:00+09:00`,
+    processed_at_max: `${endExclusive}T00:00:00+09:00`,
+    fields: 'id,total_price,total_discounts,financial_status,cancelled_at,processed_at,email,customer',
+  });
+  let nextUrl: string | null = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/orders.json?${params}`;
+  const orders: LiveOrder[] = [];
+  let pages = 0;
+
+  while (nextUrl && pages < 20) {
+    pages += 1;
+    const response = await fetch(nextUrl, { headers: { 'X-Shopify-Access-Token': token } });
+    if (!response.ok) {
+      console.error('[crm-weekly] Shopify live order fetch failed:', response.status);
+      return null;
+    }
+    const body = await response.json() as { orders?: LiveOrder[] };
+    orders.push(...(body.orders ?? []).filter(isIncludedOrder));
+    const nextLink = (response.headers.get('link') ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .find((part) => part.includes('rel="next"'));
+    nextUrl = nextLink?.match(/<([^>]+)>/)?.[1] ?? null;
+  }
+  return orders;
+}
+
+function summarizeOrders(orders: LiveOrder[]): SalesRow {
+  const customerIds = new Set<string>();
+  let grossSales = 0;
+  let totalDiscounts = 0;
+  for (const order of orders) {
+    grossSales += Number(order.total_price ?? 0) || 0;
+    totalDiscounts += Number(order.total_discounts ?? 0) || 0;
+    const customerId = order.customer?.id ?? order.customer?.email ?? order.email;
+    if (customerId) customerIds.add(String(customerId).toLowerCase());
+  }
+  const orderCount = orders.length;
+  return {
+    orderCount,
+    grossSales,
+    totalDiscounts,
+    netSales: grossSales - totalDiscounts,
+    aov: orderCount > 0 ? Math.round(grossSales / orderCount) : 0,
+    uniqueCustomers: customerIds.size,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // 共通: 期間パース
@@ -47,6 +144,18 @@ crmWeekly.get('/api/crm-weekly/summary', async (c) => {
   if ('error' in p) return c.json({ success: false, error: p.error }, 400);
 
   try {
+    const liveOrders = await fetchLiveOrders(c.env, p.start, p.endExclusive);
+    if (liveOrders) {
+      return c.json({
+        success: true,
+        data: {
+          period: { start: p.start, end: p.end },
+          ...summarizeOrders(liveOrders),
+          salesSource: 'shopify_live',
+        },
+      });
+    }
+
     // 当該期間
     const row = await c.env.DB.prepare(
       `SELECT
@@ -78,6 +187,7 @@ crmWeekly.get('/api/crm-weekly/summary', async (c) => {
         discountRatio: grossSales > 0 ? Number(((discount / grossSales) * 100).toFixed(2)) : 0,
         aov: orderCount > 0 ? Math.round(grossSales / orderCount) : 0,
         uniqueCustomers: Number(row?.unique_customers ?? 0),
+        salesSource: 'd1',
       },
     });
   } catch (err) {
@@ -95,6 +205,29 @@ crmWeekly.get('/api/crm-weekly/daily', async (c) => {
   if ('error' in p) return c.json({ success: false, error: p.error }, 400);
 
   try {
+    const liveOrders = await fetchLiveOrders(c.env, p.start, p.endExclusive);
+    if (liveOrders) {
+      const byDate = new Map<string, LiveOrder[]>();
+      for (const order of liveOrders) {
+        if (!order.processed_at) continue;
+        const date = jstDate(order.processed_at);
+        const rows = byDate.get(date) ?? [];
+        rows.push(order);
+        byDate.set(date, rows);
+      }
+      return c.json({
+        success: true,
+        data: {
+          period: { start: p.start, end: p.end },
+          rows: [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, orders]) => ({
+            date,
+            ...summarizeOrders(orders),
+          })),
+          salesSource: 'shopify_live',
+        },
+      });
+    }
+
     const res = await c.env.DB.prepare(
       `SELECT
          DATE(processed_at)                          AS date,
@@ -165,6 +298,17 @@ crmWeekly.get('/api/crm-weekly/trend', async (c) => {
 
     const trend: any[] = [];
     for (const r of ranges) {
+      const liveOrders = await fetchLiveOrders(c.env, r.start, r.endExclusive);
+      if (liveOrders) {
+        const sales = summarizeOrders(liveOrders);
+        trend.push({
+          weekStart: r.start,
+          weekEnd: r.end,
+          ...sales,
+          discountRatio: sales.grossSales > 0 ? Number(((sales.totalDiscounts / sales.grossSales) * 100).toFixed(2)) : 0,
+        });
+        continue;
+      }
       const row = await c.env.DB.prepare(
         `SELECT
            COUNT(*)                                AS order_count,
