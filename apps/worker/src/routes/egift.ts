@@ -31,6 +31,22 @@ import type { Env } from '../index.js';
 
 const egift = new Hono<Env>();
 
+type SavedRecipientAddress = {
+  name: string;
+  zip: string;
+  address: string;
+  email: string;
+} | null;
+
+function safeScriptJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 async function verifyLineFriendship(env: Env['Bindings'], lineUserId: string): Promise<{ ok: boolean; displayName?: string; pictureUrl?: string; error?: string }> {
   const tokens: string[] = [];
   const accounts = await getLineAccounts(env.DB).catch(() => []);
@@ -627,6 +643,39 @@ egift.get('/g/:token', async (c) => {
     const escapedMessage = giverMessage ? giverMessage.replace(/`/g, '\\`').replace(/\$/g, '\\$') : '';
     const imageUrl = productImage || 'https://cdn.shopify.com/s/files/1/0504/3280/2975/files/L2A7391_1_6c516997-b0a2-4ef9-9abd-9cdfb12f0478.jpg';
 
+    // 前回のお届け先を再利用できるようにする（同じ受贈者=recipient_friend_idの過去redeemed履歴）。
+    // 電話番号はハッシュ保存のみで復元できないため、名前・郵便番号・住所・メールのみ候補にする。
+    let savedAddress: SavedRecipientAddress = null;
+    if (gift.recipient_friend_id) {
+      try {
+        const prev = await c.env.DB.prepare(
+          `SELECT recipient_name, recipient_zip, recipient_address, recipient_email
+           FROM egift_gifts
+           WHERE recipient_friend_id = ?
+             AND id != ?
+             AND status IN ('redeemed', 'fulfilled')
+             AND recipient_address IS NOT NULL AND recipient_address != ''
+           ORDER BY redeemed_at DESC
+           LIMIT 1`,
+        ).bind(gift.recipient_friend_id, gift.id).first<{
+          recipient_name: string | null;
+          recipient_zip: string | null;
+          recipient_address: string | null;
+          recipient_email: string | null;
+        }>();
+        if (prev && prev.recipient_address) {
+          savedAddress = {
+            name: prev.recipient_name ?? '',
+            zip: prev.recipient_zip ?? '',
+            address: prev.recipient_address ?? '',
+            email: prev.recipient_email ?? '',
+          };
+        }
+      } catch {
+        // 履歴取得に失敗しても通常フォームで進める
+      }
+    }
+
     // Return HTML gift LP
     return c.html(`<!DOCTYPE html>
 <html lang="ja">
@@ -669,6 +718,10 @@ egift.get('/g/:token', async (c) => {
   .form-group input:focus { outline: none; border-color: #5c4a2e; box-shadow: 0 0 0 2px rgba(92,74,46,.1); }
   .form-hint { margin-top:4px; font-size:11px; color:#9b8c72; line-height:1.5; }
   .form-error { display:none; background:#fff4e5; color:#8a4b00; border:1px solid #ffd59a; border-radius:8px; padding:10px 12px; margin:0 0 14px; font-size:13px; line-height:1.6; }
+  .saved-address { display:none; background:#f8fbf4; border:1px solid #d8e8c4; border-radius:10px; padding:12px; margin-bottom:16px; text-align:left; }
+  .saved-address-title { font-size:13px; font-weight:700; color:#4b6f2a; margin-bottom:6px; }
+  .saved-address-body { font-size:12px; color:#5c4a2e; line-height:1.6; margin-bottom:10px; }
+  .btn-small { padding:10px 12px; font-size:13px; border-radius:7px; }
   #redeem-section, #done-section { display: none; }
   .hidden { display: none !important; }
   .footer { text-align: center; padding: 24px 16px; font-size: 11px; color: #bbb; }
@@ -711,6 +764,11 @@ egift.get('/g/:token', async (c) => {
   <p style="font-size:13px;color:#8a7a5c;margin-bottom:20px;">ギフトのお届け先をご入力ください</p>
   <form id="redeem-form" autocomplete="on">
     <div id="redeem-error" class="form-error" role="alert"></div>
+    <div id="saved-address-card" class="saved-address">
+      <div class="saved-address-title">前回のお届け先を使えます</div>
+      <div id="saved-address-body" class="saved-address-body"></div>
+      <button type="button" id="use-saved-address" class="btn btn-white btn-small">このお届け先を使う</button>
+    </div>
     <div class="form-group">
       <label for="name">お名前 <span style="color:#e74c3c">*</span></label>
       <input type="text" id="name" name="name" placeholder="山田 花子" autocomplete="name" required>
@@ -758,6 +816,7 @@ egift.get('/g/:token', async (c) => {
 <script>
 const TOKEN = ${JSON.stringify(token)};
 const STATUS = ${JSON.stringify(gift.status)};
+const SAVED_ADDRESS = ${safeScriptJson(savedAddress)};
 const BASE = location.origin;
 const urlParams = new URLSearchParams(location.search);
 const returnStatus = urlParams.get('status');
@@ -773,6 +832,9 @@ const redeemError = document.getElementById('redeem-error');
 const zipInput = document.getElementById('zip');
 const addressInput = document.getElementById('address');
 const zipHint = document.getElementById('zip-hint');
+const savedAddressCard = document.getElementById('saved-address-card');
+const savedAddressBody = document.getElementById('saved-address-body');
+const useSavedAddressButton = document.getElementById('use-saved-address');
 
 function setStep(n) {
   [step1, step2, step3].forEach((s, i) => {
@@ -806,6 +868,26 @@ function showRedeemError(message) {
   redeemError.textContent = message;
   redeemError.style.display = 'block';
   redeemError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function setInputValue(id, value) {
+  const input = document.getElementById(id);
+  if (input && value) input.value = value;
+}
+
+if (SAVED_ADDRESS && SAVED_ADDRESS.address) {
+  const summary = [SAVED_ADDRESS.name, SAVED_ADDRESS.zip, SAVED_ADDRESS.address].filter(Boolean).join(' / ');
+  savedAddressBody.textContent = summary;
+  savedAddressCard.style.display = 'block';
+  useSavedAddressButton.addEventListener('click', function() {
+    setInputValue('name', SAVED_ADDRESS.name);
+    setInputValue('zip', SAVED_ADDRESS.zip);
+    setInputValue('address', SAVED_ADDRESS.address);
+    setInputValue('email', SAVED_ADDRESS.email);
+    zipHint.textContent = '前回のお届け先を入力しました。必要なら修正してください';
+    addressInput.focus();
+    addressInput.setSelectionRange(addressInput.value.length, addressInput.value.length);
+  });
 }
 
 async function autofillAddressFromZip() {
@@ -855,16 +937,17 @@ redeemForm.addEventListener('submit', async function(event) {
   }
 
   try {
+    const fullAddress = address;
     const res = await fetch(BASE + '/api/egift/gifts/redeem', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         token: TOKEN, name,
         zip: document.getElementById('zip').value.trim(),
-        address,
+        address: fullAddress,
         phone: document.getElementById('phone').value.trim(),
         email: document.getElementById('email').value.trim(),
-        prefecture: '', city: '', address1: address, address2: '',
+        prefecture: '', city: '', address1: fullAddress, address2: '',
       }),
     });
     const data = await res.json();
@@ -1063,13 +1146,18 @@ egift.post('/api/egift/gifts/redeem', async (c) => {
       }
     }
 
+    const recipientAddress = [body.prefecture, body.city, body.address1, body.address2]
+      .map((part) => typeof part === 'string' ? part.trim() : '')
+      .filter(Boolean)
+      .join(' ') || (typeof body.address === 'string' ? body.address.trim() : '');
+
     await redeemGift(c.env.DB, gift.id, {
       recipientFriendId: gift.recipient_friend_id!,
       email: body.email ?? '',
       phone: body.phone ?? '',
       name: body.name ?? '',
       zip: body.zip ?? '',
-      address: [body.prefecture, body.city, body.address1, body.address2].filter(Boolean).join(' '),
+      address: recipientAddress,
       shopifyCouponCode: couponCode,
     });
 
