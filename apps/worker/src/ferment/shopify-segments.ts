@@ -132,11 +132,12 @@ async function fetchMemberPage(
   segmentGid: string,
   after: string | null,
   queryId: string | null,
-): Promise<{ customerIds: string[]; nextCursor: string | null; queryId: string | null; ready: boolean }> {
+): Promise<{ customerIds: string[]; nextCursor: string | null; queryId: string | null; expectedCount: number | null; ready: boolean }> {
   let activeQueryId = queryId;
   if (!activeQueryId) {
     try {
-      return await fetchMemberPageWithQuery(env, segmentGid, after, null);
+      const page = await fetchMemberPageWithQuery(env, segmentGid, after, null);
+      return { ...page, expectedCount: null };
     } catch (err) {
       if (!String(err).includes('USE_CUSTOMER_SEGMENT_MEMBERS_QUERY_CREATE_MUTATION')) throw err;
       const created = await shopifyGraphQL<{ customerSegmentMembersQueryCreate: { customerSegmentMembersQuery: { id: string; done: boolean }; userErrors: Array<{ message: string }> } }>(
@@ -147,12 +148,14 @@ async function fetchMemberPage(
       const job = created.customerSegmentMembersQueryCreate.customerSegmentMembersQuery;
       if (!job) throw new Error(created.customerSegmentMembersQueryCreate.userErrors.map((e) => e.message).join(', ') || '非同期セグメント照会を作成できませんでした');
       activeQueryId = job.id;
-      if (!job.done) return { customerIds: [], nextCursor: after, queryId: activeQueryId, ready: false };
+      if (!job.done) return { customerIds: [], nextCursor: after, queryId: activeQueryId, expectedCount: null, ready: false };
     }
   }
-  const status = await shopifyGraphQL<{ customerSegmentMembersQuery: { done: boolean } }>(env, `query($id: ID!) { customerSegmentMembersQuery(id: $id) { done } }`, { id: activeQueryId });
-  if (!status.customerSegmentMembersQuery.done) return { customerIds: [], nextCursor: after, queryId: activeQueryId, ready: false };
-  return fetchMemberPageWithQuery(env, segmentGid, after, activeQueryId);
+  const status = await shopifyGraphQL<{ customerSegmentMembersQuery: { done: boolean; currentCount: number } }>(env, `query($id: ID!) { customerSegmentMembersQuery(id: $id) { done currentCount } }`, { id: activeQueryId });
+  const expectedCount = status.customerSegmentMembersQuery.currentCount;
+  if (!status.customerSegmentMembersQuery.done) return { customerIds: [], nextCursor: after, queryId: activeQueryId, expectedCount, ready: false };
+  const page = await fetchMemberPageWithQuery(env, segmentGid, after, activeQueryId);
+  return { ...page, expectedCount };
 }
 
 async function fetchMemberPageWithQuery(
@@ -329,8 +332,14 @@ export async function syncShopifySegmentChunk(
   // サブリクエスト上限などで落ちた部分同期を、次回に最初から消さない。
   let cursor: string | null;
   let queryId: string | null = null;
+  let expectedCount: number | null = null;
   if (segment.sync_status === 'syncing' || (segment.sync_status === 'error' && segment.sync_cursor)) {
-    try { const state = JSON.parse(segment.sync_cursor ?? '{}'); cursor = state.cursor ?? null; queryId = state.queryId ?? null; }
+    try {
+      const state = JSON.parse(segment.sync_cursor ?? '{}');
+      cursor = state.cursor ?? null;
+      queryId = state.queryId ?? null;
+      expectedCount = typeof state.expectedCount === 'number' ? state.expectedCount : null;
+    }
     catch { cursor = segment.sync_cursor ?? null; }
     await updateSegment(env.DB, segmentId, { sync_status: 'syncing', sync_error: null });
   } else {
@@ -343,8 +352,13 @@ export async function syncShopifySegmentChunk(
   try {
     while (pages < MAX_PAGES_PER_CHUNK) {
       const page = await fetchMemberPage(env, gid, cursor, queryId);
+      expectedCount = page.expectedCount ?? expectedCount;
       if (!page.ready) {
-        await updateSegment(env.DB, segmentId, { sync_status: 'syncing', sync_cursor: JSON.stringify({ cursor, queryId: page.queryId }), sync_error: null });
+        await updateSegment(env.DB, segmentId, {
+          sync_status: 'syncing',
+          sync_cursor: JSON.stringify({ cursor, queryId: page.queryId, expectedCount }),
+          sync_error: null,
+        });
         return { done: false, processedPages: pages, totalMembers: (await env.DB.prepare('SELECT COUNT(*) as n FROM segment_members WHERE segment_id = ?').bind(segmentId).first<{ n: number }>())?.n ?? 0 };
       }
       const { customerIds, nextCursor } = page;
@@ -380,9 +394,11 @@ export async function syncShopifySegmentChunk(
 
   await updateSegment(env.DB, segmentId, {
     sync_status: done ? null : 'syncing',
-    sync_cursor: done ? null : JSON.stringify({ cursor, queryId }),
+    sync_cursor: done ? null : JSON.stringify({ cursor, queryId, expectedCount }),
     sync_error: null,
-    customer_count: totalMembers,
+    // 同期途中でも、Shopify側で確定した全対象数を表示する。
+    // 部分同期の件数で対象者数を上書きすると、配信画面で少人数に見えてしまうため。
+    customer_count: done ? totalMembers : (expectedCount ?? totalMembers),
     last_computed_at: now,
   });
 

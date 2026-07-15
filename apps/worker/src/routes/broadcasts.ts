@@ -6,6 +6,7 @@ import {
   updateBroadcast,
   updateBroadcastStatus,
   deleteBroadcast,
+  getSegmentById,
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
 import { processBroadcastSend, resolveBroadcastLineClient } from '../services/broadcast.js';
@@ -672,6 +673,13 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
     const lineClient = await resolveBroadcastLineClient(c.env.DB, c.env.LINE_CHANNEL_ACCESS_TOKEN, existing);
 
     if (existing.target_type === 'segment' && existing.target_segment_id) {
+      const segment = await getSegmentById(c.env.DB, existing.target_segment_id);
+      if (segment?.source === 'shopify' && segment.sync_status === 'syncing') {
+        return c.json({
+          success: false,
+          error: 'このShopifyセグメントは同期中です。同期完了後に対象人数を再確認してから配信してください。',
+        }, 409);
+      }
       // セグメントターゲット: 事前に空でないことを確認
       const count = (await getSegmentLineUserIds(
         c.env.DB,

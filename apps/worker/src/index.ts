@@ -108,7 +108,7 @@ import {
 } from './ferment/cron-phase4.js';
 import { processScheduledEmailCampaigns } from './ferment/cron-campaigns.js';
 import { processFlowDeliveries } from './ferment/cron-flows.js';
-import { recomputeAllSegments } from './ferment/cron-segments.js';
+import { recomputeAllSegments, resumeSyncingShopifySegments } from './ferment/cron-segments.js';
 import { sendDailySummary } from './ferment/cron-daily-summary.js';
 import { processBirthdayCoupons } from './services/birthday-coupon.js';
 import { fetchAndStoreLineOfficialFriendInsights } from './services/line-official-insights.js';
@@ -388,7 +388,9 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
   // 予約配信は分単位で拾う。Cloudflare の cron は数分の揺れが出るので、
   // 5分粒度だったハートビートを 1分粒度へ置き換える。
   if (cronExpr === '* * * * *') {
-    await Promise.allSettled(await buildCommonCronJobs(env));
+    const jobs = await buildCommonCronJobs(env);
+    jobs.push(resumeSyncingShopifySegments(env));
+    await Promise.allSettled(jobs);
     return;
   }
 

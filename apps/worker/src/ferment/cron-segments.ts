@@ -23,6 +23,18 @@ interface FermentEnv {
 /** Shopify ミラーの再同期間隔（最終同期からこの時間を超えたら再取得） */
 const SHOPIFY_RESYNC_INTERVAL_MS = 20 * 60 * 60 * 1000; // 20時間
 
+/** 同期途中のShopifyミラーだけを1分ごとに進める。通常の全セグメント再計算は行わない。 */
+export async function resumeSyncingShopifySegments(env: FermentEnv): Promise<void> {
+  const pending = await env.DB
+    .prepare(`SELECT segment_id FROM segments WHERE source = 'shopify' AND sync_status = 'syncing' ORDER BY updated_at ASC LIMIT 3`)
+    .all<{ segment_id: string }>();
+
+  for (const segment of pending.results) {
+    const sync = await syncShopifySegmentChunk(env, segment.segment_id);
+    console.log(`[FERMENT] Shopifyセグメント同期を継続: ${segment.segment_id} (${sync.totalMembers}件, done=${sync.done})`);
+  }
+}
+
 /**
  * 全セグメントを再計算し、セグメント参入オートメーションを発火する
  */
