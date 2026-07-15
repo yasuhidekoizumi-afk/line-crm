@@ -77,7 +77,8 @@ shopifySegmentRoutes.post('/mirror', async (c) => {
       await createSegment(c.env.DB, {
         segment_id: segmentId,
         name: body.name,
-        description: body.query ? `Shopifyセグメント: ${body.query}` : 'Shopifyセグメント（取り込み）',
+        // 条件式はShopify側に保持し、CRM画面では読みやすい名前だけを表示する。
+        description: `Shopifyセグメント: ${body.name}`,
         // source='shopify' のメンバーは Shopify から同期するため rules は評価に使わない
         rules: '{"operator":"AND","conditions":[]}',
         channel_scope: 'line',
