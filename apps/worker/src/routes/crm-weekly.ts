@@ -146,11 +146,14 @@ crmWeekly.get('/api/crm-weekly/summary', async (c) => {
   try {
     const liveOrders = await fetchLiveOrders(c.env, p.start, p.endExclusive);
     if (liveOrders) {
+      const sales = summarizeOrders(liveOrders);
       return c.json({
         success: true,
         data: {
           period: { start: p.start, end: p.end },
-          ...summarizeOrders(liveOrders),
+          ...sales,
+          discountRatio:
+            sales.grossSales > 0 ? Number(((sales.totalDiscounts / sales.grossSales) * 100).toFixed(2)) : 0,
           salesSource: 'shopify_live',
         },
       });
