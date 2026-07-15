@@ -816,6 +816,7 @@ egift.get('/g/:token', async (c) => {
 <script>
 const TOKEN = ${JSON.stringify(token)};
 const STATUS = ${JSON.stringify(gift.status)};
+const FRIEND_ID = ${JSON.stringify(gift.recipient_friend_id || null)};
 const SAVED_ADDRESS = ${safeScriptJson(savedAddress)};
 const BASE = location.origin;
 const urlParams = new URLSearchParams(location.search);
@@ -888,6 +889,31 @@ if (SAVED_ADDRESS && SAVED_ADDRESS.address) {
     addressInput.focus();
     addressInput.setSelectionRange(addressInput.value.length, addressInput.value.length);
   });
+}
+
+// Shopify購入済み住所の自動取得（前回住所がない場合のみ）
+if (!SAVED_ADDRESS?.address && FRIEND_ID && STATUS !== 'redeemed' && STATUS !== 'fulfilled') {
+  (async function() {
+    try {
+      const res = await fetch(BASE + '/api/egift/shopify-address?friend_id=' + encodeURIComponent(FRIEND_ID));
+      const json = await res.json();
+      if (json.success && json.data && json.data.address) {
+        const d = json.data;
+        savedAddressBody.textContent = [d.name, d.zip, d.address].filter(Boolean).join(' / ');
+        savedAddressCard.querySelector('.saved-address-title')!.textContent = 'ご購入時のお届け先を使えます';
+        savedAddressCard.style.display = 'block';
+        useSavedAddressButton.addEventListener('click', function() {
+          setInputValue('name', d.name);
+          setInputValue('zip', d.zip);
+          setInputValue('address', d.address);
+          setInputValue('phone', d.phone);
+          zipHint.textContent = 'ご購入時のお届け先を入力しました。必要なら修正してください';
+          addressInput.focus();
+          addressInput.setSelectionRange(addressInput.value.length, addressInput.value.length);
+        });
+      }
+    } catch { /* Shopify住所取得に失敗しても手入力で進める */ }
+  })();
 }
 
 async function autofillAddressFromZip() {
@@ -1184,6 +1210,51 @@ egift.get('/api/egift/campaigns/:id/kpi', async (c) => {
     return c.json({ success: true, data: kpi });
   } catch (e) {
     return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+// Shopify default_address from LINE friend_id（住所入力の自動補完用）
+egift.get('/api/egift/shopify-address', async (c) => {
+  try {
+    const friendId = c.req.query('friend_id');
+    if (!friendId) return c.json({ success: false, error: 'friend_id required' }, 400);
+
+    // friend_id → shopify_customer_id
+    const row = await c.env.DB.prepare(
+      `SELECT shopify_customer_id FROM loyalty_points WHERE friend_id = ? AND shopify_customer_id IS NOT NULL AND shopify_customer_id != '' LIMIT 1`,
+    ).bind(friendId).first<{ shopify_customer_id: string }>();
+
+    if (!row?.shopify_customer_id) {
+      return c.json({ success: true, data: null });
+    }
+
+    // Shopify Admin API → customer.default_address
+    const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
+    const token = await getShopifyAdminToken({
+      SHOPIFY_SHOP_DOMAIN: c.env.SHOPIFY_SHOP_DOMAIN,
+      SHOPIFY_CLIENT_ID: c.env.SHOPIFY_CLIENT_ID,
+      SHOPIFY_CLIENT_SECRET: c.env.SHOPIFY_CLIENT_SECRET,
+      SHOPIFY_ADMIN_TOKEN: c.env.SHOPIFY_ADMIN_TOKEN,
+    });
+    if (!token) return c.json({ success: true, data: null });
+
+    const res = await fetch(`https://${domain}/admin/api/2024-01/customers/${encodeURIComponent(row.shopify_customer_id)}.json`, {
+      headers: { 'X-Shopify-Access-Token': token },
+    });
+    if (!res.ok) return c.json({ success: true, data: null });
+
+    const data = await res.json() as { customer?: { default_address?: { address1?: string; address2?: string; city?: string; province?: string; zip?: string; phone?: string; first_name?: string; last_name?: string; name?: string } } };
+    const addr = data.customer?.default_address;
+    if (!addr) return c.json({ success: true, data: null });
+
+    return c.json({ success: true, data: {
+      name: addr.name || [addr.first_name, addr.last_name].filter(Boolean).join(' '),
+      zip: addr.zip || '',
+      address: [addr.province, addr.city, addr.address1, addr.address2].filter(Boolean).join(' '),
+      phone: addr.phone || '',
+    } });
+  } catch {
+    return c.json({ success: true, data: null });
   }
 });
 
