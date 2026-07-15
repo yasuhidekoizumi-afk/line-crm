@@ -255,7 +255,7 @@ export default function SegmentsPage() {
                     </span>
                     {s.source === 'shopify' && (
                       <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-medium">
-                        Shopify取込{s.sync_status === 'syncing' ? '（同期中…）' : ''}
+                        Shopify取込{s.sync_status === 'syncing' ? '（同期中…）' : s.sync_status === 'error' ? '（同期不一致）' : ''}
                       </span>
                     )}
                   </div>
@@ -267,7 +267,7 @@ export default function SegmentsPage() {
                       <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
                         <div>
                           <div className="text-gray-500">
-                            {s.source === 'shopify' && s.sync_status === 'syncing' ? '同期済み購入者数' : '購入者数'}
+                            {s.source === 'shopify' && (s.sync_status === 'syncing' || s.sync_status === 'error') ? '同期済み購入者数' : '購入者数'}
                           </div>
                           <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
                             {s.audience_breakdown.segmentMembers.toLocaleString('ja-JP')} 人
@@ -283,6 +283,8 @@ export default function SegmentsPage() {
                       <p className="mt-2 text-[11px] leading-relaxed text-gray-500">
                         {s.source === 'shopify' && s.sync_status === 'syncing'
                           ? `Shopify抽出対象は ${s.customer_count.toLocaleString('ja-JP')} 人です。同期済みの人数とLINE配信可能数は増加中です。同期完了まで配信はできません。`
+                          : s.source === 'shopify' && s.sync_status === 'error'
+                            ? `Shopify抽出対象 ${s.customer_count.toLocaleString('ja-JP')} 人と同期済み人数が一致していません。配信は停止中です。`
                           : '購入者数は、Shopifyで「買ったことがある」人の数です。'}
                         その中で、実際にLINEで送れる人だけをまとめたのが「LINE連携済み・配信可能」です。
                         LINE未連携の人や、配信に使えない仮IDだけの人はここには入りません。

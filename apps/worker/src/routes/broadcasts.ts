@@ -674,10 +674,10 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
 
     if (existing.target_type === 'segment' && existing.target_segment_id) {
       const segment = await getSegmentById(c.env.DB, existing.target_segment_id);
-      if (segment?.source === 'shopify' && segment.sync_status === 'syncing') {
+      if (segment?.source === 'shopify' && (segment.sync_status === 'syncing' || segment.sync_status === 'error')) {
         return c.json({
           success: false,
-          error: 'このShopifyセグメントは同期中です。同期完了後に対象人数を再確認してから配信してください。',
+          error: 'このShopifyセグメントは同期未確定です。同期完了後に対象人数を再確認してから配信してください。',
         }, 409);
       }
       // セグメントターゲット: 事前に空でないことを確認

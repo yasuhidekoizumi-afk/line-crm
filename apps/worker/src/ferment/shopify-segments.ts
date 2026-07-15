@@ -391,14 +391,19 @@ export async function syncShopifySegmentChunk(
   const totalMembers = cntRow?.n ?? 0;
   const done = cursor === null;
   const now = new Date().toISOString();
+  const countMismatch = done && expectedCount !== null && expectedCount !== totalMembers;
 
   await updateSegment(env.DB, segmentId, {
-    sync_status: done ? null : 'syncing',
+    // Shopifyの抽出件数と全ページの取得件数が一致しない場合は、配信対象として確定しない。
+    // 差分を見落として一部の顧客だけに配信されることを防ぐ。
+    sync_status: countMismatch ? 'error' : (done ? null : 'syncing'),
     sync_cursor: done ? null : JSON.stringify({ cursor, queryId, expectedCount }),
-    sync_error: null,
+    sync_error: countMismatch
+      ? `Shopify抽出件数(${expectedCount})とCRM反映件数(${totalMembers})が一致しません`
+      : null,
     // 同期途中でも、Shopify側で確定した全対象数を表示する。
     // 部分同期の件数で対象者数を上書きすると、配信画面で少人数に見えてしまうため。
-    customer_count: done ? totalMembers : (expectedCount ?? totalMembers),
+    customer_count: expectedCount ?? totalMembers,
     last_computed_at: now,
   });
 
