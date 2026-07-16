@@ -308,6 +308,14 @@ export interface SyncChunkResult {
   totalMembers: number;   // 現在の段階での累積メンバー数（ハーネス上のShopify顧客）
 }
 
+async function getSegmentMemberCount(db: D1Database, segmentId: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT COUNT(*) as n FROM segment_members WHERE segment_id = ?')
+    .bind(segmentId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
 /**
  * Shopify セグメントを「分割・再開可能」に同期する（1チャンク分）。
  *
@@ -316,6 +324,7 @@ export interface SyncChunkResult {
  *   → ハーネス顧客にマップ → segment_members へ追記
  * - 続きがあれば cursor を保存して 'syncing' のまま（次回 cron / 手動で再開）
  * - 全件取り切ったら sync_status=null・customer_count を確定
+ * - すでに完了済みの Shopify ミラーは、再同期ボタンを押しても上書きしない
  */
 export async function syncShopifySegmentChunk(
   env: ShopifySegmentEnv,
@@ -327,6 +336,17 @@ export async function syncShopifySegmentChunk(
     throw new Error(`Shopify セグメントではありません: ${segmentId}`);
   }
   const gid = segment.shopify_segment_id;
+
+  // すでに最後まで同期済みの Shopify ミラーは、再実行しても洗い替えしない。
+  // 「同期ボタンを押したら最初から上書き」が起きる原因がここだったので、
+  // 完了済みはそのまま現状を返して終了する。
+  if (segment.sync_status === null && segment.sync_cursor === null && segment.last_computed_at) {
+    return {
+      done: true,
+      processedPages: 0,
+      totalMembers: await getSegmentMemberCount(env.DB, segmentId),
+    };
+  }
 
   // 再開判定: 'syncing' または cursor 付きの 'error' なら続き。
   // サブリクエスト上限などで落ちた部分同期を、次回に最初から消さない。
@@ -359,7 +379,7 @@ export async function syncShopifySegmentChunk(
           sync_cursor: JSON.stringify({ cursor, queryId: page.queryId, expectedCount }),
           sync_error: null,
         });
-        return { done: false, processedPages: pages, totalMembers: (await env.DB.prepare('SELECT COUNT(*) as n FROM segment_members WHERE segment_id = ?').bind(segmentId).first<{ n: number }>())?.n ?? 0 };
+        return { done: false, processedPages: pages, totalMembers: await getSegmentMemberCount(env.DB, segmentId) };
       }
       const { customerIds, nextCursor } = page;
       queryId = page.queryId;
@@ -384,11 +404,7 @@ export async function syncShopifySegmentChunk(
     throw err;
   }
 
-  const cntRow = await env.DB
-    .prepare('SELECT COUNT(*) as n FROM segment_members WHERE segment_id = ?')
-    .bind(segmentId)
-    .first<{ n: number }>();
-  const totalMembers = cntRow?.n ?? 0;
+  const totalMembers = await getSegmentMemberCount(env.DB, segmentId);
   const done = cursor === null;
   const now = new Date().toISOString();
   const countMismatch = done && expectedCount !== null && expectedCount !== totalMembers;
