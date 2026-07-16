@@ -286,6 +286,7 @@ export async function processBroadcastSend(
   let totalCount = 0;
   let successCount = 0;
   let failedCount = 0;
+  let dedupeSkippedCount = 0;
   const errorMessages: string[] = [];
 
   try {
@@ -312,6 +313,7 @@ export async function processBroadcastSend(
       );
       const followingFriends = uniqueBySendableLineUserId(rawFollowingFriends, activeDedupeContext);
       if (followingFriends.length !== rawFollowingFriends.length) {
+        dedupeSkippedCount += rawFollowingFriends.length - followingFriends.length;
         console.warn(
           `Broadcast ${broadcastId} skipped ${rawFollowingFriends.length - followingFriends.length} duplicate line_user_id recipients`,
         );
@@ -390,6 +392,7 @@ export async function processBroadcastSend(
       );
       const validFriends = uniqueBySendableLineUserId(rawValidFriends, activeDedupeContext);
       if (validFriends.length !== rawValidFriends.length) {
+        dedupeSkippedCount += rawValidFriends.length - validFriends.length;
         console.warn(
           `Broadcast ${broadcastId} skipped ${rawValidFriends.length - validFriends.length} duplicate line_user_id recipients`,
         );
@@ -436,6 +439,7 @@ export async function processBroadcastSend(
         .map(normalizeSendableLineUserId);
       const uniqueLineUserIds = uniqueSendableLineUserIds(lineUserIds, activeDedupeContext);
       if (uniqueLineUserIds.length !== lineUserIds.length) {
+        dedupeSkippedCount += lineUserIds.length - uniqueLineUserIds.length;
         console.warn(
           `Broadcast ${broadcastId} skipped ${lineUserIds.length - uniqueLineUserIds.length} duplicate line_user_id recipients`,
         );
@@ -490,10 +494,17 @@ export async function processBroadcastSend(
     }
 
     // 失敗理由は重複を除いて先頭3件までを要約として保存（成功時は null）
-    const errorSummary =
+    const deliveryErrorSummary =
       errorMessages.length > 0
         ? Array.from(new Set(errorMessages)).slice(0, 3).join(' | ').slice(0, 500)
         : null;
+    // 同日に同じ人へ二重送信しないために除外した場合も、画面で「成功0/0」だけに
+    // ならないよう理由を残す。LINE APIの失敗ではないので failed_count は増やさない。
+    const errorSummary = deliveryErrorSummary ?? (
+      dedupeSkippedCount > 0
+        ? `同日重複除外: ${dedupeSkippedCount}名は本日すでに配信済みのため送信しませんでした`
+        : null
+    );
     await updateBroadcastStatus(db, broadcastId, 'sent', {
       totalCount,
       successCount,

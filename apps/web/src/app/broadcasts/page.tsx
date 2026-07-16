@@ -88,7 +88,18 @@ const broadcastTabs: { value: BroadcastListTab; label: string }[] = [
 ]
 
 function hasFailure(broadcast: ApiBroadcast): boolean {
-  return (broadcast.failedCount ?? 0) > 0 || !!broadcast.errorSummary
+  return (broadcast.failedCount ?? 0) > 0
+}
+
+function isDuplicateSkipped(broadcast: Pick<ApiBroadcast, 'status' | 'errorSummary'>): boolean {
+  return broadcast.status === 'sent' && (broadcast.errorSummary ?? '').startsWith('同日重複除外:')
+}
+
+function getStatusInfo(broadcast: Pick<ApiBroadcast, 'status' | 'errorSummary'>) {
+  if (isDuplicateSkipped(broadcast)) {
+    return { label: '重複除外', className: 'bg-amber-100 text-amber-800' }
+  }
+  return statusConfig[broadcast.status]
 }
 
 function hasTestKeyword(value: string): boolean {
@@ -755,8 +766,8 @@ function BroadcastsPageInner() {
           <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[selectedDetail.status].className}`}>
-                  {statusConfig[selectedDetail.status].label}
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${getStatusInfo(selectedDetail).className}`}>
+                  {getStatusInfo(selectedDetail).label}
                 </span>
                 {selectedDetail.isTest && (
                   <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
@@ -826,8 +837,8 @@ function BroadcastsPageInner() {
           </div>
 
           {selectedDetail.errorSummary && (
-            <div className="border-b border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">
-              失敗理由: {selectedDetail.errorSummary}
+            <div className={`border-b px-5 py-3 text-sm ${isDuplicateSkipped(selectedDetail) ? 'border-amber-100 bg-amber-50 text-amber-800' : 'border-red-100 bg-red-50 text-red-700'}`}>
+              {isDuplicateSkipped(selectedDetail) ? '送信しなかった理由: ' : '失敗理由: '}{selectedDetail.errorSummary}
             </div>
           )}
 
@@ -964,7 +975,7 @@ function BroadcastsPageInner() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayedBroadcasts.map((broadcast) => {
-                const statusInfo = statusConfig[broadcast.status]
+                const statusInfo = getStatusInfo(broadcast)
                 const isSending = sendingId === broadcast.id
                 const isArchiving = archivingId === broadcast.id
 
@@ -1019,7 +1030,9 @@ function BroadcastsPageInner() {
                       {broadcast.status === 'sent' ? (
                         <div className="space-y-0.5">
                           <span>
-                            成功 {broadcast.successCount.toLocaleString('ja-JP')} / {broadcast.totalCount.toLocaleString('ja-JP')} 件
+                            {isDuplicateSkipped(broadcast)
+                              ? broadcast.errorSummary
+                              : `成功 ${broadcast.successCount.toLocaleString('ja-JP')} / ${broadcast.totalCount.toLocaleString('ja-JP')} 件`}
                           </span>
                           {(broadcast.failedCount ?? 0) > 0 && (
                             <span
