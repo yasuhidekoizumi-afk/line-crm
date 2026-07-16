@@ -477,6 +477,18 @@ function BroadcastsPageInner() {
 
   useEffect(() => { load() }, [load])
 
+  // 予約配信はWorker側で完了するため、画面を開いたままでも状態を反映する。
+  // 下書きだけのときは通信しない。予約中・送信中の間だけ定期的に再読込みする。
+  useEffect(() => {
+    const hasPendingDelivery = broadcasts.some(
+      (broadcast) => broadcast.status === 'scheduled' || broadcast.status === 'sending',
+    )
+    if (!hasPendingDelivery) return
+
+    const timer = window.setInterval(() => { void load() }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [broadcasts, load])
+
   const handleSend = async (id: string) => {
     if (!confirm('この配信を今すぐ送信してもよいですか？')) return
     setSendingId(id)
