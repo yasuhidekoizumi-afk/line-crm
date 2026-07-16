@@ -505,6 +505,20 @@ export async function processBroadcastSend(
         ? `同日重複除外: ${dedupeSkippedCount}名は本日すでに配信済みのため送信しませんでした`
         : null
     );
+
+    // 配信対象が同日重複で全員除外された場合、送信されていない配信にだけ
+    // 自動計測リンクが残ると、実際の配信履歴と計測画面の対応が崩れる。
+    // 全員配信は totalCount が取得できないため対象外にし、宛先指定の0件だけを片付ける。
+    if (
+      broadcast.target_type !== 'all' &&
+      totalCount === 0 &&
+      successCount === 0 &&
+      failedCount === 0 &&
+      dedupeSkippedCount > 0
+    ) {
+      await db.prepare('DELETE FROM tracked_links WHERE broadcast_id = ?').bind(broadcastId).run();
+    }
+
     await updateBroadcastStatus(db, broadcastId, 'sent', {
       totalCount,
       successCount,
