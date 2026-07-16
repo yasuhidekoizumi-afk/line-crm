@@ -24,7 +24,7 @@ const CS_MENU_HREFS = new Set([
 // マーケティングモードで表示するメニューのhrefリスト
 const MARKETING_MENU_HREFS = new Set([
   '/', '/scenarios', '/broadcasts', '/tracked-links', '/templates', '/rich-menus', '/reminders', '/egift-pilot',
-  '/shopify-bi', '/crm-weekly', '/affiliates', '/affiliate-program', '/conversions', '/scoring',
+  '/shopify-bi', '/rakuten-mailmag', '/crm-weekly', '/affiliates', '/affiliate-program', '/conversions', '/scoring',
   '/crm-campaign-report',
   '/loyalty', '/automations', '/webhooks',
   '/email/campaigns', '/email/flows', '/email/templates', '/customers', '/segments',
@@ -79,6 +79,7 @@ const menuSections = [
     label: '分析',
     items: [
       { href: '/shopify-bi', label: '売上分析', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+      { href: '/rakuten-mailmag', label: '楽天メルマガ', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
       { href: '/crm-campaign-report', label: 'CRMキャンペーン分析', icon: 'M11 3a1 1 0 011 1v12.586l3.293-3.293a1 1 0 111.414 1.414l-5 5a1 1 0 01-1.414 0l-5-5a1 1 0 111.414-1.414L10 16.586V4a1 1 0 011-1z' },
       { href: '/crm-weekly', label: 'CRM週次レポート', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
       { href: '/affiliates', label: '流入経路', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' },

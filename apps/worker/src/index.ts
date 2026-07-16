@@ -64,6 +64,8 @@ import { syncFaqFromSheets } from './services/cs-faq-sync.js';
 import { notifyDraftBacklog } from './services/cs-slack-notify.js';
 // CS Phase 2: 楽天 RMS WEB SERVICE 統合
 import { rakuten } from './routes/rakuten.js';
+// Rakuten メルマガ Harness
+import { rakutenMailmag } from './routes/rakuten-mailmag.js';
 import { checkRakutenLicenseExpiry } from './services/rakuten-license-monitor.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
 import { expireGifts } from '@line-crm/db';
@@ -311,6 +313,8 @@ app.route('/', help);
 app.route('/', cs);
 // CS Phase 2: 楽天RMS
 app.route('/', rakuten);
+// Rakuten メルマガ Harness
+app.route('/', rakutenMailmag);
 // CS Phase 2: AI下書き生成
 app.route('/', aiDraft);
 // Judge.me webhook（同梱カードレビュー→ポイント付与）
