@@ -43,6 +43,7 @@ import { previewUnusedCodeRefunds } from '../services/loyalty-code-refund-previe
 import { sweepUnusedPointCodes } from '../services/loyalty-unused-code-sweep.js';
 import { rescueSocialplusCustomer, sweepSocialplusUnlinked } from '../services/loyalty-socialplus-rescue.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
+import { findShopifyCustomerByEmail } from '../services/email-link.js';
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
@@ -2295,15 +2296,16 @@ loyalty.post('/api/loyalty/admin/points-pilot/award', async (c) => {
 // 8周年 LINE 連携特典など、定義済みキャンペーン (campaign_key) に対して
 // 期間限定ポイントを付与する。point-charge Worker からの移行先。
 //
-// body: { campaign_key, lineUserId?, shopifyCustomerId? }
+// body: { campaign_key, lineUserId?, shopifyCustomerId?, customer_id?, email? }
 //   - lineUserId が指定されていれば friend を直接特定
 //   - lineUserId 無しで shopifyCustomerId のみなら loyalty_points 経由で friend 解決
-//   - friend が見つからない場合は 'not_linked' を返す
+//   - shopifyCustomerId/email のみで既存 friend が見つからない場合は Shopify-only friend を作る
 //
 // 重複ガード: loyalty_transactions.order_id = '<campaign_key>-<friend_id>'
 // ────────────────────────────────────────────────────────────────────
 const CAMPAIGN_AWARD_RULES: Record<string, { points: number; label: string }> = {
   '8th_anniversary_88pt': { points: 388, label: '8周年キャンペーンLINE連携特典' },
+  'dormant_letter_202607': { points: 500, label: 'また会えて嬉しいポイント' },
 };
 
 // GET /api/pay-forward/claim-status — 受け取り済み表示のサーバー判定
@@ -2563,13 +2565,18 @@ loyalty.post('/api/loyalty/campaign-award', async (c) => {
       campaign_key: string;
       lineUserId?: string;
       shopifyCustomerId?: string;
+      customer_id?: string;
+      email?: string;
     }>();
 
     if (!body.campaign_key) {
       return c.json({ success: false, error: 'campaign_key は必須です' }, 400);
     }
-    if (!body.lineUserId && !body.shopifyCustomerId) {
-      return c.json({ success: false, error: 'lineUserId または shopifyCustomerId が必要です' }, 400);
+
+    const normalizedEmail = body.email?.trim().toLowerCase() || null;
+    let requestedShopifyCustomerId = (body.shopifyCustomerId ?? body.customer_id ?? '').trim() || null;
+    if (!body.lineUserId && !requestedShopifyCustomerId && !normalizedEmail) {
+      return c.json({ success: false, error: 'lineUserId, shopifyCustomerId/customer_id, または email が必要です' }, 400);
     }
 
     const rule = CAMPAIGN_AWARD_RULES[body.campaign_key];
@@ -2577,25 +2584,34 @@ loyalty.post('/api/loyalty/campaign-award', async (c) => {
       return c.json({ success: false, error: `未定義のキャンペーン: ${body.campaign_key}` }, 400);
     }
 
-    // friend を特定
+    // Shopify顧客IDを特定（emailは完全一致のみ。既存顧客がない場合は作成しない）
+    if (!requestedShopifyCustomerId && normalizedEmail) {
+      const found = await findShopifyCustomerByEmail(c.env, normalizedEmail);
+      if (found === 'ambiguous') {
+        return c.json({ success: false, error: 'ambiguous_email', message: '同一メールの顧客が複数見つかりました' }, 409);
+      }
+      requestedShopifyCustomerId = found;
+    }
+
+    // friend を特定。Shopify顧客IDだけの場合は、LINE未連携でもShopify-only friendを作る。
     let friendId: string | null = null;
-    let shopifyCustomerId: string | null = body.shopifyCustomerId ?? null;
+    let shopifyCustomerId: string | null = requestedShopifyCustomerId;
     if (body.lineUserId) {
       const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
       if (friend) friendId = friend.id;
     }
     if (!friendId && shopifyCustomerId) {
       const lp = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
-      if (lp) friendId = lp.friend_id;
+      friendId = lp?.friend_id ?? await ensureShopifyOnlyFriend(c.env.DB, shopifyCustomerId);
     }
     if (!friendId) {
       return c.json(
         {
           success: false,
-          error: 'not_linked',
-          message: 'LINE連携が完了していません。先に友だち追加・連携してください。',
+          error: 'customer_not_found',
+          message: '対象のShopify顧客が見つかりませんでした。',
         },
-        400,
+        404,
       );
     }
 

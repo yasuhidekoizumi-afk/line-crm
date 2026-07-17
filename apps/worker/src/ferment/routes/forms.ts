@@ -310,7 +310,7 @@ formPublicRoutes.post('/:formId/submit', async (c) => {
       const campaignEmail = body.email || (submissionData.email as string) || null;
       if (campaignEmail) {
         c.executionCtx.waitUntil(
-          fetch('https://point-charge.oryzae.workers.dev/api/loyalty/campaign-award', {
+          fetch(new URL('/api/loyalty/campaign-award', c.req.url).toString(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ campaign_key: '8th_anniversary_88pt', email: campaignEmail }),
@@ -368,7 +368,7 @@ formPublicRoutes.post('/:formId/submit', async (c) => {
     // 388ptキャンペーン: タグ検出時→ポイント付与API呼び出し
     if (form.on_submit_tag === 'e8e9f6d1-f35c-418f-b39f-7a8765c082ec') {
       c.executionCtx.waitUntil(
-        fetch('https://point-charge.oryzae.workers.dev/api/loyalty/campaign-award', {
+        fetch(new URL('/api/loyalty/campaign-award', c.req.url).toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ campaign_key: '8th_anniversary_88pt', email }),
