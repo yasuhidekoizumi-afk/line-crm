@@ -12,8 +12,12 @@
       .eyebrow { margin: 0; font-size: 12px; font-weight: bold; letter-spacing: .12em; color: #a57d32; }
       h1 { margin: 12px 0 0; font-size: 28px; font-weight: normal; line-height: 1.45; color: #8a6828; }
       p { font-size: 15px; line-height: 1.9; color: #514e47; }
-      .copy-button { display: block; width: 100%; margin-top: 28px; padding: 18px 20px; border: 0; border-radius: 0; background: #8a6828; color: #fff; cursor: pointer; font: inherit; font-size: 16px; font-weight: bold; }
+      .button-group { margin-top: 28px; }
+      .copy-button, .download-button { display: block; width: 100%; padding: 18px 20px; border: 0; border-radius: 0; cursor: pointer; font: inherit; font-size: 16px; font-weight: bold; }
+      .copy-button { background: #8a6828; color: #fff; }
       .copy-button:hover, .copy-button:focus-visible { background: #71531f; }
+      .download-button { margin-top: 10px; background: #f4eedc; color: #8a6828; border: 1px solid #c8a968; }
+      .download-button:hover, .download-button:focus-visible { background: #ede1c5; }
       .status { min-height: 1.8em; margin: 16px 0 0; text-align: center; font-size: 14px; color: #725c37; }
       .source-link { display: inline-block; margin-top: 16px; color: #8a6828; font-size: 14px; text-decoration: underline; }
       iframe { position: absolute; width: 1px; height: 1px; border: 0; opacity: 0; pointer-events: none; }
@@ -24,8 +28,11 @@
     <div role="main">
       <p class="eyebrow">ORYZAE MAIL</p>
       <h1>グラノーラバー配信HTML</h1>
-      <p>下のボタンを押すと、Shopify Messagingへ貼り付けるためのメールHTML全体をコピーします。</p>
-      <button id="copy-button" class="copy-button" type="button">HTMLをコピー</button>
+      <p>Shopify Messagingへ貼り付ける場合は「HTMLコードをコピー」、ファイルとして渡す・アップロードする場合は「HTMLをダウンロード」を使ってください。</p>
+      <div class="button-group">
+        <button id="copy-button" class="copy-button" type="button">HTMLコードをコピー</button>
+        <button id="download-button" class="download-button" type="button">HTMLをダウンロード</button>
+      </div>
       <p id="status" class="status" aria-live="polite">コピーの準備ができました。</p>
       <a class="source-link" href="./ORYZAE_EMAIL_GRANOLA_BAR_2026-07-17.html" target="_blank">配信内容を別タブで確認する</a>
     </div>
@@ -36,6 +43,7 @@
     <script>
       const sourcePath = './ORYZAE_EMAIL_GRANOLA_BAR_2026-07-17.html';
       const copyButton = document.getElementById('copy-button');
+      const downloadButton = document.getElementById('download-button');
       const status = document.getElementById('status');
       const emailSource = document.getElementById('email-source');
 
@@ -69,7 +77,7 @@
 
       copyButton.addEventListener('click', async () => {
         copyButton.disabled = true;
-        copyButton.textContent = 'コピーしています…';
+        copyButton.textContent = 'コードをコピーしています…';
         status.textContent = '';
 
         try {
@@ -79,13 +87,39 @@
           } else {
             legacyCopy(html);
           }
-          copyButton.textContent = 'HTMLをコピーしました';
+          copyButton.textContent = 'HTMLコードをコピーしました';
           status.textContent = 'Shopify MessagingのHTML編集画面で、そのまま貼り付けてください。';
         } catch (error) {
-          copyButton.textContent = 'HTMLをコピー';
+          copyButton.textContent = 'HTMLコードをコピー';
           status.textContent = 'コピーできませんでした。配信内容を別タブで開き、ページのソースをコピーしてください。';
         } finally {
           copyButton.disabled = false;
+        }
+      });
+
+      downloadButton.addEventListener('click', async () => {
+        downloadButton.disabled = true;
+        downloadButton.textContent = 'HTMLを準備しています…';
+        status.textContent = '';
+
+        try {
+          const html = await loadHtml();
+          const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+          const link = document.createElement('a');
+          const downloadUrl = URL.createObjectURL(blob);
+          link.href = downloadUrl;
+          link.download = 'ORYZAE_EMAIL_GRANOLA_BAR_2026-07-17.html';
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+          downloadButton.textContent = 'HTMLをダウンロードしました';
+          status.textContent = '保存された.htmlファイルを、Shopify Messagingでアップロードしてください。';
+        } catch (error) {
+          downloadButton.textContent = 'HTMLをダウンロード';
+          status.textContent = 'ダウンロードできませんでした。HTMLコードをコピーして貼り付けてください。';
+        } finally {
+          downloadButton.disabled = false;
         }
       });
     </script>
