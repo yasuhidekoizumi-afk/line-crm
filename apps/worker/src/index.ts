@@ -362,7 +362,10 @@ app.notFound((c) => {
   return c.notFound();
 });
 
-async function buildCommonCronJobs(env: Env['Bindings']): Promise<Promise<void>[]> {
+async function buildCommonCronJobs(
+  env: Env['Bindings'],
+  options: { includeScheduledBroadcasts?: boolean } = {},
+): Promise<Promise<void>[]> {
   const dbAccounts = await getLineAccounts(env.DB);
   const activeTokens = new Set<string>();
   activeTokens.add(env.LINE_CHANNEL_ACCESS_TOKEN);
@@ -376,7 +379,9 @@ async function buildCommonCronJobs(env: Env['Bindings']): Promise<Promise<void>[
     jobs.push(processStepDeliveries(env.DB, lineClient, env.WORKER_URL));
     jobs.push(processReminderDeliveries(env.DB, lineClient));
   }
-  jobs.push(processScheduledBroadcasts(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, env.WORKER_URL));
+  if (options.includeScheduledBroadcasts !== false) {
+    jobs.push(processScheduledBroadcasts(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, env.WORKER_URL));
+  }
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
   jobs.push(processLoyaltyExpirations(env.DB));
@@ -386,15 +391,40 @@ async function buildCommonCronJobs(env: Env['Bindings']): Promise<Promise<void>[
   return jobs;
 }
 
+/**
+ * 定期処理の失敗を握りつぶさず、Workerログに必ず残す。
+ * 予約配信の障害を他の定期処理から切り離すためにも使う。
+ */
+async function runCronJob(name: string, job: Promise<void>): Promise<void> {
+  try {
+    await job;
+  } catch (error) {
+    console.error(`[cron] ${name} failed:`, error);
+  }
+}
+
 async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: ExecutionContext): Promise<void> {
   const cronExpr = (_event as ScheduledEvent).cron;
 
   // 予約配信は分単位で拾う。Cloudflare の cron は数分の揺れが出るので、
   // 5分粒度だったハートビートを 1分粒度へ置き換える。
   if (cronExpr === '* * * * *') {
-    const jobs = await buildCommonCronJobs(env);
-    jobs.push(resumeSyncingShopifySegments(env));
-    await Promise.allSettled(jobs);
+    // 予約配信を共通ジョブの準備から独立させる。
+    // これまでは getLineAccounts() など共通ジョブ準備中の例外で、
+    // 送信対象の予約配信まで到達しないまま Promise.allSettled で見えなくなった。
+    await Promise.all([
+      runCronJob(
+        'scheduled-broadcasts',
+        processScheduledBroadcasts(env.DB, env.LINE_CHANNEL_ACCESS_TOKEN, env.WORKER_URL)
+          .then(() => undefined),
+      ),
+      runCronJob(
+        'common-jobs',
+        buildCommonCronJobs(env, { includeScheduledBroadcasts: false })
+          .then((jobs) => Promise.all(jobs).then(() => undefined)),
+      ),
+      runCronJob('resume-syncing-shopify-segments', resumeSyncingShopifySegments(env)),
+    ]);
     return;
   }
 
