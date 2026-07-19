@@ -144,7 +144,7 @@ ${dailyTrendStr}
     return c.json({ success: false, error: 'DEEPSEEK_API_KEYが設定されていません' });
   }
 
-  const MODEL = 'deepseek-chat';
+  const MODEL = 'deepseek-chat-v4-flash';
 
   const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
