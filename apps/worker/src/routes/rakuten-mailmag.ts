@@ -128,61 +128,116 @@ ${dailyTrendStr}
 
 【絶対守るルール】
 - 件名を3パターン提案する（異なる切り口で）
-- 本文は500〜800文字（長すぎない）
-- ORYZAEのブランドトーン: 素直で誠実。売り込みすぎない。商品への想いは残す。
-- 「次に〜をご紹介します」「ここまでで〜はお伝えしました」等、本文自身の進行や構成を実況する文は絶対禁止
+- 本文は300〜500文字（短く簡潔に）
+- ORYZAEのブランドトーン: 素直で誠実。売り込みすぎない。
+- 「次に〜をご紹介します」等、本文自身の進行を実況する文は絶対禁止
 - 「簡単に」「お気軽に」「ぜひ」「おすすめ」「人気」「大好評」は使わない
 - 「ORYZAEの小泉です」で始める
-- メルマガ読者は楽天で購入したことがあるリピーター層
-- HTMLタグを使う（h2, p, strong, a）ただし過度な装飾はしない
+- HTMLタグはh2, p, strongのみ使う（divタグ、style属性、HTMLコメントは使わない）
 - 最後に商品ページへのリンクCTAを入れる
-- 景表法に注意：効果・効能を医薬品的に表現しない（「腸活」「健康」は食材としての文脈のみOK）
+- 景表法に注意：効果・効能を医薬品的に表現しない
 
-以下のJSONフォーマットで返してください:
+以下のJSONフォーマットのみを返してください。前後に説明文や挨拶は一切不要。マークダウンも使わず、純粋なJSONのみ:
 {
-  "subjects": ["件名A", "件名B", "件名C"],
-  "preheader": "プレテキスト（件名の後に表示される短い文）",
-  "bodyHtml": "<h2>...</h2><p>...</p>...",
-  "bodyText": "プレーンテキスト版"
-}`;
+  const apiKey = c.env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    return c.json({ success: false, error: 'DEEPSEEK_API_KEYが設定されていません' });
+  }
 
-    const MODEL = 'gemini-2.5-flash';
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.8,
-            maxOutputTokens: 4000,
-          },
-        }),
-      },
-    );
+  const MODEL = 'deepseek-chat';
 
-    if (!res.ok) {
-      const errText = await res.text();
-      return c.json({ success: false, error: `Gemini API error (${res.status}): ${errText.slice(0, 300)}` });
-    }
+  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.8,
+      max_tokens: 8192,
+    }),
+  });
 
-    const geminiData = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+  if (!res.ok) {
+    const errText = await res.text();
+    return c.json({ success: false, error: `DeepSeek API error (${res.status}): ${errText.slice(0, 300)}` });
+  }
 
-    if (!rawText) {
-      return c.json({ success: false, error: 'Geminiからの返答が空でした' });
-    }
+  const dsData = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const rawText = dsData?.choices?.[0]?.message?.content?.trim() ?? '';
 
-    // JSONを抽出（Geminiは```json ... ```で囲むことがある）
+  if (!rawText) {
+    return c.json({ success: false, error: 'DeepSeekからの返答が空でした' });
+  }
+
+    // JSONを抽出（Geminiは```json ... ```で囲むことがある、出力が切れることもある）
     let parsed: { subjects: string[]; preheader: string; bodyHtml: string; bodyText: string };
     try {
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
+      let cleaned = rawText;
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+      const braceIdx = cleaned.indexOf('{');
+      if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
+
+      // パターン1: 完全なJSON
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // パターン2: 出力が途中で切れている場合の修復
+        // bodyHtmlの途中で切れている → 最後の完了タグまで使う
+        let repaired = cleaned;
+
+        // 最後の閉じタグ（</p>, </h2>, </strong>）を探す
+        const tagMatches = [...repaired.matchAll(/<\/(?:p|h2|strong|a)>/g)];
+        if (tagMatches.length > 0) {
+          const lastTagEnd = tagMatches[tagMatches.length - 1].index! + tagMatches[tagMatches.length - 1][0].length;
+          repaired = repaired.slice(0, lastTagEnd);
+
+          // bodyHtml文字列値を閉じる
+          // bodyHtmlの値として repaired の内容を使う形に再構築
+          // subjectsとpreheaderを正規表現で抽出
+          const subjects: string[] = [];
+          const subjMatches = [...cleaned.matchAll(/"([^"]{5,80})"(?:\s*[,|\]])/g)];
+          for (const m of subjMatches.slice(0, 3)) {
+            subjects.push(m[1]);
+          }
+
+          const preheaderMatch = cleaned.match(/"preheader"\s*:\s*"([^"]*)"/);
+          const preheader = preheaderMatch ? preheaderMatch[1] : '';
+
+          // bodyHtmlの値を抽出（"bodyHtml": " の後ろから最後の完了タグまで）
+          const bodyStartMatch = cleaned.match(/"bodyHtml"\s*:\s*"/);
+          const bodyStartIdx = bodyStartMatch ? bodyStartMatch.index! + bodyStartMatch[0].length : -1;
+          let bodyHtml = '';
+          if (bodyStartIdx >= 0) {
+            bodyHtml = cleaned.slice(bodyStartIdx, lastTagEnd);
+          }
+
+          if (subjects.length > 0 && bodyHtml) {
+            parsed = {
+              subjects,
+              preheader,
+              bodyHtml,
+              bodyText: bodyHtml.replace(/<[^>]+>/g, '').trim(),
+            };
+          } else {
+            throw new Error('Could not extract fields');
+          }
+        } else {
+          throw new Error('No complete tags found');
+        }
+      }
+
+      if (!parsed.subjects || !Array.isArray(parsed.subjects) || !parsed.bodyHtml) {
+        throw new Error('Missing required fields');
+      }
+      if (!parsed.bodyText) {
+        parsed.bodyText = parsed.bodyHtml.replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim();
+      }
     } catch {
-      // JSONパース失敗時は生テキストを返す
       return c.json({
         success: true,
         data: {
