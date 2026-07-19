@@ -978,6 +978,11 @@ function BroadcastsPageInner() {
                 const statusInfo = getStatusInfo(broadcast)
                 const isSending = sendingId === broadcast.id
                 const isArchiving = archivingId === broadcast.id
+                // 予約実行が停止した場合でも、予定時刻を過ぎた未送信配信だけは手動で安全に復旧できる。
+                const canSendNow = broadcast.status === 'draft'
+                  || (broadcast.status === 'scheduled'
+                    && !!broadcast.scheduledAt
+                    && new Date(broadcast.scheduledAt).getTime() <= Date.now())
 
                 return (
                   <tr key={broadcast.id} className="hover:bg-gray-50 transition-colors">
@@ -1073,7 +1078,7 @@ function BroadcastsPageInner() {
                         >
                           {detailLoadingId === broadcast.id ? '読込中...' : '詳細'}
                         </button>
-                        {broadcast.status === 'draft' && (
+                        {canSendNow && (
                           <button
                             onClick={() => handleSend(broadcast.id)}
                             disabled={isSending}
