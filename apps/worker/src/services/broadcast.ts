@@ -590,6 +590,13 @@ export async function processScheduledBroadcasts(
       await processBroadcastSend(db, lineClient, broadcast.id, workerUrl, dedupeContext);
     } catch (err) {
       console.error(`Failed to send scheduled broadcast ${broadcast.id}:`, err);
+      // 予約のまま停止する場合でも、管理画面と本番DBから原因を追えるように残す。
+      // status は scheduled のままにして、復旧後の安全な再試行対象から外さない。
+      await updateBroadcastStatus(db, broadcast.id, 'scheduled', {
+        errorSummary: `予約実行エラー: ${(err instanceof Error ? err.message : String(err)).slice(0, 450)}`,
+      }).catch((logError) => {
+        console.error(`Failed to record scheduled broadcast error ${broadcast.id}:`, logError);
+      });
       // Continue with next broadcast
     }
   }
