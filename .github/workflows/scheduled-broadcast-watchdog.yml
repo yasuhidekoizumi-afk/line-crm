@@ -1,0 +1,17 @@
+name: Scheduled Broadcast Watchdog
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Run scheduled broadcast fail-safe
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "X-Cron-Watchdog-Token: ${{ secrets.LINE_CRON_WATCHDOG_TOKEN }}" \
+            https://oryzae-line-crm.oryzae.workers.dev/api/internal/scheduled-broadcasts/run

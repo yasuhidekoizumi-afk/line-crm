@@ -114,6 +114,8 @@ import { recomputeAllSegments, resumeSyncingShopifySegments } from './ferment/cr
 import { sendDailySummary } from './ferment/cron-daily-summary.js';
 import { processBirthdayCoupons } from './services/birthday-coupon.js';
 import { fetchAndStoreLineOfficialFriendInsights } from './services/line-official-insights.js';
+import { cronWatchdog } from './routes/cron-watchdog.js';
+import { finishCronExecution, startCronExecution } from './services/cron-monitor.js';
 
 declare const __APP_VERSION__: string;
 declare const __GIT_SHA__: string;
@@ -131,6 +133,7 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
+    CRON_WATCHDOG_TOKEN?: string;
     X_HARNESS_URL?: string;
     SHOPIFY_ADMIN_TOKEN?: string;
     // CRM週次レポート専用Shopifyトークン (apps/worker/src/routes/crm-weekly.ts で使用)
@@ -261,6 +264,39 @@ app.get('/api/system/status', async (c) => {
   }
 });
 
+app.get('/api/system/scheduled-broadcast-health', async (c) => {
+  try {
+    const [latestRun, overdue] = await Promise.all([
+      c.env.DB.prepare(
+        `SELECT trigger_source, status, error_message, started_at, completed_at
+         FROM cron_execution_logs
+         WHERE job_name = 'scheduled-broadcasts'
+         ORDER BY started_at DESC LIMIT 1`,
+      ).first<{ trigger_source: string; status: string; error_message: string | null; started_at: string; completed_at: string | null }>(),
+      c.env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM broadcasts
+         WHERE status = 'scheduled' AND scheduled_at <= ?`,
+      ).bind(new Date().toISOString()).first<{ count: number }>(),
+    ]);
+    const ageMs = latestRun ? Date.now() - new Date(latestRun.started_at).getTime() : null;
+    const stale = (overdue?.count ?? 0) > 0 && (ageMs === null || ageMs > 3 * 60_000);
+    return c.json({ success: true, data: {
+      stale,
+      overdueScheduledBroadcasts: overdue?.count ?? 0,
+      latestRun: latestRun ? {
+        triggerSource: latestRun.trigger_source,
+        status: latestRun.status,
+        errorMessage: latestRun.error_message,
+        startedAt: latestRun.started_at,
+        completedAt: latestRun.completed_at,
+      } : null,
+    } });
+  } catch (error) {
+    console.error('GET /api/system/scheduled-broadcast-health error:', error);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
 // MVP & Round 2
 app.route('/', webhook);
 app.route('/', friends);
@@ -319,6 +355,7 @@ app.route('/', rakutenMailmag);
 app.route('/', aiDraft);
 // Judge.me webhook（同梱カードレビュー→ポイント付与）
 app.route('/', judgeme);
+app.route('/', cronWatchdog);
 
 // FERMENT
 app.route('/api/email', emailApiRouter);
@@ -405,6 +442,9 @@ async function runCronJob(name: string, job: Promise<void>): Promise<void> {
 
 async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: ExecutionContext): Promise<void> {
   const cronExpr = (_event as ScheduledEvent).cron;
+  let executionId: string | null = null;
+  try {
+    executionId = await startCronExecution(env.DB, 'scheduled-broadcasts', 'cloudflare-cron', cronExpr);
 
   // 予約配信は分単位で拾う。Cloudflare の cron は数分の揺れが出るので、
   // 5分粒度だったハートビートを 1分粒度へ置き換える。
@@ -425,6 +465,7 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
       ),
       runCronJob('resume-syncing-shopify-segments', resumeSyncingShopifySegments(env)),
     ]);
+    await finishCronExecution(env.DB, executionId);
     return;
   }
 
@@ -492,6 +533,12 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     jobs.push(checkCsDraftBacklog(env).catch(() => undefined));
   }
   await Promise.allSettled(jobs);
+  await finishCronExecution(env.DB, executionId);
+  } catch (error) {
+    if (executionId) await finishCronExecution(env.DB, executionId, error).catch(() => undefined);
+    console.error('[cron] scheduled handler failed:', error);
+    throw error;
+  }
 }
 
 async function checkCsDraftBacklog(env: Env['Bindings']): Promise<void> {
