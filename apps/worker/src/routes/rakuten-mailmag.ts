@@ -103,11 +103,6 @@ rakutenMailmag.post('/api/rakuten-mailmag/generate', async (c) => {
       ferment: '麹のチカラ（発酵食）',
     };
 
-    const apiKey = c.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return c.json({ success: false, error: 'GEMINI_API_KEYが設定されていません' });
-    }
-
     const prompt = `あなたは楽天市場の出店運営者です。「ORYZAE（オリゼ）」の米麹発酵食品を販売しています。
 
 以下の売上データと訴求商品をもとに、楽天市場のメルマガ（HTML形式）を作成してください。
@@ -139,7 +134,13 @@ ${dailyTrendStr}
 
 以下のJSONフォーマットのみを返してください。前後に説明文や挨拶は一切不要。マークダウンも使わず、純粋なJSONのみ:
 {
-  const apiKey = c.env.DEEPSEEK_API_KEY;
+  "subjects": ["件名案1", "件名案2", "件名案3"],
+  "preheader": "メール冒頭の短い要約",
+  "bodyHtml": "<p>HTML本文</p>",
+  "bodyText": "プレーンテキスト本文"
+}`;
+
+    const apiKey = c.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     return c.json({ success: false, error: 'DEEPSEEK_API_KEYが設定されていません' });
   }
