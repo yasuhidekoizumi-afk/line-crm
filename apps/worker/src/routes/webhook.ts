@@ -392,8 +392,20 @@ async function handleEvent(
     // ── AI一次対応（auto_repliesがマッチしなかった場合） ──────────
     if (!matched && !replyTokenConsumed && env?.DEEPSEEK_API_KEY) {
       try {
-        const { chatWithDeepSeek } = await import('@line-crm/ai-sdk');
+        const { detectMoneyKeywords: hasMoneyKw, chatWithDeepSeek } = await import('@line-crm/ai-sdk');
         const name = friend.display_name || 'お客様';
+
+        // 金銭キーワード検出 → AI判定前にエスカレーション
+        if (hasMoneyKw(incomingText)) {
+          console.log('[AI] Money keywords detected, skipping AI — escalate to DM');
+          await notifyKoizumiLineEscalation(env, {
+            name,
+            text: incomingText,
+            reason: '金銭関連キーワード検出（返金・クレーム等）→ AI判定スキップ',
+            friendId: friend.id,
+          });
+        } else {
+          // AI判定を実行
 
         const systemPrompt = `あなたはORYZAE（オリゼ）のLINEカスタマーサポート担当AIです。
 ORYZAEは宇都宮大学発の米麹発酵フードテック企業です。お米、米麹、甘酒、グラノーラなどの発酵食品を展開しています。
@@ -404,15 +416,16 @@ LINEで顧客から届いたメッセージに、親切・簡潔に回答して�
 # 回答方針
 - 敬語（丁寧語）で回答
 - 1つのメッセージは200文字以内
+- FAQにない質問・ORYZAEの事業と無関係な質問はL3エスカレーションする
 - 送料・保存方法・アレルギー等のFAQには正確に答える
-- 商品おすすめは購入履歴を参考に提案
-- わからないこと・複雑な問い合わせは「担当者におつなぎします」とだけ返す
+- 商品おすすめは実際の商品カテゴリ（甘酒・グラノーラ・麹調味料・KOJIPOP等）から提案する
 
 # 重要なルール
 - 絶対に架空の商品名・価格・事実を作らない
-- 返金の条件判定は行わず、「返金についてのお問い合わせですね」とだけ答え、担当者へエスカレーションする
-- 不満・クレームはすぐにエスカレーションする
+- 返金の条件判定は一切行わず、「返金についてのお問い合わせですね。担当者よりご連絡いたします」とだけ返す
+- 不満・クレームはすぐにエスカレーション（handled=false）する
 - 送料は「ゆうパケット: 250円」「ゆうパック: 500円」
+- ORYZAEが扱っていない商品（肉・魚・冷凍食品等）の質問は「弊社では取り扱いがございません」と返す
 
 顧客名: ${name}`;
 
@@ -444,61 +457,18 @@ LINEで顧客から届いたメッセージに、親切・簡潔に回答して�
           console.log(`[AI] LINE auto-reply sent: intent=${aiResponse.intent}`);
         } else {
           // AIが対応不可 → 小泉のSlack DMにエスカレーション通知
-          const reason = aiResponse.escalateReason ?? 'AIが対応不可と判定';
-          console.log(`[AI] Escalation needed: ${reason}`);
-
-          if (env.SLACK_BOT_TOKEN) {
-            const SLACK_API = 'https://slack.com/api';
-            const KOIZUMI_DM = 'D0BJBFTETEE'; // 小泉さんのSlack DM ID
-            const chatLink = env.WORKER_URL
-              ? `${env.WORKER_URL.replace(/\/$/, '')}/chats?id=${friend.id}`
-              : null;
-
-            const blocks = [
-              { type: 'header', text: { type: 'plain_text', text: '🤖 LINE要エスカレーション（村田不在）' } },
-              {
-                type: 'section',
-                fields: [
-                  { type: 'mrkdwn', text: `*顧客*: ${name}` },
-                  { type: 'mrkdwn', text: `*意図*: ${aiResponse.intent}` },
-                  { type: 'mrkdwn', text: `*理由*: ${reason}` },
-                ],
-              },
-              {
-                type: 'section',
-                text: { type: 'mrkdwn', text: `*メッセージ内容*\n>>>${incomingText.slice(0, 600)}` },
-              },
-              ...(chatLink
-                ? [{
-                    type: 'actions',
-                    elements: [
-                      { type: 'button', text: { type: 'plain_text', text: 'harnessで開く' }, url: chatLink, style: 'primary' },
-                    ],
-                  }]
-                : []),
-            ];
-
-            try {
-              await fetch(`${SLACK_API}/chat.postMessage`, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  channel: KOIZUMI_DM,
-                  text: `🔔 LINEエスカレーション: ${name} - ${reason}`,
-                  blocks,
-                }),
-              });
-            } catch (e) {
-              console.error('[AI] Slack DM notification failed:', e);
-            }
-          }
+          await notifyKoizumiLineEscalation(env, {
+            name,
+            text: incomingText,
+            reason: aiResponse.escalateReason ?? 'AIが対応不可と判定',
+            friendId: friend.id,
+            intent: aiResponse.intent,
+          });
         }
+        } // end if (hasMoneyKw)
       } catch (err) {
         console.error('[AI] DeepSeek call failed, falling back to manual', err);
-        // 失敗時は何も返さず、既存通りCS画面に未読で残る（安全側）
+        // 失敗時は安全側：何も返さずCS画面に未読で残る
       }
     }
 
@@ -511,6 +481,65 @@ LINEで顧客から届いたメッセージに、親切・簡潔に回答して�
     }, lineAccessToken, lineAccountId);
 
     return;
+  }
+}
+
+// ── 小泉Slack DM通知ヘルパー ──────────
+async function notifyKoizumiLineEscalation(
+  env: { SLACK_BOT_TOKEN?: string; WORKER_URL?: string },
+  params: {
+    name: string;
+    text: string;
+    reason: string;
+    friendId: string;
+    intent?: string;
+  },
+): Promise<void> {
+  if (!env.SLACK_BOT_TOKEN) {
+    console.warn('[AI] SLACK_BOT_TOKEN not set, cannot send DM');
+    return;
+  }
+  const KOIZUMI_DM = 'D0BJBFTETEE';
+  const chatLink = env.WORKER_URL
+    ? `${env.WORKER_URL.replace(/\/$/, '')}/chats?id=${params.friendId}`
+    : null;
+
+  const blocks = [
+    { type: 'header', text: { type: 'plain_text', text: '🤖 LINE要エスカレーション' } },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*顧客*: ${params.name}` },
+        ...(params.intent ? [{ type: 'mrkdwn', text: `*意図*: ${params.intent}` }] : []),
+        { type: 'mrkdwn', text: `*理由*: ${params.reason}` },
+      ],
+    },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*メッセージ*\n>>>${params.text.slice(0, 600)}` },
+    },
+    ...(chatLink
+      ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'harnessで開く' }, url: chatLink, style: 'primary' }] }]
+      : []),
+  ];
+
+  try {
+    const res = await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        channel: KOIZUMI_DM,
+        text: `🔔 LINEエスカレーション: ${params.name} - ${params.reason}`,
+        blocks,
+      }),
+    });
+    const json = (await res.json()) as { ok: boolean; error?: string };
+    if (!json.ok) console.error('[AI] Slack DM failed:', json.error);
+  } catch (e) {
+    console.error('[AI] Slack DM exception:', e);
   }
 }
 

@@ -351,10 +351,10 @@ async function runTriageForMessage(
     outcome_at: result.level === 'L1' ? jstNow() : null,
   });
 
-  if (result.level === 'L1' && result.draft_text) {
-    // L1: 即返信（Phase1初期2週間は安全のためL2運用にしている前提だが、機構は実装）
+  if (result.level === 'L1' && result.draft_text && result.confidence >= 0.9) {
+    // L1: 即返信（confidence 0.9以上かつFAQ完全一致。村田不在時はこれが本番）
     await sendReply(env, chatId, messageId, result.draft_text, channel, customerEmail, subject);
-  } else if (result.level === 'L2' && result.draft_text) {
+  } else if ((result.level === 'L2' || (result.level === 'L1' && result.confidence < 0.9)) && result.draft_text) {
     // L2: 下書き作成 → Slack通知
     await createAiDraft(env.DB, {
       chat_id: chatId,
