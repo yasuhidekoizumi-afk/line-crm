@@ -67,7 +67,7 @@ webhook.post('/webhook', async (c) => {
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -86,6 +86,11 @@ async function handleEvent(
   lineAccessToken: string,
   lineAccountId: string | null = null,
   workerUrl?: string,
+  env?: {
+    DEEPSEEK_API_KEY?: string;
+    SLACK_BOT_TOKEN?: string;
+    WORKER_URL?: string;
+  },
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
@@ -381,6 +386,119 @@ async function handleEvent(
 
         matched = true;
         break;
+      }
+    }
+
+    // ── AI一次対応（auto_repliesがマッチしなかった場合） ──────────
+    if (!matched && !replyTokenConsumed && env?.DEEPSEEK_API_KEY) {
+      try {
+        const { chatWithDeepSeek } = await import('@line-crm/ai-sdk');
+        const name = friend.display_name || 'お客様';
+
+        const systemPrompt = `あなたはORYZAE（オリゼ）のLINEカスタマーサポート担当AIです。
+ORYZAEは宇都宮大学発の米麹発酵フードテック企業です。お米、米麹、甘酒、グラノーラなどの発酵食品を展開しています。
+
+# あなたの役割
+LINEで顧客から届いたメッセージに、親切・簡潔に回答してください。
+
+# 回答方針
+- 敬語（丁寧語）で回答
+- 1つのメッセージは200文字以内
+- 送料・保存方法・アレルギー等のFAQには正確に答える
+- 商品おすすめは購入履歴を参考に提案
+- わからないこと・複雑な問い合わせは「担当者におつなぎします」とだけ返す
+
+# 重要なルール
+- 絶対に架空の商品名・価格・事実を作らない
+- 返金の条件判定は行わず、「返金についてのお問い合わせですね」とだけ答え、担当者へエスカレーションする
+- 不満・クレームはすぐにエスカレーションする
+- 送料は「ゆうパケット: 250円」「ゆうパック: 500円」
+
+顧客名: ${name}`;
+
+        const aiResponse = await chatWithDeepSeek(
+          env.DEEPSEEK_API_KEY,
+          systemPrompt,
+          [{ role: 'user', content: incomingText }],
+          { temperature: 0.3, maxTokens: 500 },
+        );
+
+        if (aiResponse.handled && aiResponse.reply) {
+          // AIが対応 → LINE返信
+          await lineClient.replyMessage(event.replyToken, [
+            buildMessage('text', aiResponse.reply),
+          ]);
+          replyTokenConsumed = true;
+
+          // AI応答をログ保存
+          const aiLogId = crypto.randomUUID();
+          await db
+            .prepare(
+              `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
+               VALUES (?, ?, 'outgoing', 'text', ?, NULL, NULL, 'ai_reply', ?)`,
+            )
+            .bind(aiLogId, friend.id, `[AI] ${aiResponse.reply}`, jstNow())
+            .run();
+
+          matched = true;
+          console.log(`[AI] LINE auto-reply sent: intent=${aiResponse.intent}`);
+        } else {
+          // AIが対応不可 → 小泉のSlack DMにエスカレーション通知
+          const reason = aiResponse.escalateReason ?? 'AIが対応不可と判定';
+          console.log(`[AI] Escalation needed: ${reason}`);
+
+          if (env.SLACK_BOT_TOKEN) {
+            const SLACK_API = 'https://slack.com/api';
+            const KOIZUMI_DM = 'D0BJBFTETEE'; // 小泉さんのSlack DM ID
+            const chatLink = env.WORKER_URL
+              ? `${env.WORKER_URL.replace(/\/$/, '')}/chats?id=${friend.id}`
+              : null;
+
+            const blocks = [
+              { type: 'header', text: { type: 'plain_text', text: '🤖 LINE要エスカレーション（村田不在）' } },
+              {
+                type: 'section',
+                fields: [
+                  { type: 'mrkdwn', text: `*顧客*: ${name}` },
+                  { type: 'mrkdwn', text: `*意図*: ${aiResponse.intent}` },
+                  { type: 'mrkdwn', text: `*理由*: ${reason}` },
+                ],
+              },
+              {
+                type: 'section',
+                text: { type: 'mrkdwn', text: `*メッセージ内容*\n>>>${incomingText.slice(0, 600)}` },
+              },
+              ...(chatLink
+                ? [{
+                    type: 'actions',
+                    elements: [
+                      { type: 'button', text: { type: 'plain_text', text: 'harnessで開く' }, url: chatLink, style: 'primary' },
+                    ],
+                  }]
+                : []),
+            ];
+
+            try {
+              await fetch(`${SLACK_API}/chat.postMessage`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  channel: KOIZUMI_DM,
+                  text: `🔔 LINEエスカレーション: ${name} - ${reason}`,
+                  blocks,
+                }),
+              });
+            } catch (e) {
+              console.error('[AI] Slack DM notification failed:', e);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[AI] DeepSeek call failed, falling back to manual', err);
+        // 失敗時は何も返さず、既存通りCS画面に未読で残る（安全側）
       }
     }
 

@@ -62,3 +62,5 @@ CS_FAQ_SHEET_RANGE = "FAQ!A2:F1000"
 # wrangler secret put GCP_SERVICE_ACCOUNT_JSON < ~/Downloads/oryzae-secrets/cs-harness-key.json
 # wrangler secret put SLACK_BOT_TOKEN
 # wrangler secret put CS_FAQ_SHEET_ID
+# LINE AI Chatbot: DeepSeek API Key（既存の rakuten-mailmag と共用）
+# wrangler secret put DEEPSEEK_API_KEY

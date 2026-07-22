@@ -174,6 +174,8 @@ export type Env = {
     RAKUTEN_LICENSE_KEY?: string;
     // Judge.me webhook
     JUDGEME_WEBHOOK_SECRET?: string;
+    // LINE AI Chatbot (DeepSeek)
+    DEEPSEEK_API_KEY?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
