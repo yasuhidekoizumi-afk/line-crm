@@ -87,7 +87,7 @@ async function handleEvent(
   lineAccountId: string | null = null,
   workerUrl?: string,
   env?: {
-    DEEPSEEK_API_KEY?: string;
+    GEMINI_API_KEY?: string;
     SLACK_BOT_TOKEN?: string;
     WORKER_URL?: string;
   },
@@ -390,7 +390,7 @@ async function handleEvent(
     }
 
     // ── AI一次対応（auto_repliesがマッチしなかった場合） ──────────
-    if (!matched && !replyTokenConsumed && env?.DEEPSEEK_API_KEY) {
+    if (!matched && !replyTokenConsumed && env?.GEMINI_API_KEY) {
       try {
         const { detectMoneyKeywords: hasMoneyKw, chatWithDeepSeek } = await import('@line-crm/ai-sdk');
         const name = friend.display_name || 'お客様';
@@ -430,7 +430,7 @@ LINEで顧客から届いたメッセージに、親切・簡潔に回答して�
 顧客名: ${name}`;
 
         const aiResponse = await chatWithDeepSeek(
-          env.DEEPSEEK_API_KEY,
+          env.GEMINI_API_KEY,
           systemPrompt,
           [{ role: 'user', content: incomingText }],
           { temperature: 0.3, maxTokens: 500 },

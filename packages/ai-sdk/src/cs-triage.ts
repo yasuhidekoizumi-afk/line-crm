@@ -12,7 +12,7 @@
  */
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const MODEL = 'gemini-3-flash-preview';
+const MODEL = 'gemini-3.6-flash';
 
 // Gemini 3 Flash Preview 想定単価（USD per 1M tokens）。実際は最新価格を確認のこと。
 const PRICE_INPUT_USD_PER_1M = 0.075;

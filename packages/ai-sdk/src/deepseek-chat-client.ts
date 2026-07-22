@@ -1,15 +1,15 @@
 /**
- * LINE AI Chatbot: DeepSeek V4-Flash クライアント
+ * LINE AI Chatbot: Gemini 3.6 Flash クライアント
  *
  * LINEの顧客メッセージに対してAIが一次対応する。
  * - FAQ・定型質問は自動応答
  * - 返金・クレーム・複雑な問い合わせはエスカレーション
  *
- * モデル: deepseek-v4-flash（OpenAI互換API）
- * 料金: $0.14/MTok 入力, $0.28/MTok 出力
+ * モデル: gemini-3.6-flash（OpenAI互換API経由）
+ * 料金: $1.50/1M 入力, $7.50/1M 出力
  */
 
-const DEEPSEEK_API_BASE = 'https://api.deepseek.com/v1';
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -28,9 +28,9 @@ export interface ChatResponse {
 }
 
 /**
- * DeepSeek V4-Flash に問い合わせ、構造化応答を得る
+ * Gemini 3.6 Flash に問い合わせ、構造化応答を得る
  *
- * @param apiKey DeepSeek API キー
+ * @param apiKey Gemini API キー
  * @param systemPrompt システムプロンプト
  * @param messages 会話履歴（現在は直近1件のみ）
  * @param options オプション（temperature, maxTokens）
@@ -45,9 +45,8 @@ export async function chatWithDeepSeek(
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens ?? 500;
 
-  // DeepSeekはOpenAI互換API
   const requestBody = {
-    model: 'deepseek-v4-flash',
+    model: 'gemini-3.6-flash',
     temperature,
     max_tokens: maxTokens,
     messages: [
@@ -58,18 +57,18 @@ export async function chatWithDeepSeek(
   };
 
   try {
-    const res = await fetch(`${DEEPSEEK_API_BASE}/chat/completions`, {
+    const res = await fetch(`${GEMINI_API_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        'x-goog-api-key': apiKey,
       },
       body: JSON.stringify(requestBody),
     });
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error('[deepseek] API error', res.status, errText.slice(0, 300));
+      console.error('[line-cs-gemini] API error', res.status, errText.slice(0, 300));
       return fallbackResponse('escalate', `API error: ${res.status}`);
     }
 
@@ -82,7 +81,7 @@ export async function chatWithDeepSeek(
 
     const content = data.choices?.[0]?.message?.content?.trim();
     if (!content) {
-      console.error('[deepseek] empty response', JSON.stringify(data).slice(0, 200));
+      console.error('[line-cs-gemini] empty response', JSON.stringify(data).slice(0, 200));
       return fallbackResponse('escalate', 'Empty response');
     }
 
@@ -96,8 +95,7 @@ export async function chatWithDeepSeek(
     try {
       parsed = JSON.parse(content);
     } catch (e) {
-      console.error('[deepseek] JSON parse failed:', content.slice(0, 200));
-      // JSONでない場合はテキストをそのままreplyとして扱う（安全側）
+      console.error('[line-cs-gemini] JSON parse failed:', content.slice(0, 200));
       return {
         reply: content,
         intent: 'other',
@@ -124,7 +122,7 @@ export async function chatWithDeepSeek(
       handled: true,
     };
   } catch (err) {
-    console.error('[deepseek] exception:', err);
+    console.error('[line-cs-gemini] exception:', err);
     return fallbackResponse('escalate', `Exception: ${String(err)}`);
   }
 }
