@@ -506,7 +506,7 @@ async function notifyKoizumiLineEscalation(
     console.warn('[AI] SLACK_BOT_TOKEN not set, cannot send DM');
     return;
   }
-  const KOIZUMI_DM = 'D0BJBFTETEE';
+  const KOIZUMI_DM = 'DDAC7QSHM';
   const chatLink = env.WORKER_URL
     ? `${env.WORKER_URL.replace(/\/$/, '')}/chats?id=${params.friendId}`
     : null;

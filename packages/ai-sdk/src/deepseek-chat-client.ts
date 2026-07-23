@@ -61,7 +61,7 @@ export async function chatWithDeepSeek(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(requestBody),
     });

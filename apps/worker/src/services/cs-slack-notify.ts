@@ -26,7 +26,7 @@ function chatUrl(env: CsSlackEnv, chatId: string): string {
 
 async function postToChannel(env: CsSlackEnv, blocks: unknown[], text: string): Promise<void> {
   // 村田不在時（2026年8月）は小泉DMにエスカレーション
-  const channel = 'D0BJBFTETEE'; // 小泉さんSlack DM
+  const channel = 'DDAC7QSHM'; // 小泉さんSlack DM
   if (env.SLACK_BOT_TOKEN) {
     try {
       const res = await fetch(`${SLACK_API_BASE}/chat.postMessage`, {
