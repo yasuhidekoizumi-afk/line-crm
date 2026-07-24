@@ -174,7 +174,8 @@ export type Env = {
     RAKUTEN_LICENSE_KEY?: string;
     // Judge.me webhook
     JUDGEME_WEBHOOK_SECRET?: string;
-    // LINE AI Chatbot (DeepSeek)
+    // LINE AI Chatbot。顧客向けの自動返信は明示的に有効化した場合のみ動かす。
+    LINE_AI_AUTOREPLY_ENABLED?: string;
     DEEPSEEK_API_KEY?: string;
   };
   Variables: {

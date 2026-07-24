@@ -88,6 +88,7 @@ async function handleEvent(
   workerUrl?: string,
   env?: {
     GEMINI_API_KEY?: string;
+    LINE_AI_AUTOREPLY_ENABLED?: string;
     SLACK_BOT_TOKEN?: string;
     WORKER_URL?: string;
   },
@@ -389,8 +390,14 @@ async function handleEvent(
       }
     }
 
-    // ── AI一次対応（auto_repliesがマッチしなかった場合） ──────────
-    if (!matched && !replyTokenConsumed && env?.GEMINI_API_KEY) {
+    // ── AI一次対応（明示的に有効化した場合のみ） ──────────
+    // 顧客向けの自動返信は、未設定時を安全側（停止）にする。
+    if (
+      !matched &&
+      !replyTokenConsumed &&
+      env?.LINE_AI_AUTOREPLY_ENABLED === 'true' &&
+      env.GEMINI_API_KEY
+    ) {
       try {
         const { detectMoneyKeywords: hasMoneyKw, chatWithDeepSeek } = await import('@line-crm/ai-sdk');
         const name = friend.display_name || 'お客様';
