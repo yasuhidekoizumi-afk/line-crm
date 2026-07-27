@@ -29,7 +29,7 @@ const liffRoutes = new Hono<Env>();
  * Query params:
  *   ?ref=xxx     — attribution tracking
  *   ?redirect=url — redirect after completion
- *   ?mode=register — 端末を問わずLINE Loginの友だち追加プロンプトを表示
+ *   ?mode=register — 公式アカウントの友だち追加画面へ直接遷移
  *   ?gclid=xxx   — Google Ads click ID
  *   ?fbclid=xxx  — Meta Ads click ID
  *   ?utm_source=xxx, utm_medium, utm_campaign, utm_content, utm_term — UTM params
@@ -63,6 +63,33 @@ liffRoutes.get('/auth/line', async (c) => {
     }
   }
   const callbackUrl = `${baseUrl}/auth/callback`;
+
+  // お客様向けの友だち追加URLはLINE Loginを経由しない。
+  // LINE Developers側のcallback URL登録漏れに影響されず、公式アカウントの
+  // 追加画面を確実に開けるようにする。
+  if (registrationMode) {
+    const accounts = await getLineAccounts(c.env.DB);
+    const account = accounts.find((item) => item.is_active === 1 && item.login_channel_id === channelId)
+      ?? accounts.find((item) => item.is_active === 1);
+    const channelAccessToken = account?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!channelAccessToken) {
+      return c.text('LINE公式アカウントの設定が見つかりません。', 503);
+    }
+    const botInfo = await fetch('https://api.line.me/v2/bot/info', {
+      headers: { Authorization: `Bearer ${channelAccessToken}` },
+    });
+    if (!botInfo.ok) {
+      console.error('[auth/line] Failed to resolve bot basic ID for registration link', {
+        status: botInfo.status,
+      });
+      return c.text('LINE公式アカウントの確認に失敗しました。', 503);
+    }
+    const bot = await botInfo.json<{ basicId?: string }>();
+    if (!bot.basicId) {
+      return c.text('LINE公式アカウントの追加URLが見つかりません。', 503);
+    }
+    return c.redirect(`https://line.me/R/ti/p/${bot.basicId}`);
+  }
 
   // xh: refs are X Harness one-time tokens — never forward to third-party URLs (liff.line.me / QR)
   // The token must reach /auth/callback, so it IS included in the OAuth state (handled by this worker).
@@ -107,13 +134,12 @@ liffRoutes.get('/auth/line', async (c) => {
   if (accountParam) qrParams.set('account', accountParam);
   const qrUrl = qrParams.toString() ? `${liffUrl}?${qrParams.toString()}` : liffUrl;
 
-  // Mobile: 通常はLIFFを開く。友だち追加URL（mode=register）では、LINE Loginの
-  // bot_prompt=aggressiveを必ず経由し、追加済みでない人にも登録画面を表示する。
-  // クロスアカウント連携も、別アカウントのLIFFを開けないためOAuthを使う。
+  // Mobile: 通常はLIFFを開く。クロスアカウント連携は、別アカウントのLIFFを
+  // 開けないためOAuthを使う。
   const ua = (c.req.header('user-agent') || '').toLowerCase();
   const isMobile = /iphone|ipad|android|mobile/.test(ua);
   if (isMobile) {
-    if (accountParam || registrationMode) {
+    if (accountParam) {
       return c.redirect(loginUrl.toString());
     }
     return c.redirect(qrUrl);
