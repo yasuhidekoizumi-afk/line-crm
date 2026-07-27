@@ -956,6 +956,9 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
     }
 
     let lineUserId: string | null = null;
+    // 連携に使われたLINE Loginチャネル。友だちレコードが欠けていた場合に、
+    // 対応する公式アカウントへ本人の友だち状態を直接照会するために保持する。
+    let verifiedLoginChannelId: string | null = null;
 
     // アクセストークン検証（LIFFチャネルに openid スコープが無くても動く）
     if (body.accessToken) {
@@ -973,6 +976,7 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
       if (tokenInfo.expires_in <= 0) {
         return c.json({ success: false, error: 'Access token expired' }, 401);
       }
+      verifiedLoginChannelId = tokenInfo.client_id;
       // 2) /v2/profile で userId 取得
       const profileRes = await fetch('https://api.line.me/v2/profile', {
         headers: { Authorization: `Bearer ${body.accessToken}` },
@@ -991,7 +995,10 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ id_token: body.idToken, client_id: channelId }),
         });
-        if (verifyRes.ok) break;
+        if (verifyRes.ok) {
+          verifiedLoginChannelId = channelId;
+          break;
+        }
       }
       if (!verifyRes?.ok) {
         return c.json({ success: false, error: 'Invalid ID token' }, 401);
@@ -1005,9 +1012,67 @@ liffRoutes.post('/api/liff/link-shopify', async (c) => {
     }
 
     // LINE userID → friend_id
-    const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
+    let friend = await getFriendByLineUserId(c.env.DB, lineUserId);
     if (!friend) {
-      return c.json({ success: false, error: 'Friend not found（まずLINE公式アカウントを友だち追加してください）' }, 404);
+      // follow Webhookの一時的な未達や、CRM導入前からの既存友だちでは friends に
+      // レコードが無いことがある。LINE Loginで本人確認済みのUIDを、該当公式アカウントの
+      // Messaging APIで再照会し、友だちならここで安全に復旧する。
+      const account = dbAccounts.find((item) =>
+        item.is_active === 1 && item.login_channel_id === verifiedLoginChannelId,
+      );
+      const channelAccessToken = account?.channel_access_token
+        ?? (verifiedLoginChannelId === c.env.LINE_LOGIN_CHANNEL_ID ? c.env.LINE_CHANNEL_ACCESS_TOKEN : undefined);
+
+      if (!channelAccessToken) {
+        console.error('[link-shopify] No Messaging API token for verified LINE Login channel', {
+          verifiedLoginChannelId,
+        });
+        return c.json({
+          success: false,
+          code: 'friend_check_failed',
+          error: 'LINE連携の確認に失敗しました。時間をおいて再度お試しください。',
+        }, 503);
+      }
+
+      try {
+        const { LineClient } = await import('@line-crm/line-sdk');
+        const profile = await new LineClient(channelAccessToken).getProfile(lineUserId);
+        friend = await upsertFriend(c.env.DB, {
+          lineUserId,
+          displayName: profile.displayName,
+          pictureUrl: profile.pictureUrl ?? null,
+          statusMessage: profile.statusMessage ?? null,
+        });
+        if (account) {
+          await c.env.DB.prepare(
+            'UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL',
+          ).bind(account.id, friend.id).run();
+        }
+        console.log('[link-shopify] Recovered missing friend record after verified profile lookup', {
+          friendId: friend.id,
+          lineAccountId: account?.id ?? null,
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        // Messaging APIの404は「この公式アカウントの友だちではない」ことを意味する。
+        // 顧客に内部情報を出さず、必要な操作だけを案内する。
+        if (detail.includes('404')) {
+          return c.json({
+            success: false,
+            code: 'not_friend',
+            error: 'LINE公式アカウントを友だち追加してから、もう一度LINE連携を行ってください。',
+          }, 409);
+        }
+        console.error('[link-shopify] Failed to recover missing friend record', {
+          verifiedLoginChannelId,
+          error: detail,
+        });
+        return c.json({
+          success: false,
+          code: 'friend_check_failed',
+          error: 'LINE連携の確認に失敗しました。時間をおいて再度お試しください。',
+        }, 503);
+      }
     }
 
     // 中核ロジック（なりすまし防止・sp_合流・連携・特典付与の二重防止・通知）は
