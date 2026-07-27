@@ -205,6 +205,30 @@ function showError(message: string, debugExtra: Record<string, unknown> = {}): v
   }
 }
 
+/**
+ * 公式アカウントの友だちではない場合の案内。
+ * 通常の障害ではないため、メールアドレスや顧客IDを含むデバッグ情報は表示しない。
+ */
+function showFriendRequired(): void {
+  render(`
+    <div class="card">
+      <h2>LINE公式アカウントを追加してください</h2>
+      <p class="message">まずORYZAE公式LINEを友だち追加してから、<br>Shopifyのマイページに戻って<br>もう一度「LINE連携する」を押してください。</p>
+      <button id="closeBtn" class="close-btn" style="margin-top:24px;">マイページに戻る</button>
+    </div>
+  `);
+  const closeBtn = document.getElementById('closeBtn');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      if (liff.isInClient()) {
+        liff.closeWindow();
+      } else {
+        window.location.href = resolveCloseUrl();
+      }
+    });
+  }
+}
+
 export async function initLinkShopify(): Promise<void> {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -252,7 +276,7 @@ export async function initLinkShopify(): Promise<void> {
       return;
     }
 
-    let json: { success: boolean; data?: { bonusAwarded: number; backfilledOrders: number; backfilledPoints: number; couponCode?: string | null; couponExpiresAt?: string | null; alreadyLinked?: boolean; alreadyLinkedSource?: 'crm_plus' | 'self' | null }; error?: string } | null = null;
+    let json: { success: boolean; code?: 'not_friend' | 'friend_check_failed'; data?: { bonusAwarded: number; backfilledOrders: number; backfilledPoints: number; couponCode?: string | null; couponExpiresAt?: string | null; alreadyLinked?: boolean; alreadyLinkedSource?: 'crm_plus' | 'self' | null }; error?: string } | null = null;
     try {
       json = JSON.parse(rawBody);
     } catch {
@@ -265,6 +289,10 @@ export async function initLinkShopify(): Promise<void> {
     }
 
     if (!res.ok || !json?.success) {
+      if (json?.code === 'not_friend') {
+        showFriendRequired();
+        return;
+      }
       showError(json?.error || `連携に失敗しました（HTTP ${res.status}）`, {
         stage: 'serverError',
         httpStatus: res.status,
