@@ -43,6 +43,11 @@ import { previewUnusedCodeRefunds } from '../services/loyalty-code-refund-previe
 import { sweepUnusedPointCodes } from '../services/loyalty-unused-code-sweep.js';
 import { rescueSocialplusCustomer, sweepSocialplusUnlinked } from '../services/loyalty-socialplus-rescue.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
+import {
+  cancelDirectPointReservation,
+  createDirectPointReservation,
+  getActiveDirectPointReservation,
+} from '../services/direct-point-redemption.js';
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
@@ -950,7 +955,7 @@ loyalty.post('/api/loyalty/order-cancelled', async (c) => {
 loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
   try {
     // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）
-    const sigErr = await checkCustomerSig(c, c.req.param('shopifyCustomerId'));
+    const sigErr = await checkCustomerSig(c as never, c.req.param('shopifyCustomerId'));
     if (sigErr) return sigErr;
     const point = await getLoyaltyPointByShopifyCustomerId(
       c.env.DB,
@@ -999,6 +1004,15 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
       }
     } catch (_) {}
 
+    // 新ポイント利用は「予約」だけを返す。内部コードは顧客向けAPIに含めない。
+    let pendingRedemption: { points: number; discount_amount: number } | null = null;
+    try {
+      const reservation = await getActiveDirectPointReservation(c.env.DB, point.friend_id);
+      if (reservation?.status === 'active') {
+        pendingRedemption = { points: reservation.points, discount_amount: reservation.discount_amount };
+      }
+    } catch (_) {}
+
     // 期限切れが近いポイントを取得
     let expiringSoon: { points: number; expires_at: string } | null = null;
     try {
@@ -1041,6 +1055,7 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
         pending_code: pendingCode,
         pending_discount: pendingDiscount,
         pending_points: pendingPoints,
+        pending_redemption: pendingRedemption,
         expiring_soon: expiringSoon,
         benefits,
         rank_definitions,
@@ -1049,6 +1064,49 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
     });
   } catch (e) {
     return c.json({ success: false, error: 'Failed to fetch loyalty point' }, 500);
+  }
+});
+
+// POST /api/loyalty/shopify/:shopifyCustomerId/redemption-reservations
+// ステージング用の新フロー: 予約時は残高を減らさず、注文Webhookでのみ消費する。
+loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redemption-reservations', async (c) => {
+  try {
+    const sigErr = await checkCustomerSig(c as never, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
+    const shopifyCustomerId = c.req.param('shopifyCustomerId');
+    const body = await c.req.json<{ points?: number }>().catch(() => ({} as { points?: number }));
+    const points = Number(body.points);
+    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (!point) return c.json({ success: false, error: 'ポイント残高がありません' }, 400);
+    const result = await createDirectPointReservation(c.env, {
+      friendId: point.friend_id,
+      shopifyCustomerId,
+      points,
+    });
+    if (!result.ok) return c.json({ success: false, error: result.error }, 400);
+    return c.json({
+      success: true,
+      // コードは画面に表示せず、Shopify が割引をカートに登録するための遷移にだけ使う。
+      data: { redirect_path: `/discount/${encodeURIComponent(result.code)}?redirect=/cart`, points: result.points, discount_amount: result.discountAmount },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: 'ポイント利用の準備に失敗しました' }, 500);
+  }
+});
+
+// POST /api/loyalty/shopify/:shopifyCustomerId/redemption-reservations/cancel
+loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redemption-reservations/cancel', async (c) => {
+  try {
+    const sigErr = await checkCustomerSig(c as never, c.req.param('shopifyCustomerId'));
+    if (sigErr) return sigErr;
+    const shopifyCustomerId = c.req.param('shopifyCustomerId');
+    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (!point) return c.json({ success: false, error: 'ポイント残高がありません' }, 400);
+    const result = await cancelDirectPointReservation(c.env, { friendId: point.friend_id, shopifyCustomerId });
+    if (!result.ok) return c.json({ success: false, error: result.error }, 400);
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: 'ポイント利用の取り消しに失敗しました' }, 500);
   }
 });
 

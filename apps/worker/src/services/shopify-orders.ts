@@ -10,6 +10,7 @@
  */
 
 import { markPointCodeUsedByFriendId } from './loyalty-code-refund.js';
+import { consumeDirectPointReservationForOrder } from './direct-point-redemption.js';
 
 export interface ShopifyOrderPayload {
   id: number | string;
@@ -301,7 +302,15 @@ export async function persistShopifyOrder(
   const pointCodes = extractPointDiscountCodes(order);
   if (friend_id && pointCodes.length > 0) {
     for (const code of pointCodes) {
-      await markPointCodeUsedByFriendId(db, friend_id, code);
+      const direct = await consumeDirectPointReservationForOrder(
+        { DB: db },
+        { friendId: friend_id, shopifyCustomerId, orderId: shopifyOrderId, code },
+      );
+      // 既存の割引コード利用は従来通り履歴を利用済みにする。
+      // 新フローの予約は注文確定時にポイントを減算するため、二重で触らない。
+      if (!direct.consumed) {
+        await markPointCodeUsedByFriendId(db, friend_id, code);
+      }
     }
   }
 
