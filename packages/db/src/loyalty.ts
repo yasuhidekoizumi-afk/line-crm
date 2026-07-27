@@ -700,13 +700,22 @@ export async function getLoyaltyTransactionsByShopifyCustomerId(
 
   if (!pointRow) return { items: [], total: 0 };
 
+  // お客様向け履歴では、旧仕様のコード発行・取消という途中操作は表示しない。
+  // 注文確定後の新しいポイント利用は「コード:」を含まないため、そのまま表示される。
+  const customerHistoryWhere = `
+    friend_id = ?
+    AND points != 0
+    AND NOT (type = 'redeem' AND reason LIKE '%/ コード:%')
+    AND NOT (type = 'adjust' AND reason LIKE '%割引コードの取り消し%')
+  `;
+
   const countRow = await db
-    .prepare(`SELECT COUNT(*) as n FROM loyalty_transactions WHERE friend_id = ?`)
+    .prepare(`SELECT COUNT(*) as n FROM loyalty_transactions WHERE ${customerHistoryWhere}`)
     .bind(pointRow.friend_id)
     .first<{ n: number }>();
 
   const rows = await db
-    .prepare(`SELECT * FROM loyalty_transactions WHERE friend_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .prepare(`SELECT * FROM loyalty_transactions WHERE ${customerHistoryWhere} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
     .bind(pointRow.friend_id, limit, offset)
     .all<LoyaltyTransactionRow>();
 
