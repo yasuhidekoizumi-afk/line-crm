@@ -29,6 +29,7 @@ const liffRoutes = new Hono<Env>();
  * Query params:
  *   ?ref=xxx     — attribution tracking
  *   ?redirect=url — redirect after completion
+ *   ?mode=register — 端末を問わずLINE Loginの友だち追加プロンプトを表示
  *   ?gclid=xxx   — Google Ads click ID
  *   ?fbclid=xxx  — Meta Ads click ID
  *   ?utm_source=xxx, utm_medium, utm_campaign, utm_content, utm_term — UTM params
@@ -46,6 +47,7 @@ liffRoutes.get('/auth/line', async (c) => {
   const cidParam = c.req.query('cid') || ''; // Shopify customer ID for link-and-bonus on callback
   const accountParam = c.req.query('account') || '';
   const uidParam = c.req.query('uid') || ''; // existing user UUID for cross-account linking
+  const registrationMode = c.req.query('mode') === 'register';
   const baseUrl = new URL(c.req.url).origin;
 
   // Multi-account: resolve LINE Login channel + LIFF from DB if account param provided
@@ -105,14 +107,13 @@ liffRoutes.get('/auth/line', async (c) => {
   if (accountParam) qrParams.set('account', accountParam);
   const qrUrl = qrParams.toString() ? `${liffUrl}?${qrParams.toString()}` : liffUrl;
 
-  // Mobile: redirect to LIFF URL (opens LINE app directly)
-  // Exception: cross-account links (account param) use OAuth directly
-  // because Account A's LIFF can't open from Account B's LINE chat
+  // Mobile: 通常はLIFFを開く。友だち追加URL（mode=register）では、LINE Loginの
+  // bot_prompt=aggressiveを必ず経由し、追加済みでない人にも登録画面を表示する。
+  // クロスアカウント連携も、別アカウントのLIFFを開けないためOAuthを使う。
   const ua = (c.req.header('user-agent') || '').toLowerCase();
   const isMobile = /iphone|ipad|android|mobile/.test(ua);
   if (isMobile) {
-    if (accountParam) {
-      // Cross-account: use OAuth (LIFF won't work across accounts)
+    if (accountParam || registrationMode) {
       return c.redirect(loginUrl.toString());
     }
     return c.redirect(qrUrl);
