@@ -64,6 +64,7 @@ export async function sweepUnusedPointCodes(
        WHERE lt.type = 'redeem'
          AND lt.reason NOT LIKE '[取り消し済み]%'
          AND lt.reason NOT LIKE '[利用済み]%'
+         AND (lt.reason LIKE '%コード: ORYZAE-%' OR lt.reason LIKE '%コード: KOJIPOP-%')
          AND lt.created_at < ?
          AND lp.shopify_customer_id IS NOT NULL
        ORDER BY lt.created_at ASC
