@@ -80,9 +80,11 @@ export async function refundUnusedPointCode(
   const db = env.DB;
   const normalizedCode = code.trim().toUpperCase();
 
-  // このコードがこの顧客のものか確認（コード = ORYZAE-<顧客ID末尾6桁>-xxxx）
+  // このコードがこの顧客のものか確認。
+  // 旧仕様には KOJIPOP-<顧客ID末尾6桁>-xxxx 形式もあるため、両形式を受け付ける。
   const expectedSuffix = shopifyCustomerId.slice(-6);
-  if (!normalizedCode.startsWith(`ORYZAE-${expectedSuffix}-`)) {
+  const ownedPrefixes = [`ORYZAE-${expectedSuffix}-`, `KOJIPOP-${expectedSuffix}-`];
+  if (!ownedPrefixes.some((prefix) => normalizedCode.startsWith(prefix))) {
     return { refunded: false, reason: 'not_owned' };
   }
 
