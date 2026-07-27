@@ -23,6 +23,11 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.match(/^\/api\/loyalty\/shopify\/[^/]+$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redeem$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) ||
+    // カートのポイント利用は、Shopifyテーマから本人確認付きで呼び出す。
+    // 実際の本人確認は各ルートの checkCustomerSig が担うため、ここでは
+    // 管理者用Bearer認証を要求しない。
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redemption-reservations$/) ||
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redemption-reservations\/cancel$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/profile-birthday$/) ||
     path === '/api/loyalty/campaign-award' ||
