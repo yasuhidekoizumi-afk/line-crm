@@ -182,6 +182,7 @@ function buildBirthdayFlex(type: CouponType, name: string, code: string, expire:
       contents: [
         { type: 'text', text: `${name}さんへ`, weight: 'bold', size: 'md', color: '#5c4a2e' },
         { type: 'text', text: lead, size: 'sm', color: '#8a7a5c', wrap: true },
+        { type: 'text', text: '8月にお誕生日を迎える方へ、特別なクーポンをお送りしています。', size: 'sm', color: '#5c4a2e', wrap: true },
         {
           type: 'box', layout: 'vertical', spacing: 'sm', margin: 'md',
           paddingAll: '14px', backgroundColor: '#FBF6EC', cornerRadius: '10px',
