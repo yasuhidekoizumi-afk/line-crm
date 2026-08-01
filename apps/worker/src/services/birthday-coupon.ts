@@ -42,7 +42,7 @@ const AMOUNT_THRESHOLD = 5000; // 直近注文額の境目（未満=送料無料
 const EXPIRY_DAYS = 14;
 
 type CouponType = 'free_shipping' | 'fixed_500';
-type Mode = 'dryrun' | 'test' | 'live';
+type Mode = 'dryrun' | 'test' | 'issue' | 'deliver' | 'live';
 
 export interface BirthdayCampaignTarget {
   shopifyCustomerId: string;
@@ -290,7 +290,7 @@ export async function processBirthdayCoupons(
   // ① 緊急停止スイッチ: enabled=1 でなければ何もしない（force で上書き可＝手動テスト）
   if (!opts.force && !enabled) return result;
 
-  if (opts.campaign && mode === 'live') {
+  if (opts.campaign && (mode === 'live' || mode === 'deliver')) {
     const now = Date.now();
     const startsAt = Date.parse(opts.campaign.startsAt);
     const endsAt = Date.parse(opts.campaign.endsAt);
@@ -387,9 +387,10 @@ export async function processBirthdayCoupons(
       if (mode === 'dryrun') continue;
 
       let logClaimed = false;
+      let couponCode = '';
 
       // ② 冪等: 年1回（testモードは繰り返しテストできるよう冪等チェックしない）
-      if (mode === 'live') {
+      if (mode === 'live' || mode === 'issue') {
         const claim = await db
           .prepare(
             `INSERT OR IGNORE INTO birthday_coupon_log (id, shopify_customer_id, friend_id, year, coupon_type, status, channel, recent_amount)
@@ -401,28 +402,52 @@ export async function processBirthdayCoupons(
         logClaimed = true;
       }
 
-      // クーポン発行
-      const issued = await issueBirthdayCoupon(env, scid, type, startsAt, endsAt);
-      if (!issued.ok) {
-        result.errors++;
-        if (result.errorSamples.length < 5) result.errorSamples.push(`${scid}: ${issued.error}`);
-        if (logClaimed) {
-          await db.prepare(`UPDATE birthday_coupon_log SET status = 'failed', error_message = ? WHERE shopify_customer_id = ? AND year = ?`)
-            .bind(issued.error, scid, year).run();
+      if (mode === 'deliver') {
+        const existingLog = await db
+          .prepare(
+            `SELECT code, coupon_type, status
+             FROM birthday_coupon_log
+             WHERE shopify_customer_id = ? AND year = ?`,
+          )
+          .bind(scid, year)
+          .first<{ code: string | null; coupon_type: string | null; status: string }>();
+        if (!existingLog?.code || existingLog.coupon_type !== type) {
+          result.errors++;
+          if (result.errorSamples.length < 5) result.errorSamples.push(`${scid}: 発行済みコードまたは種別が不一致`);
+          continue;
         }
-        continue;
+        if (existingLog.status === 'sent') {
+          result.alreadyDone++;
+          continue;
+        }
+        couponCode = existingLog.code;
+      } else {
+        // クーポン発行
+        const issued = await issueBirthdayCoupon(env, scid, type, startsAt, endsAt);
+        if (!issued.ok) {
+          result.errors++;
+          if (result.errorSamples.length < 5) result.errorSamples.push(`${scid}: ${issued.error}`);
+          if (logClaimed) {
+            await db.prepare(`UPDATE birthday_coupon_log SET status = 'failed', error_message = ? WHERE shopify_customer_id = ? AND year = ?`)
+              .bind(issued.error, scid, year).run();
+          }
+          continue;
+        }
+        couponCode = issued.code;
+        result.issued++;
+        if (mode === 'live' || mode === 'issue') {
+          await db.prepare(`UPDATE birthday_coupon_log SET code = ?, status = 'issued' WHERE shopify_customer_id = ? AND year = ?`)
+            .bind(couponCode, scid, year).run();
+        }
       }
-      result.issued++;
-      if (result.sample.length > 0 && result.sample[result.sample.length - 1].scid === scid) {
-        result.sample[result.sample.length - 1].code = issued.code;
-      }
-      if (mode === 'live') {
-        await db.prepare(`UPDATE birthday_coupon_log SET code = ?, status = 'issued' WHERE shopify_customer_id = ? AND year = ?`)
-          .bind(issued.code, scid, year).run();
-      }
+      const sampleRow = result.sample.find((row) => row.scid === scid);
+      if (sampleRow) sampleRow.code = couponCode;
+
+      // issueモードはShopify発行とD1記録だけで終了し、LINEは送らない。
+      if (mode === 'issue') continue;
 
       // LINE送信のみ。送れない場合もメール代替配信はしない。
-      const sendRes = await sendLineFlex(env, t.friend_id, type, name, issued.code, expireStr);
+      const sendRes = await sendLineFlex(env, t.friend_id, type, name, couponCode, expireStr);
       const channel = sendRes.sent ? 'line' : 'none';
       const deliveryError = sendRes.sent ? '' : (sendRes.error ?? 'line_send_failed');
       if (sendRes.sent) {
@@ -430,7 +455,7 @@ export async function processBirthdayCoupons(
         result.lineSent++;
       }
 
-      if (mode === 'live') {
+      if (mode === 'live' || mode === 'deliver') {
         await db
           .prepare(
             `UPDATE birthday_coupon_log
