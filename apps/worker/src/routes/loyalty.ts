@@ -2069,15 +2069,17 @@ loyalty.post('/api/loyalty/admin/scan-socialplus-unlinked', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// POST /api/loyalty/admin/birthday-coupon-run?mode=dryrun|test|live&force=1&today=MM-DD
+// POST /api/loyalty/admin/birthday-coupon-run?mode=dryrun|test|issue|deliver|live&force=1&today=MM-DD
 //   誕生日クーポン処理を手動実行。mode/force で上書き（未指定は設定値）。
-//   dryrun=対象を数えるだけ(発行も送信もしない) / test=テスト送り先(河原さん)だけに発行＋送信 /
-//   live=当日誕生日の全対象へ発行＋送信。today=MM-DD で「今日」を上書き(動作確認用)。認証必須。
+//   dryrun=対象を数えるだけ / test=テスト送り先だけに発行＋送信 /
+//   issue=発行のみ / deliver=発行済みコードをLINE送信 / live=発行＋送信。認証必須。
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/birthday-coupon-run', async (c) => {
   try {
     const modeQ = c.req.query('mode');
-    const mode = modeQ === 'dryrun' || modeQ === 'test' || modeQ === 'live' ? modeQ : undefined;
+    const mode = modeQ === 'dryrun' || modeQ === 'test' || modeQ === 'issue' || modeQ === 'deliver' || modeQ === 'live'
+      ? modeQ
+      : undefined;
     const force = c.req.query('force') === '1';
     const todayQ = c.req.query('today') ?? '';
     const todayMMDD = /^\d{2}-\d{2}$/.test(todayQ) ? todayQ : undefined;
@@ -2093,6 +2095,92 @@ loyalty.post('/api/loyalty/admin/birthday-coupon-run', async (c) => {
     return c.json({ success: true, data: r });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'birthday-coupon-run failed' }, 500);
+  }
+});
+
+// 発行済みキャンペーンの本人限定・1回限り・期限をShopifyから読み戻して検証する。
+loyalty.get('/api/loyalty/admin/birthday-coupon-verify', async (c) => {
+  try {
+    const campaignQ = c.req.query('campaign') ?? '';
+    const { AUGUST_2026_BIRTHDAY_CAMPAIGN } = await import('../services/birthday-coupon.js');
+    if (campaignQ !== AUGUST_2026_BIRTHDAY_CAMPAIGN.id) {
+      return c.json({ success: false, error: '未承認の誕生日キャンペーンです' }, 400);
+    }
+    const shopDomain = c.env.SHOPIFY_SHOP_DOMAIN;
+    const adminToken = await getShopifyAdminToken(c.env);
+    if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
+
+    const query = `query VerifyBirthdayDiscount($code: String!) {
+      codeDiscountNodeByCode(code: $code) {
+        codeDiscount {
+          __typename
+          ... on DiscountCodeBasic {
+            appliesOncePerCustomer usageLimit startsAt endsAt
+            context { ... on DiscountCustomers { customers { id } } }
+          }
+          ... on DiscountCodeFreeShipping {
+            appliesOncePerCustomer usageLimit startsAt endsAt
+            context { ... on DiscountCustomers { customers { id } } }
+          }
+        }
+      }
+    }`;
+    const results = [];
+    for (const target of AUGUST_2026_BIRTHDAY_CAMPAIGN.targets) {
+      const log = await c.env.DB
+        .prepare(`SELECT code, coupon_type, status FROM birthday_coupon_log WHERE shopify_customer_id = ? AND year = 2026`)
+        .bind(target.shopifyCustomerId)
+        .first<{ code: string | null; coupon_type: string | null; status: string }>();
+      if (!log?.code) {
+        results.push({ shopifyCustomerId: target.shopifyCustomerId, ok: false, error: 'D1 codeなし' });
+        continue;
+      }
+      const response = await fetch(`https://${shopDomain}/admin/api/2026-07/graphql.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
+        body: JSON.stringify({ query, variables: { code: log.code } }),
+      });
+      const json = await response.json() as {
+        errors?: Array<{ message: string }>;
+        data?: { codeDiscountNodeByCode?: { codeDiscount?: {
+          __typename: string;
+          appliesOncePerCustomer: boolean;
+          usageLimit: number | null;
+          startsAt: string;
+          endsAt: string | null;
+          context?: { customers?: Array<{ id: string }> };
+        } } | null };
+      };
+      const discount = json.data?.codeDiscountNodeByCode?.codeDiscount;
+      const expectedCustomerGid = `gid://shopify/Customer/${target.shopifyCustomerId}`;
+      const customerIds = discount?.context?.customers?.map((customer) => customer.id) ?? [];
+      const ok = response.ok
+        && !json.errors?.length
+        && !!discount
+        && discount.appliesOncePerCustomer === true
+        && discount.usageLimit === 1
+        && Math.floor(Date.parse(discount.endsAt ?? '') / 1000)
+          === Math.floor(Date.parse(AUGUST_2026_BIRTHDAY_CAMPAIGN.endsAt) / 1000)
+        && customerIds.length === 1
+        && customerIds[0] === expectedCustomerGid
+        && log.coupon_type === target.couponType;
+      results.push({
+        shopifyCustomerId: target.shopifyCustomerId,
+        code: log.code,
+        couponType: log.coupon_type,
+        status: log.status,
+        discountType: discount?.__typename ?? null,
+        appliesOncePerCustomer: discount?.appliesOncePerCustomer ?? null,
+        usageLimit: discount?.usageLimit ?? null,
+        endsAt: discount?.endsAt ?? null,
+        customerIds,
+        ok,
+        errors: json.errors ?? [],
+      });
+    }
+    return c.json({ success: true, data: { ok: results.every((result) => result.ok), results } });
+  } catch (e) {
+    return c.json({ success: false, error: e instanceof Error ? e.message : 'birthday-coupon-verify failed' }, 500);
   }
 });
 
