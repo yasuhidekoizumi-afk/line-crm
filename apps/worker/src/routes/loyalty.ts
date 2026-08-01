@@ -2159,7 +2159,8 @@ loyalty.get('/api/loyalty/admin/birthday-coupon-verify', async (c) => {
         && !!discount
         && discount.appliesOncePerCustomer === true
         && discount.usageLimit === 1
-        && Date.parse(discount.endsAt ?? '') === Date.parse(AUGUST_2026_BIRTHDAY_CAMPAIGN.endsAt)
+        && Math.floor(Date.parse(discount.endsAt ?? '') / 1000)
+          === Math.floor(Date.parse(AUGUST_2026_BIRTHDAY_CAMPAIGN.endsAt) / 1000)
         && customerIds.length === 1
         && customerIds[0] === expectedCustomerGid
         && log.coupon_type === target.couponType;
