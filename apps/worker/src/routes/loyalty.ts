@@ -2081,8 +2081,15 @@ loyalty.post('/api/loyalty/admin/birthday-coupon-run', async (c) => {
     const force = c.req.query('force') === '1';
     const todayQ = c.req.query('today') ?? '';
     const todayMMDD = /^\d{2}-\d{2}$/.test(todayQ) ? todayQ : undefined;
-    const { processBirthdayCoupons } = await import('../services/birthday-coupon.js');
-    const r = await processBirthdayCoupons(c.env, { mode, force, todayMMDD });
+    const campaignQ = c.req.query('campaign') ?? '';
+    const { processBirthdayCoupons, AUGUST_2026_BIRTHDAY_CAMPAIGN } = await import('../services/birthday-coupon.js');
+    const campaign = campaignQ === AUGUST_2026_BIRTHDAY_CAMPAIGN.id
+      ? AUGUST_2026_BIRTHDAY_CAMPAIGN
+      : undefined;
+    if (campaignQ && !campaign) {
+      return c.json({ success: false, error: '未承認の誕生日キャンペーンです' }, 400);
+    }
+    const r = await processBirthdayCoupons(c.env, { mode, force, todayMMDD, campaign });
     return c.json({ success: true, data: r });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'birthday-coupon-run failed' }, 500);
