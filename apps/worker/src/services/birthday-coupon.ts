@@ -13,16 +13,18 @@ import { getShopifyAdminToken } from '../utils/shopify-token.js';
 //   設計: docs/BIRTHDAY_TRIGGER_DESIGN.md / 文面: docs/BIRTHDAY_TRIGGER_MESSAGES_2026-06.md
 //
 //   仕様（確定）:
-//     - 誕生日「当日」配信。直近注文額 <5,000円 → 送料無料 / ≥5,000円 → 500円OFF を出し分け。
-//     - 有効期限 = 誕生日 +14日。年1回（同一顧客×同一年に二重発行/配信しない）。
+//     - 毎月1日に、その月に誕生日を迎える対象者へ配信。
+//     - 直近注文額 <5,000円 → 月次共通の送料無料コード / ≥5,000円 → 月次共通の500円OFFコードを出し分け。
+//     - 共通コードは対象顧客だけが使える Shopify price rule として作り、各対象者は1回まで利用可。
+//     - 有効期限 = 誕生日月の月末。年1回（同一顧客×同一年に二重発行/配信しない）。
 //     - LINE連携後に誕生日登録した人へ Flex（お祝い画像＋クーポン）を配信。メール代替配信はしない。
 //     - 文面ルール: 送料無料ラインには触れない（500円OFF側で5,300円カートを誘発しないため）。
 //
 //   ★安全モード（このファイルの肝）:
 //     1. 緊急停止スイッチ: 設定 birthday_coupon_enabled='1' のときだけ稼働（既定0=停止）。
 //     2. 予行演習(dryrun): 対象を数えてログ出力のみ。クーポン発行も送信も一切しない。
-//     3. テスト(test): 実際の誕生日に関係なく、テスト送り先(河原さん)だけにクーポン発行＋LINE送信。
-//        本番(live): 当日誕生日の全対象へ発行＋送信。
+//     3. テスト(test): 実際の誕生日に関係なく、テスト送り先だけにクーポン発行＋LINE送信。
+//        本番(live): 毎月1日に当月誕生日の全対象へ発行＋送信。
 //
 //   ※本番有効化(enabled=1)＋日次cron結線は小泉さんOK後（設計書の保護ゾーン）。
 // ────────────────────────────────────────────────────────────────────
@@ -39,17 +41,17 @@ export interface BdayEnv {
 const HERO_IMAGE = 'https://oryzae-line-crm.oryzae.workers.dev/images/448496d1-1d2a-4c06-831f-2c0110b5f6ca.png';
 const SHOP_URL = 'https://oryzae.shop';
 const AMOUNT_THRESHOLD = 5000; // 直近注文額の境目（未満=送料無料 / 以上=500円OFF）
-const EXPIRY_DAYS = 14;
 
 type CouponType = 'free_shipping' | 'fixed_500';
 type Mode = 'dryrun' | 'test' | 'live';
 
-/** JSTの「今日」の年とMM-DD */
-function jstToday(): { year: number; mmdd: string } {
+/** JSTの「今日」の年月日 */
+function jstToday(): { year: number; month: number; day: number; mmdd: string; yyyymm: string } {
   const j = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const mm = String(j.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(j.getUTCDate()).padStart(2, '0');
-  return { year: j.getUTCFullYear(), mmdd: `${mm}-${dd}` };
+  const year = j.getUTCFullYear();
+  return { year, month: j.getUTCMonth() + 1, day: j.getUTCDate(), mmdd: `${mm}-${dd}`, yyyymm: `${year}-${mm}` };
 }
 
 /** 有効期限の表示用（YYYY/MM/DD） */
@@ -58,28 +60,54 @@ function formatJaDate(d: Date): string {
   return `${j.getUTCFullYear()}/${String(j.getUTCMonth() + 1).padStart(2, '0')}/${String(j.getUTCDate()).padStart(2, '0')}`;
 }
 
-/** クーポン発行（link-reward-coupon と同型の price_rules + discount_codes REST） */
-async function issueBirthdayCoupon(
+function resolveTargetMonth(opts: { monthYYYYMM?: string; todayMMDD?: string }, today: ReturnType<typeof jstToday>) {
+  if (opts.monthYYYYMM && /^\d{4}-\d{2}$/.test(opts.monthYYYYMM)) {
+    const [year, month] = opts.monthYYYYMM.split('-').map((v) => Number(v));
+    return { year, month, yyyymm: opts.monthYYYYMM };
+  }
+  if (opts.todayMMDD && /^\d{2}-\d{2}$/.test(opts.todayMMDD)) {
+    const month = Number(opts.todayMMDD.slice(0, 2));
+    return { year: today.year, month, yyyymm: `${today.year}-${String(month).padStart(2, '0')}` };
+  }
+  return { year: today.year, month: today.month, yyyymm: today.yyyymm };
+}
+
+/** JST月末 23:59:59 を UTC Date として返す */
+function monthEndJst(year: number, month: number): Date {
+  return new Date(Date.UTC(year, month, 0, 14, 59, 59));
+}
+
+function monthlyCouponCode(type: CouponType, year: number, month: number): string {
+  const suffix = type === 'free_shipping' ? 'SHIP' : '500OFF';
+  return `BDAY-${year}${String(month).padStart(2, '0')}-${suffix}`;
+}
+
+/** 月次共通クーポン発行（対象顧客だけに制限し、各顧客1回まで利用可） */
+async function issueMonthlyBirthdayCoupon(
   env: BdayEnv,
-  scid: string,
   type: CouponType,
+  customerIds: string[],
+  year: number,
+  month: number,
   startsAt: Date,
   endsAt: Date,
+  codeOverride?: string,
 ): Promise<{ ok: true; code: string } | { ok: false; error: string }> {
   const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
   const adminToken = await getShopifyAdminToken(env);
   if (!shopDomain || !adminToken) return { ok: false, error: 'Shopify 設定が未構成です' };
 
-  const code = `BDAY-${scid.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
+  const code = codeOverride ?? monthlyCouponCode(type, year, month);
+  const titleMonth = `${year}年${String(month).padStart(2, '0')}月`;
   const priceRule =
     type === 'free_shipping'
       ? {
-          title: `誕生日 送料無料 ${code}`,
+          title: `誕生日 ${titleMonth} 送料無料 ${code}`,
           target_type: 'shipping_line', target_selection: 'all', allocation_method: 'each',
           value_type: 'percentage', value: '-100.0',
         }
       : {
-          title: `誕生日 500円OFF ${code}`,
+          title: `誕生日 ${titleMonth} 500円OFF ${code}`,
           target_type: 'line_item', target_selection: 'all', allocation_method: 'across',
           value_type: 'fixed_amount', value: '-500.0',
         };
@@ -91,9 +119,8 @@ async function issueBirthdayCoupon(
       price_rule: {
         ...priceRule,
         customer_selection: 'prerequisite',
-        prerequisite_customer_ids: [scid],
+        prerequisite_customer_ids: customerIds,
         once_per_customer: true,
-        usage_limit: 1,
         starts_at: startsAt.toISOString(),
         ends_at: endsAt.toISOString(),
       },
@@ -195,6 +222,8 @@ export interface BdayRunResult {
   enabled: boolean;
   mode: Mode;
   todayMMDD: string;
+  targetMonth: string;
+  skippedReason?: string;
   targets: number;          // 対象（誕生日一致・LINE連携済み）
   alreadyDone: number;      // 今年すでに発行済み（スキップ）
   freeShipping: number;     // 送料無料を発行/予定
@@ -213,17 +242,24 @@ interface TargetRow {
   display_name?: string | null;
 }
 
+interface PreparedTarget extends TargetRow {
+  coupon_type: CouponType;
+  recent_amount: number;
+  display_name: string;
+}
+
 /**
  * 誕生日クーポンの処理本体。3モード対応・冪等。
  *   opts.mode/force で手動上書き可（管理エンドポイント用）。未指定なら設定値に従う。
  */
 export async function processBirthdayCoupons(
   env: BdayEnv,
-  opts: { mode?: Mode; force?: boolean; todayMMDD?: string } = {},
+  opts: { mode?: Mode; force?: boolean; todayMMDD?: string; monthYYYYMM?: string } = {},
 ): Promise<BdayRunResult> {
   const db = env.DB;
-  const { year, mmdd } = jstToday();
-  const todayMMDD = opts.todayMMDD ?? mmdd;
+  const today = jstToday();
+  const targetMonth = resolveTargetMonth(opts, today);
+  const todayMMDD = opts.todayMMDD ?? today.mmdd;
 
   const enabledSetting = await getLoyaltySetting(db, 'birthday_coupon_enabled').catch(() => null);
   const enabled = enabledSetting === '1';
@@ -231,13 +267,17 @@ export async function processBirthdayCoupons(
     opts.mode ?? ((await getLoyaltySetting(db, 'birthday_coupon_mode').catch(() => null)) as Mode) ?? 'dryrun';
 
   const result: BdayRunResult = {
-    enabled, mode, todayMMDD,
+    enabled, mode, todayMMDD, targetMonth: targetMonth.yyyymm,
     targets: 0, alreadyDone: 0, freeShipping: 0, fixed500: 0, issued: 0, sent: 0,
     lineSent: 0, errors: 0, errorSamples: [], sample: [],
   };
 
   // ① 緊急停止スイッチ: enabled=1 でなければ何もしない（force で上書き可＝手動テスト）
   if (!opts.force && !enabled) return result;
+  if (!opts.force && mode !== 'test' && today.day !== 1) {
+    result.skippedReason = 'not_month_start';
+    return result;
+  }
 
   // 対象の抽出
   let targets: TargetRow[] = [];
@@ -249,10 +289,8 @@ export async function processBirthdayCoupons(
     if (!lp) { result.errorSamples.push('test_recipientが自社ポイント未連携'); result.errors++; return result; }
     targets = [{ shopify_customer_id: testScid, friend_id: lp.friend_id }];
   } else {
-    // dryrun / live: 当日誕生日（MM-DD一致）かつLINE連携済み・フォロー中。
-    // うるう年: 今日が2/28なら2/29生まれも含める（平年は2/28配信）。
-    const patterns = todayMMDD === '02-28' ? [`%-${todayMMDD}`, '%-02-29'] : [`%-${todayMMDD}`];
-    const where = patterns.map(() => 'lp.birthday LIKE ?').join(' OR ');
+    // dryrun / live: 当月誕生日かつLINE連携済み・フォロー中。
+    const month = String(targetMonth.month).padStart(2, '0');
     const rows = await db
       .prepare(
         `SELECT lp.shopify_customer_id AS shopify_customer_id, lp.friend_id AS friend_id
@@ -262,17 +300,18 @@ export async function processBirthdayCoupons(
            AND lp.birthday IS NOT NULL
            AND f.is_following = 1
            AND f.line_user_id LIKE 'U%'
-           AND (${where})`,
+           AND substr(lp.birthday, 6, 2) = ?`,
       )
-      .bind(...patterns)
+      .bind(month)
       .all<TargetRow>();
     targets = rows.results ?? [];
   }
   result.targets = targets.length;
 
   const startsAt = new Date();
-  const endsAt = new Date(startsAt.getTime() + EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+  const endsAt = monthEndJst(targetMonth.year, targetMonth.month);
   const expireStr = formatJaDate(endsAt);
+  const claimedByType: Record<CouponType, PreparedTarget[]> = { free_shipping: [], fixed_500: [] };
 
   for (const t of targets) {
     const scid = t.shopify_customer_id;
@@ -300,55 +339,20 @@ export async function processBirthdayCoupons(
             `INSERT OR IGNORE INTO birthday_coupon_log (id, shopify_customer_id, friend_id, year, coupon_type, status, channel, recent_amount)
              VALUES (?, ?, ?, ?, ?, 'pending', 'none', ?)`,
           )
-          .bind(crypto.randomUUID(), scid, t.friend_id, year, type, recentAmount)
+          .bind(crypto.randomUUID(), scid, t.friend_id, targetMonth.year, type, recentAmount)
           .run();
         if ((claim.meta?.changes ?? 0) === 0) { result.alreadyDone++; continue; } // 今年発行済み
         logClaimed = true;
       }
 
-      // クーポン発行
-      const issued = await issueBirthdayCoupon(env, scid, type, startsAt, endsAt);
-      if (!issued.ok) {
-        result.errors++;
-        if (result.errorSamples.length < 5) result.errorSamples.push(`${scid}: ${issued.error}`);
-        if (logClaimed) {
-          await db.prepare(`UPDATE birthday_coupon_log SET status = 'failed', error_message = ? WHERE shopify_customer_id = ? AND year = ?`)
-            .bind(issued.error, scid, year).run();
-        }
-        continue;
-      }
-      result.issued++;
-      if (result.sample.length > 0 && result.sample[result.sample.length - 1].scid === scid) {
-        result.sample[result.sample.length - 1].code = issued.code;
-      }
-      if (mode === 'live') {
-        await db.prepare(`UPDATE birthday_coupon_log SET code = ?, status = 'issued' WHERE shopify_customer_id = ? AND year = ?`)
-          .bind(issued.code, scid, year).run();
-      }
-
-      // LINE送信のみ。送れない場合もメール代替配信はしない。
-      const sendRes = await sendLineFlex(env, t.friend_id, type, name, issued.code, expireStr);
-      const channel = sendRes.sent ? 'line' : 'none';
-      const deliveryError = sendRes.sent ? '' : (sendRes.error ?? 'line_send_failed');
-      if (sendRes.sent) {
-        result.sent++;
-        result.lineSent++;
-      }
-
-      if (mode === 'live') {
-        await db
-          .prepare(
-            `UPDATE birthday_coupon_log
-             SET channel = ?, status = ?, error_message = ?
-             WHERE shopify_customer_id = ? AND year = ?`,
-          )
-          .bind(channel, channel === 'none' ? 'issued' : 'sent', deliveryError || null, scid, year)
-          .run();
-      }
-
-      if (channel === 'none') {
-        result.errors++;
-        if (result.errorSamples.length < 5) result.errorSamples.push(`${scid} send: ${deliveryError || 'unknown'}`);
+      if (logClaimed || mode === 'test') {
+        claimedByType[type].push({
+          shopify_customer_id: scid,
+          friend_id: t.friend_id,
+          coupon_type: type,
+          recent_amount: recentAmount,
+          display_name: name,
+        });
       }
     } catch (e) {
       result.errors++;
@@ -356,9 +360,92 @@ export async function processBirthdayCoupons(
     }
   }
 
+  for (const type of ['free_shipping', 'fixed_500'] as CouponType[]) {
+    const typeTargets = claimedByType[type];
+    if (typeTargets.length === 0) continue;
+
+    const issued = await issueMonthlyBirthdayCoupon(
+      env,
+      type,
+      typeTargets.map((t) => t.shopify_customer_id),
+      targetMonth.year,
+      targetMonth.month,
+      startsAt,
+      endsAt,
+      mode === 'test' ? `BDAY-TEST-${targetMonth.yyyymm.replace('-', '')}-${type === 'free_shipping' ? 'SHIP' : '500OFF'}-${Date.now().toString(36).toUpperCase()}` : undefined,
+    );
+    if (issued.ok === false) {
+      result.errors += typeTargets.length;
+      if (result.errorSamples.length < 5) result.errorSamples.push(`${type}: ${issued.error}`);
+      if (mode === 'live') {
+        for (const t of typeTargets) {
+          await db
+            .prepare(
+              `UPDATE birthday_coupon_log
+               SET status = 'failed', error_message = ?
+               WHERE shopify_customer_id = ? AND year = ?`,
+            )
+            .bind(issued.error, t.shopify_customer_id, targetMonth.year)
+            .run();
+        }
+      }
+      continue;
+    }
+    result.issued++;
+
+    if (mode === 'live') {
+      for (const t of typeTargets) {
+        await db
+          .prepare(
+            `UPDATE birthday_coupon_log
+             SET code = ?, status = 'issued'
+             WHERE shopify_customer_id = ? AND year = ?`,
+          )
+          .bind(issued.code, t.shopify_customer_id, targetMonth.year)
+          .run();
+      }
+    }
+
+    for (const t of typeTargets) {
+      const scid = t.shopify_customer_id;
+      try {
+        const sample = result.sample.find((s) => s.scid === scid);
+        if (sample) sample.code = issued.code;
+
+        // LINE送信のみ。送れない場合もメール代替配信はしない。
+        const sendRes = await sendLineFlex(env, t.friend_id, type, t.display_name, issued.code, expireStr);
+        const channel = sendRes.sent ? 'line' : 'none';
+        const deliveryError = sendRes.sent ? '' : (sendRes.error ?? 'line_send_failed');
+        if (sendRes.sent) {
+          result.sent++;
+          result.lineSent++;
+        }
+
+        if (mode === 'live') {
+          await db
+            .prepare(
+              `UPDATE birthday_coupon_log
+               SET channel = ?, status = ?, error_message = ?
+               WHERE shopify_customer_id = ? AND year = ?`,
+            )
+            .bind(channel, channel === 'none' ? 'issued' : 'sent', deliveryError || null, scid, targetMonth.year)
+            .run();
+        }
+
+        if (channel === 'none') {
+          result.errors++;
+          if (result.errorSamples.length < 5) result.errorSamples.push(`${scid} send: ${deliveryError || 'unknown'}`);
+        }
+      } catch (e) {
+        result.errors++;
+        if (result.errorSamples.length < 5) result.errorSamples.push(`${scid}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
   if (result.targets > 0 || result.errors > 0) {
     console.log(
-      `[birthday-coupon] mode=${mode} today=${todayMMDD} targets=${result.targets} issued=${result.issued} sent=${result.sent} already=${result.alreadyDone} errors=${result.errors}`,
+      `[birthday-coupon] mode=${mode} month=${targetMonth.yyyymm} targets=${result.targets} issued=${result.issued} sent=${result.sent} already=${result.alreadyDone} errors=${result.errors}`,
     );
   }
   return result;

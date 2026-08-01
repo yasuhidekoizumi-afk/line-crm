@@ -2069,10 +2069,11 @@ loyalty.post('/api/loyalty/admin/scan-socialplus-unlinked', async (c) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// POST /api/loyalty/admin/birthday-coupon-run?mode=dryrun|test|live&force=1&today=MM-DD
+// POST /api/loyalty/admin/birthday-coupon-run?mode=dryrun|test|live&force=1&month=YYYY-MM
 //   誕生日クーポン処理を手動実行。mode/force で上書き（未指定は設定値）。
 //   dryrun=対象を数えるだけ(発行も送信もしない) / test=テスト送り先(河原さん)だけに発行＋送信 /
-//   live=当日誕生日の全対象へ発行＋送信。today=MM-DD で「今日」を上書き(動作確認用)。認証必須。
+//   live=当月誕生日の全対象へ月次共通コードを発行＋送信。month=YYYY-MM で対象月を上書き(動作確認用)。認証必須。
+//   today=MM-DD は旧当日配信の互換パラメータとして、月だけ対象月判定に使う。
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/birthday-coupon-run', async (c) => {
   try {
@@ -2081,8 +2082,10 @@ loyalty.post('/api/loyalty/admin/birthday-coupon-run', async (c) => {
     const force = c.req.query('force') === '1';
     const todayQ = c.req.query('today') ?? '';
     const todayMMDD = /^\d{2}-\d{2}$/.test(todayQ) ? todayQ : undefined;
+    const monthQ = c.req.query('month') ?? '';
+    const monthYYYYMM = /^\d{4}-\d{2}$/.test(monthQ) ? monthQ : undefined;
     const { processBirthdayCoupons } = await import('../services/birthday-coupon.js');
-    const r = await processBirthdayCoupons(c.env, { mode, force, todayMMDD });
+    const r = await processBirthdayCoupons(c.env, { mode, force, todayMMDD, monthYYYYMM });
     return c.json({ success: true, data: r });
   } catch (e) {
     return c.json({ success: false, error: e instanceof Error ? e.message : 'birthday-coupon-run failed' }, 500);

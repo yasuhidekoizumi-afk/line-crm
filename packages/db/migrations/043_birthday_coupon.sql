@@ -1,12 +1,12 @@
 -- ============================================================
 -- 誕生日クーポン自動配信
 --   設計: docs/BIRTHDAY_TRIGGER_DESIGN.md / 文面: docs/BIRTHDAY_TRIGGER_MESSAGES_2026-06.md
---   仕様: 誕生日当日に、直近注文額 <5,000円→送料無料 / ≥5,000円→500円OFF を出し分け。
---         有効期限=誕生日+14日。年1回（冪等）。LINE連携済みへ配信。
+--   仕様: 毎月1日に当月誕生日の対象者へ、直近注文額 <5,000円→送料無料 / ≥5,000円→500円OFF を出し分け。
+--         クーポンはタイプ別の月次共通コード。対象顧客だけに限定し、各顧客1回まで。年1回（冪等）。LINE連携済みへ配信。
 --   ※本番有効化(birthday_coupon_enabled=1)＋cron結線は小泉さんOK後（設計書の保護ゾーン）。
 -- ============================================================
 
--- 誕生日をD1に持つ（毎日Shopify全件走査を避けて軽くする）。YYYY-MM-DD。
+-- 誕生日をD1に持つ（毎月Shopify全件走査を避けて軽くする）。YYYY-MM-DD。
 ALTER TABLE loyalty_points ADD COLUMN birthday TEXT;
 CREATE INDEX IF NOT EXISTS idx_loyalty_points_birthday ON loyalty_points (birthday);
 
