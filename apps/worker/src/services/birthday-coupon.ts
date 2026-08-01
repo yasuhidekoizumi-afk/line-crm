@@ -199,10 +199,10 @@ function buildBirthdayFlex(type: CouponType, name: string, code: string, expire:
     footer: {
       type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '14px',
       contents: [
-        // 飛び先を /discount/<code> にすることでクーポンが自動適用される（コピー不要・チェックアウトで反映）
         { type: 'button', style: 'primary', color: '#C9A86A',
-          action: { type: 'uri', label: 'クーポンを使ってお買い物', uri: `${SHOP_URL}/discount/${code}` } },
-        { type: 'text', text: 'ボタンを押すとクーポンが自動で適用されます🎁', size: 'xxs', color: '#8a7a5c', wrap: true, align: 'center' },
+          action: { type: 'clipboard', label: 'クーポンをコピー', clipboardText: code } },
+        { type: 'text', text: 'オンラインストアへ', size: 'sm', weight: 'bold', color: '#5c4a2e',
+          decoration: 'underline', align: 'center', action: { type: 'uri', uri: SHOP_URL } },
       ],
     },
   };
