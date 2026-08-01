@@ -83,27 +83,48 @@ export async function createDirectPointReservation(
   const pointValue = parseFloat((await getLoyaltySetting(env.DB, 'point_value').catch(() => '1')) ?? '1') || 1;
   const discountAmount = Math.floor(input.points * pointValue);
   const code = `ORYZAE-DR-${input.shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
-  const rule = await fetch(`https://${shopDomain}/admin/api/2024-10/price_rules.json`, {
+  const discount = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
-    body: JSON.stringify({ price_rule: {
-      title: `ポイント利用予約 ${code}`,
-      target_type: 'line_item', target_selection: 'all', allocation_method: 'across',
-      value_type: 'fixed_amount', value: `-${discountAmount}`,
-      customer_selection: 'prerequisite', prerequisite_customer_ids: [input.shopifyCustomerId],
-      once_per_customer: true, usage_limit: 1, starts_at: now(),
-    } }),
-  });
-  if (!rule.ok) return { ok: false, error: 'ポイント割引の準備に失敗しました' };
-  const ruleJson = await rule.json() as { price_rule?: { id?: number } };
-  const ruleId = ruleJson.price_rule?.id;
-  if (!ruleId) return { ok: false, error: 'ポイント割引の準備に失敗しました' };
-  const discount = await fetch(`https://${shopDomain}/admin/api/2024-10/price_rules/${ruleId}/discount_codes.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
-    body: JSON.stringify({ discount_code: { code } }),
+    body: JSON.stringify({
+      query: `mutation CreatePointDiscount($basicCodeDiscount: DiscountCodeBasicInput!) {
+        discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+          codeDiscountNode { id }
+          userErrors { field message code }
+        }
+      }`,
+      variables: {
+        basicCodeDiscount: {
+          title: `ポイント利用予約 ${code}`,
+          code,
+          startsAt: now(),
+          customerSelection: {
+            customers: { add: [`gid://shopify/Customer/${input.shopifyCustomerId}`] },
+          },
+          customerGets: {
+            value: { discountAmount: { amount: String(discountAmount), appliesOnEachItem: false } },
+            items: { all: true },
+          },
+          combinesWith: {
+            productDiscounts: true,
+            orderDiscounts: true,
+            shippingDiscounts: true,
+          },
+          appliesOncePerCustomer: true,
+          usageLimit: 1,
+        },
+      },
+    }),
   });
   if (!discount.ok) return { ok: false, error: 'ポイント割引の準備に失敗しました' };
+  const discountJson = await discount.json() as {
+    data?: { discountCodeBasicCreate?: { codeDiscountNode?: { id?: string } | null; userErrors?: unknown[] } | null };
+    errors?: unknown;
+  };
+  const discountResult = discountJson.data?.discountCodeBasicCreate;
+  if (discountJson.errors || !discountResult?.codeDiscountNode?.id || (discountResult.userErrors?.length ?? 0) > 0) {
+    return { ok: false, error: 'ポイント割引の準備に失敗しました' };
+  }
 
   const timestamp = now();
   try {
