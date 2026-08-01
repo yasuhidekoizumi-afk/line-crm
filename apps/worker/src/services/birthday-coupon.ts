@@ -44,6 +44,42 @@ const EXPIRY_DAYS = 14;
 type CouponType = 'free_shipping' | 'fixed_500';
 type Mode = 'dryrun' | 'test' | 'live';
 
+export interface BirthdayCampaignTarget {
+  shopifyCustomerId: string;
+  couponType: CouponType;
+}
+
+export interface BirthdayCampaign {
+  id: string;
+  birthdayMonth: string;
+  startsAt: string;
+  endsAt: string;
+  targets: BirthdayCampaignTarget[];
+}
+
+/** 2026年8月に承認されたLINE送信可能者だけを対象にする月次キャンペーン。 */
+export const AUGUST_2026_BIRTHDAY_CAMPAIGN: BirthdayCampaign = {
+  id: '2026-08',
+  birthdayMonth: '08',
+  startsAt: '2026-08-01T10:30:00.000Z',
+  // Shopify の endsAt はこの時刻を過ぎると無効。日本時間の8月末まで利用可能にする。
+  endsAt: '2026-08-31T14:59:59.999Z',
+  targets: [
+    { shopifyCustomerId: '23184304701599', couponType: 'free_shipping' },
+    { shopifyCustomerId: '23630045806751', couponType: 'free_shipping' },
+    { shopifyCustomerId: '23654501777567', couponType: 'free_shipping' },
+    { shopifyCustomerId: '23653719277727', couponType: 'free_shipping' },
+    { shopifyCustomerId: '23401424912543', couponType: 'free_shipping' },
+    { shopifyCustomerId: '23408172007583', couponType: 'fixed_500' },
+    { shopifyCustomerId: '23653694603423', couponType: 'free_shipping' },
+    { shopifyCustomerId: '23693691060383', couponType: 'free_shipping' },
+    { shopifyCustomerId: '6422935896223', couponType: 'fixed_500' },
+    { shopifyCustomerId: '22919745241247', couponType: 'fixed_500' },
+    { shopifyCustomerId: '23607996154015', couponType: 'free_shipping' },
+    { shopifyCustomerId: '23653695160479', couponType: 'free_shipping' },
+  ],
+};
+
 /** JSTの「今日」の年とMM-DD */
 function jstToday(): { year: number; mmdd: string } {
   const j = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -58,7 +94,7 @@ function formatJaDate(d: Date): string {
   return `${j.getUTCFullYear()}/${String(j.getUTCMonth() + 1).padStart(2, '0')}/${String(j.getUTCDate()).padStart(2, '0')}`;
 }
 
-/** クーポン発行（link-reward-coupon と同型の price_rules + discount_codes REST） */
+/** クーポン発行（Shopify Admin GraphQL。顧客限定・顧客1回・コード全体1回をShopify側で強制） */
 async function issueBirthdayCoupon(
   env: BdayEnv,
   scid: string,
@@ -71,51 +107,65 @@ async function issueBirthdayCoupon(
   if (!shopDomain || !adminToken) return { ok: false, error: 'Shopify 設定が未構成です' };
 
   const code = `BDAY-${scid.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
-  const priceRule =
+  const customerGid = `gid://shopify/Customer/${scid}`;
+  const mutation =
     type === 'free_shipping'
-      ? {
-          title: `誕生日 送料無料 ${code}`,
-          target_type: 'shipping_line', target_selection: 'all', allocation_method: 'each',
-          value_type: 'percentage', value: '-100.0',
-        }
-      : {
-          title: `誕生日 500円OFF ${code}`,
-          target_type: 'line_item', target_selection: 'all', allocation_method: 'across',
-          value_type: 'fixed_amount', value: '-500.0',
-        };
+      ? `mutation CreateBirthdayFreeShipping($input: DiscountCodeFreeShippingInput!) {
+          discountCodeFreeShippingCreate(freeShippingCodeDiscount: $input) {
+            codeDiscountNode { id }
+            userErrors { field code message }
+          }
+        }`
+      : `mutation CreateBirthdayFixedAmount($input: DiscountCodeBasicInput!) {
+          discountCodeBasicCreate(basicCodeDiscount: $input) {
+            codeDiscountNode { id }
+            userErrors { field code message }
+          }
+        }`;
+  const commonInput = {
+    title: type === 'free_shipping' ? `誕生日 送料無料 ${code}` : `誕生日 500円OFF ${code}`,
+    code,
+    context: { customers: { add: [customerGid] } },
+    appliesOncePerCustomer: true,
+    usageLimit: 1,
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+  };
+  const input = type === 'free_shipping'
+    ? { ...commonInput, destination: { all: true } }
+    : {
+        ...commonInput,
+        customerGets: {
+          value: { discountAmount: { amount: '500.0', appliesOnEachItem: false } },
+          items: { all: true },
+        },
+      };
 
-  const ruleRes = await fetch(`https://${shopDomain}/admin/api/2024-10/price_rules.json`, {
+  const discountRes = await fetch(`https://${shopDomain}/admin/api/2026-07/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
-    body: JSON.stringify({
-      price_rule: {
-        ...priceRule,
-        customer_selection: 'prerequisite',
-        prerequisite_customer_ids: [scid],
-        once_per_customer: true,
-        usage_limit: 1,
-        starts_at: startsAt.toISOString(),
-        ends_at: endsAt.toISOString(),
-      },
-    }),
+    body: JSON.stringify({ query: mutation, variables: { input } }),
   });
-  if (!ruleRes.ok) {
-    const e = await ruleRes.text().catch(() => '');
-    return { ok: false, error: `price_rule ${ruleRes.status} ${e.slice(0, 150)}` };
+  if (!discountRes.ok) {
+    const errorText = await discountRes.text().catch(() => '');
+    return { ok: false, error: `discount_graphql ${discountRes.status} ${errorText.slice(0, 150)}` };
   }
-  const ruleData = (await ruleRes.json()) as { price_rule: { id: number } };
-
-  const codeRes = await fetch(
-    `https://${shopDomain}/admin/api/2024-10/price_rules/${ruleData.price_rule.id}/discount_codes.json`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
-      body: JSON.stringify({ discount_code: { code } }),
-    },
-  );
-  if (!codeRes.ok) {
-    const e = await codeRes.text().catch(() => '');
-    return { ok: false, error: `discount_code ${codeRes.status} ${e.slice(0, 150)}` };
+  const discountData = await discountRes.json() as {
+    errors?: Array<{ message: string }>;
+    data?: {
+      discountCodeFreeShippingCreate?: { codeDiscountNode: { id: string } | null; userErrors: Array<{ message: string }> };
+      discountCodeBasicCreate?: { codeDiscountNode: { id: string } | null; userErrors: Array<{ message: string }> };
+    };
+  };
+  const payload = type === 'free_shipping'
+    ? discountData.data?.discountCodeFreeShippingCreate
+    : discountData.data?.discountCodeBasicCreate;
+  const errors = [
+    ...(discountData.errors ?? []).map((error) => error.message),
+    ...(payload?.userErrors ?? []).map((error) => error.message),
+  ];
+  if (!payload?.codeDiscountNode || errors.length > 0) {
+    return { ok: false, error: `discount_graphql ${errors.join(' | ') || '割引コードを作成できませんでした'}` };
   }
   return { ok: true, code };
 }
@@ -219,7 +269,7 @@ interface TargetRow {
  */
 export async function processBirthdayCoupons(
   env: BdayEnv,
-  opts: { mode?: Mode; force?: boolean; todayMMDD?: string } = {},
+  opts: { mode?: Mode; force?: boolean; todayMMDD?: string; campaign?: BirthdayCampaign } = {},
 ): Promise<BdayRunResult> {
   const db = env.DB;
   const { year, mmdd } = jstToday();
@@ -239,9 +289,49 @@ export async function processBirthdayCoupons(
   // ① 緊急停止スイッチ: enabled=1 でなければ何もしない（force で上書き可＝手動テスト）
   if (!opts.force && !enabled) return result;
 
+  if (opts.campaign && mode === 'live') {
+    const now = Date.now();
+    const startsAt = Date.parse(opts.campaign.startsAt);
+    const endsAt = Date.parse(opts.campaign.endsAt);
+    if (now < startsAt || now > endsAt) {
+      result.errors++;
+      result.errorSamples.push(`campaign ${opts.campaign.id} は配信可能期間外です`);
+      return result;
+    }
+  }
+
   // 対象の抽出
   let targets: TargetRow[] = [];
-  if (mode === 'test') {
+  if (opts.campaign && mode !== 'test') {
+    // 月次キャンペーンは承認済みIDを固定し、実行時にも誕生月・LINE送信可否を再検証する。
+    const campaign = opts.campaign;
+    const ids = campaign.targets.map((target) => target.shopifyCustomerId);
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = await db
+      .prepare(
+        `SELECT lp.shopify_customer_id AS shopify_customer_id, lp.friend_id AS friend_id
+         FROM loyalty_points lp
+         INNER JOIN friends f ON f.id = lp.friend_id
+         WHERE lp.shopify_customer_id IN (${placeholders})
+           AND lp.birthday LIKE ?
+           AND f.is_following = 1
+           AND f.line_user_id LIKE 'U%'`,
+      )
+      .bind(...ids, `%-${campaign.birthdayMonth}-%`)
+      .all<TargetRow>();
+    targets = rows.results ?? [];
+
+    const actualIds = new Set(targets.map((target) => target.shopify_customer_id));
+    const missingIds = ids.filter((id) => !actualIds.has(id));
+    if (targets.length !== ids.length || missingIds.length > 0) {
+      result.errors++;
+      result.errorSamples.push(
+        `campaign ${campaign.id} 対象不一致: expected=${ids.length} actual=${targets.length} missing=${missingIds.join('|')}`,
+      );
+      result.targets = targets.length;
+      return result;
+    }
+  } else if (mode === 'test') {
     // テストモード: 誕生日に関係なく、テスト送り先(河原さん)だけ
     const testScid = (await getLoyaltySetting(db, 'birthday_coupon_test_recipient').catch(() => null)) || '';
     if (!testScid) { result.errorSamples.push('test_recipient未設定'); result.errors++; return result; }
@@ -270,16 +360,20 @@ export async function processBirthdayCoupons(
   }
   result.targets = targets.length;
 
-  const startsAt = new Date();
-  const endsAt = new Date(startsAt.getTime() + EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+  const startsAt = opts.campaign ? new Date(opts.campaign.startsAt) : new Date();
+  const endsAt = opts.campaign
+    ? new Date(opts.campaign.endsAt)
+    : new Date(startsAt.getTime() + EXPIRY_DAYS * 24 * 60 * 60 * 1000);
   const expireStr = formatJaDate(endsAt);
 
   for (const t of targets) {
     const scid = t.shopify_customer_id;
     try {
-      // 直近注文額で出し分け
+      // 通常は直近注文額で出し分け。承認済み月次キャンペーンでは確定済み種別を使う。
       const recentAmount = await recentOrderAmount(db, scid);
-      const type: CouponType = recentAmount >= AMOUNT_THRESHOLD ? 'fixed_500' : 'free_shipping';
+      const campaignTarget = opts.campaign?.targets.find((target) => target.shopifyCustomerId === scid);
+      const type: CouponType = campaignTarget?.couponType
+        ?? (recentAmount >= AMOUNT_THRESHOLD ? 'fixed_500' : 'free_shipping');
       if (type === 'free_shipping') result.freeShipping++; else result.fixed500++;
 
       // 表示名（LINE用）
