@@ -109,23 +109,18 @@ async function upsertProfile(db: D1Database, friendId: string, profile: ProfileI
   const now = new Date().toISOString();
   await db.prepare(`INSERT INTO influencer_profiles (
       friend_id, instagram_handle, categories_json, follower_band, contact_email, contact_phone, age_group, gender,
-      gifting_interests_json, dietary_notes, has_shopify_purchase, privacy_consent_at, profile_completed_at, updated_at,
-      registration_source, contact_method
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      gifting_interests_json, dietary_notes, has_shopify_purchase, privacy_consent_at, profile_completed_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(friend_id) DO UPDATE SET instagram_handle=excluded.instagram_handle, categories_json=excluded.categories_json,
       follower_band=excluded.follower_band, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
       age_group=excluded.age_group, gender=excluded.gender, gifting_interests_json=excluded.gifting_interests_json,
       dietary_notes=excluded.dietary_notes, has_shopify_purchase=excluded.has_shopify_purchase,
       privacy_consent_at=COALESCE(influencer_profiles.privacy_consent_at, excluded.privacy_consent_at),
-      profile_completed_at=excluded.profile_completed_at, updated_at=excluded.updated_at,
-      registration_source=influencer_profiles.registration_source,
-      contact_method=influencer_profiles.contact_method`)
+      profile_completed_at=excluded.profile_completed_at, updated_at=excluded.updated_at`)
     .bind(friendId, cleanText(profile.instagramHandle, 80), JSON.stringify(cleanList(profile.categories)), cleanText(profile.followerBand, 40),
       cleanText(profile.contactEmail, 254), cleanText(profile.contactPhone, 30), cleanText(profile.ageGroup, 30), cleanText(profile.gender, 30),
       JSON.stringify(cleanList(profile.giftingInterests)), cleanText(profile.dietaryNotes, 1000), profile.hasShopifyPurchase ? 1 : 0,
-      profile.privacyConsent ? now : null, now, now,
-      profile.registrationSource === 'manual' ? 'manual' : 'line',
-      profile.contactMethod === 'instagram_dm' ? 'instagram_dm' : 'line').run();
+      profile.privacyConsent ? now : null, now, now).run();
   if (address) await upsertShippingAddress(db, friendId, address);
 }
 
@@ -144,7 +139,8 @@ async function profileRow(db: D1Database, friendId: string) {
   return db.prepare(`SELECT f.id AS friend_id, f.display_name, f.picture_url, f.line_account_id, f.is_following,
       p.instagram_handle, p.categories_json, p.follower_band, p.contact_email, p.contact_phone, p.age_group, p.gender,
       p.gifting_interests_json, p.dietary_notes, p.has_shopify_purchase, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
-      p.registration_source, p.contact_method,
+      CASE WHEN f.line_user_id LIKE 'manual:%' THEN 'manual' ELSE 'line' END AS registration_source,
+      CASE WHEN f.line_user_id LIKE 'manual:%' THEN 'instagram_dm' ELSE 'line' END AS contact_method,
       a.recipient_name, a.postal_code, a.prefecture, a.address_line1, a.address_line2, a.phone AS address_phone, a.confirmed_at
     FROM friends f LEFT JOIN influencer_profiles p ON p.friend_id=f.id
     LEFT JOIN influencer_shipping_addresses a ON a.friend_id=f.id WHERE f.id=?`).bind(friendId).first<Record<string, unknown>>();
@@ -253,14 +249,14 @@ influencers.get('/api/influencers', async (c) => {
   const result = await c.env.DB.prepare(`SELECT f.id AS friend_id, f.display_name, f.picture_url, f.line_account_id, f.is_following,
       p.instagram_handle, p.categories_json, p.follower_band, p.contact_email, p.contact_phone, p.age_group, p.gender,
       p.gifting_interests_json, p.dietary_notes, p.has_shopify_purchase, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
-      p.registration_source, p.contact_method,
+      CASE WHEN f.line_user_id LIKE 'manual:%' THEN 'manual' ELSE 'line' END AS registration_source,
+      CASE WHEN f.line_user_id LIKE 'manual:%' THEN 'instagram_dm' ELSE 'line' END AS contact_method,
       a.recipient_name, a.postal_code, a.prefecture, a.address_line1, a.address_line2, a.phone AS address_phone, a.confirmed_at
     FROM friends f INNER JOIN influencer_profiles p ON p.friend_id=f.id
     LEFT JOIN influencer_shipping_addresses a ON a.friend_id=f.id
-    WHERE f.line_account_id=? ${contactMethod ? 'AND p.contact_method=?' : ''} ${q ? 'AND (f.display_name LIKE ? OR p.instagram_handle LIKE ?)' : ''}
+    WHERE f.line_account_id=? ${contactMethod === 'instagram_dm' ? "AND f.line_user_id LIKE 'manual:%'" : contactMethod === 'line' ? "AND f.line_user_id NOT LIKE 'manual:%'" : ''} ${q ? 'AND (f.display_name LIKE ? OR p.instagram_handle LIKE ?)' : ''}
     ORDER BY p.updated_at DESC LIMIT 200`).bind(
       lineAccountId!,
-      ...(contactMethod ? [contactMethod] : []),
       ...(q ? [`%${q}%`, `%${q}%`] : []),
     ).all<Record<string, unknown>>();
   return c.json({ success: true, data: result.results.map(serialize) });
