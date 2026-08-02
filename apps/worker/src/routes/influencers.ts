@@ -11,7 +11,9 @@ type ProfileInput = {
   contactEmail?: string | null; contactPhone?: string | null; ageGroup?: string | null;
   gender?: string | null; giftingInterests?: string[]; dietaryNotes?: string | null;
   hasShopifyPurchase?: boolean; privacyConsent?: boolean;
+  registrationSource?: 'line' | 'manual'; contactMethod?: 'line' | 'instagram_dm';
 };
+type ManualProfileInput = ProfileInput & { displayName?: string | null };
 type AddressInput = {
   recipientName?: string | null; postalCode?: string | null; prefecture?: string | null;
   addressLine1?: string | null; addressLine2?: string | null; phone?: string | null;
@@ -56,6 +58,7 @@ function serialize(row: Record<string, unknown>) {
     ageGroup: row.age_group, gender: row.gender, giftingInterests: JSON.parse((row.gifting_interests_json as string) || '[]'),
     dietaryNotes: row.dietary_notes, hasShopifyPurchase: Boolean(row.has_shopify_purchase), privacyConsentAt: row.privacy_consent_at,
     profileCompletedAt: row.profile_completed_at, updatedAt: row.profile_updated_at,
+    registrationSource: row.registration_source ?? 'line', contactMethod: row.contact_method ?? 'line',
     address: row.recipient_name ? { recipientName: row.recipient_name, postalCode: row.postal_code, prefecture: row.prefecture, addressLine1: row.address_line1, addressLine2: row.address_line2, phone: row.address_phone, confirmedAt: row.confirmed_at } : null,
   };
 }
@@ -106,18 +109,23 @@ async function upsertProfile(db: D1Database, friendId: string, profile: ProfileI
   const now = new Date().toISOString();
   await db.prepare(`INSERT INTO influencer_profiles (
       friend_id, instagram_handle, categories_json, follower_band, contact_email, contact_phone, age_group, gender,
-      gifting_interests_json, dietary_notes, has_shopify_purchase, privacy_consent_at, profile_completed_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      gifting_interests_json, dietary_notes, has_shopify_purchase, privacy_consent_at, profile_completed_at, updated_at,
+      registration_source, contact_method
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(friend_id) DO UPDATE SET instagram_handle=excluded.instagram_handle, categories_json=excluded.categories_json,
       follower_band=excluded.follower_band, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
       age_group=excluded.age_group, gender=excluded.gender, gifting_interests_json=excluded.gifting_interests_json,
       dietary_notes=excluded.dietary_notes, has_shopify_purchase=excluded.has_shopify_purchase,
       privacy_consent_at=COALESCE(influencer_profiles.privacy_consent_at, excluded.privacy_consent_at),
-      profile_completed_at=excluded.profile_completed_at, updated_at=excluded.updated_at`)
+      profile_completed_at=excluded.profile_completed_at, updated_at=excluded.updated_at,
+      registration_source=influencer_profiles.registration_source,
+      contact_method=influencer_profiles.contact_method`)
     .bind(friendId, cleanText(profile.instagramHandle, 80), JSON.stringify(cleanList(profile.categories)), cleanText(profile.followerBand, 40),
       cleanText(profile.contactEmail, 254), cleanText(profile.contactPhone, 30), cleanText(profile.ageGroup, 30), cleanText(profile.gender, 30),
       JSON.stringify(cleanList(profile.giftingInterests)), cleanText(profile.dietaryNotes, 1000), profile.hasShopifyPurchase ? 1 : 0,
-      profile.privacyConsent ? now : null, now, now).run();
+      profile.privacyConsent ? now : null, now, now,
+      profile.registrationSource === 'manual' ? 'manual' : 'line',
+      profile.contactMethod === 'instagram_dm' ? 'instagram_dm' : 'line').run();
   if (address) await upsertShippingAddress(db, friendId, address);
 }
 
@@ -136,6 +144,7 @@ async function profileRow(db: D1Database, friendId: string) {
   return db.prepare(`SELECT f.id AS friend_id, f.display_name, f.picture_url, f.line_account_id, f.is_following,
       p.instagram_handle, p.categories_json, p.follower_band, p.contact_email, p.contact_phone, p.age_group, p.gender,
       p.gifting_interests_json, p.dietary_notes, p.has_shopify_purchase, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
+      p.registration_source, p.contact_method,
       a.recipient_name, a.postal_code, a.prefecture, a.address_line1, a.address_line2, a.phone AS address_phone, a.confirmed_at
     FROM friends f LEFT JOIN influencer_profiles p ON p.friend_id=f.id
     LEFT JOIN influencer_shipping_addresses a ON a.friend_id=f.id WHERE f.id=?`).bind(friendId).first<Record<string, unknown>>();
@@ -237,15 +246,50 @@ influencers.get('/api/influencers', async (c) => {
   const denied = await requireLineAccountAccess(c, lineAccountId);
   if (denied) return denied;
   const q = cleanText(c.req.query('q'), 100);
+  const contactMethod = c.req.query('contactMethod');
+  if (contactMethod && contactMethod !== 'line' && contactMethod !== 'instagram_dm') {
+    return c.json({ success: false, error: '連絡手段が不正です' }, 400);
+  }
   const result = await c.env.DB.prepare(`SELECT f.id AS friend_id, f.display_name, f.picture_url, f.line_account_id, f.is_following,
       p.instagram_handle, p.categories_json, p.follower_band, p.contact_email, p.contact_phone, p.age_group, p.gender,
       p.gifting_interests_json, p.dietary_notes, p.has_shopify_purchase, p.privacy_consent_at, p.profile_completed_at, p.updated_at AS profile_updated_at,
+      p.registration_source, p.contact_method,
       a.recipient_name, a.postal_code, a.prefecture, a.address_line1, a.address_line2, a.phone AS address_phone, a.confirmed_at
     FROM friends f INNER JOIN influencer_profiles p ON p.friend_id=f.id
     LEFT JOIN influencer_shipping_addresses a ON a.friend_id=f.id
-    WHERE f.line_account_id=? ${q ? 'AND (f.display_name LIKE ? OR p.instagram_handle LIKE ?)' : ''}
-    ORDER BY p.updated_at DESC LIMIT 200`).bind(...(q ? [lineAccountId!, `%${q}%`, `%${q}%`] : [lineAccountId!])).all<Record<string, unknown>>();
+    WHERE f.line_account_id=? ${contactMethod ? 'AND p.contact_method=?' : ''} ${q ? 'AND (f.display_name LIKE ? OR p.instagram_handle LIKE ?)' : ''}
+    ORDER BY p.updated_at DESC LIMIT 200`).bind(
+      lineAccountId!,
+      ...(contactMethod ? [contactMethod] : []),
+      ...(q ? [`%${q}%`, `%${q}%`] : []),
+    ).all<Record<string, unknown>>();
   return c.json({ success: true, data: result.results.map(serialize) });
+});
+
+// LINEを使わないクリエイターを、担当者がInstagram DM運用として登録する。
+influencers.post('/api/influencers/manual', async (c) => {
+  const body = await c.req.json<{ lineAccountId?: string; profile?: ManualProfileInput; address?: AddressInput }>();
+  const denied = await requireLineAccountAccess(c, body.lineAccountId, true);
+  if (denied) return denied;
+  const displayName = cleanText(body.profile?.displayName, 100);
+  const instagramHandle = cleanText(body.profile?.instagramHandle, 80);
+  if (!displayName || !instagramHandle) {
+    return c.json({ success: false, error: '名前とInstagramアカウントは必須です' }, 400);
+  }
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(`INSERT INTO friends (
+      id, line_user_id, display_name, is_following, line_account_id, created_at, updated_at
+    ) VALUES (?, ?, ?, 0, ?, ?, ?)`)
+    .bind(id, `manual:${id}`, displayName, body.lineAccountId, now, now).run();
+  await upsertProfile(c.env.DB, id, {
+    ...body.profile,
+    instagramHandle,
+    registrationSource: 'manual',
+    contactMethod: 'instagram_dm',
+    privacyConsent: false,
+  }, body.address);
+  return c.json({ success: true, data: serialize((await profileRow(c.env.DB, id))!) }, 201);
 });
 
 influencers.patch('/api/influencers/:friendId', async (c) => {
