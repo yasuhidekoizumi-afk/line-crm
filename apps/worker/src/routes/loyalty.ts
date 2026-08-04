@@ -1033,7 +1033,8 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
 
     // 次のランク情報
     let next_rank: { rank: string; min_spent: number; remaining: number } | null = null;
-    for (const r of RANK_THRESHOLDS) {
+    // 閾値は高い順で定義されているため、低い順に確認して直近の次ランクを返す。
+    for (const r of [...RANK_THRESHOLDS].reverse()) {
       if (r.minSpent > point.total_spent) {
         next_rank = { rank: r.rank, min_spent: r.minSpent, remaining: r.minSpent - point.total_spent };
         break;
