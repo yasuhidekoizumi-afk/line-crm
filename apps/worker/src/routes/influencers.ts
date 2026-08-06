@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { getLineAccountByChannelId, getLineAccountById } from '@line-crm/db'
 import { verifyLineUserFromToken } from '../services/email-link.js'
 import { requireLineAccountAccess } from '../middleware/account-access.js'
+import { notifyInfluencerRegistration } from '../services/influencer-slack-notify.js'
 import type { Env } from '../index.js'
 
 const influencers = new Hono<Env>()
@@ -304,7 +305,14 @@ influencers.put('/api/liff/influencer-profile', async (c) => {
     await recordIdentityMismatch(c.env.DB, body.lineAccountId, lineAccountId, verified.lineUserId)
     return c.json({ success: false, error: 'この公式LINEの友だちとして確認できません' }, 403)
   }
+  const existingProfile = await c.env.DB.prepare('SELECT friend_id FROM influencer_profiles WHERE friend_id=? LIMIT 1').bind(friend.id).first()
   await upsertProfile(c.env.DB, friend.id, body.profile, body.address)
+  if (!existingProfile) {
+    await notifyInfluencerRegistration(c.env, {
+      lineAccountId,
+      registrationSource: 'line',
+    })
+  }
   return c.json({
     success: true,
     data: serialize((await profileRow(c.env.DB, friend.id))!),
@@ -427,6 +435,10 @@ influencers.post('/api/influencers/manual', async (c) => {
     },
     body.address
   )
+  await notifyInfluencerRegistration(c.env, {
+    lineAccountId: body.lineAccountId!,
+    registrationSource: 'manual',
+  })
   return c.json({ success: true, data: serialize((await profileRow(c.env.DB, id))!) }, 201)
 })
 

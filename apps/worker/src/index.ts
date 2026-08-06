@@ -149,6 +149,7 @@ export type Env = {
     GEMINI_API_KEY?: string;
     OPENAI_API_KEY?: string;
     SLACK_WEBHOOK_URL?: string;
+    GIFTING_SLACK_WEBHOOK_URL?: string;
     FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
     FERMENT_HMAC_SECRET?: string;
     LINK_SHOPIFY_DISABLED?: string;
