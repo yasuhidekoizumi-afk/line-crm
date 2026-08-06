@@ -16,6 +16,7 @@ import {
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { recordLineFollowEvent } from '../services/delivery-safety.js';
+import { notifyInfluencerRegistration } from '../services/influencer-slack-notify.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
@@ -90,6 +91,7 @@ async function handleEvent(
     GEMINI_API_KEY?: string;
     LINE_AI_AUTOREPLY_ENABLED?: string;
     SLACK_BOT_TOKEN?: string;
+    GIFTING_SLACK_WEBHOOK_URL?: string;
     WORKER_URL?: string;
   },
 ): Promise<void> {
@@ -136,6 +138,19 @@ async function handleEvent(
       friendId: friend.id,
       eventType: 'follow',
     });
+
+    if (lineAccountId) {
+      const influencerProfile = await db
+        .prepare('SELECT instagram_handle, profile_completed_at FROM influencer_profiles WHERE friend_id=? LIMIT 1')
+        .bind(friend.id)
+        .first<{ instagram_handle: string | null; profile_completed_at: string | null }>();
+      await notifyInfluencerRegistration(env ?? {}, {
+        lineAccountId,
+        event: influencerProfile?.profile_completed_at ? 'follow_with_profile' : 'follow_without_profile',
+        lineDisplayName: profile?.displayName ?? friend.display_name ?? fallbackName,
+        instagramHandle: influencerProfile?.instagram_handle ?? null,
+      });
+    }
 
     // friend_add シナリオに登録（このアカウントのシナリオのみ）
     const scenarios = await getScenarios(db);

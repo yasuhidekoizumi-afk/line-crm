@@ -50,6 +50,8 @@ CS_GMAIL_SENDER_EMAIL = ""
 # wrangler secret put ANTHROPIC_API_KEY
 # wrangler secret put GEMINI_API_KEY
 # wrangler secret put SLACK_WEBHOOK_URL
+# ギフティングの新規インフルエンサー登録通知専用
+# wrangler secret put GIFTING_SLACK_WEBHOOK_URL
 # wrangler secret put FERMENT_SHOPIFY_WEBHOOK_SECRET
 # wrangler secret put FERMENT_HMAC_SECRET
 
