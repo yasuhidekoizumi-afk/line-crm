@@ -308,9 +308,12 @@ influencers.put('/api/liff/influencer-profile', async (c) => {
   const existingProfile = await c.env.DB.prepare('SELECT friend_id FROM influencer_profiles WHERE friend_id=? LIMIT 1').bind(friend.id).first()
   await upsertProfile(c.env.DB, friend.id, body.profile, body.address)
   if (!existingProfile) {
+    const friendProfile = await c.env.DB.prepare('SELECT display_name FROM friends WHERE id=?').bind(friend.id).first<{ display_name: string | null }>()
     await notifyInfluencerRegistration(c.env, {
       lineAccountId,
-      registrationSource: 'line',
+      event: 'profile_completed',
+      lineDisplayName: friendProfile?.display_name ?? null,
+      instagramHandle: cleanText(body.profile.instagramHandle, 80),
     })
   }
   return c.json({
@@ -435,10 +438,6 @@ influencers.post('/api/influencers/manual', async (c) => {
     },
     body.address
   )
-  await notifyInfluencerRegistration(c.env, {
-    lineAccountId: body.lineAccountId!,
-    registrationSource: 'manual',
-  })
   return c.json({ success: true, data: serialize((await profileRow(c.env.DB, id))!) }, 201)
 })
 

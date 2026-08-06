@@ -4,13 +4,20 @@ export type InfluencerSlackEnv = {
   GIFTING_SLACK_WEBHOOK_URL?: string
 }
 
+export type InfluencerRegistrationNotification = {
+  lineAccountId: string
+  event: 'follow_without_profile' | 'follow_with_profile' | 'profile_completed'
+  lineDisplayName: string | null
+  instagramHandle: string | null
+}
+
 /**
- * ギフティング専用アカウントの新規登録だけをSlackへ通知する。
- * 個人情報は載せず、通知障害で登録自体を失敗させない。
+ * ギフティング専用アカウントの友だち追加・プロフィール登録をSlackへ通知する。
+ * 発送先や連絡先は載せず、通知障害で登録自体を失敗させない。
  */
 export async function notifyInfluencerRegistration(
   env: InfluencerSlackEnv,
-  input: { lineAccountId: string; registrationSource: 'line' | 'manual' }
+  input: InfluencerRegistrationNotification
 ): Promise<void> {
   if (input.lineAccountId !== GIFTING_LINE_ACCOUNT_ID) return
   if (!env.GIFTING_SLACK_WEBHOOK_URL) {
@@ -18,8 +25,13 @@ export async function notifyInfluencerRegistration(
     return
   }
 
-  const source = input.registrationSource === 'manual' ? '管理画面（Instagram DM）' : 'LINEプロフィール'
-  const text = `🎁 ギフティングアカウントでインフルエンサーの新規登録が発生しました（登録経路: ${source}）`
+  const hasProfile = input.event !== 'follow_without_profile'
+  const title = hasProfile ? '①友達登録＋プロフィール登録されました' : '②友達登録されました（プロフィール登録なし）'
+  const lineName = input.lineDisplayName?.trim() || '未取得'
+  const instagram = input.instagramHandle?.trim()
+    ? `@${input.instagramHandle.trim().replace(/^@/, '')}`
+    : '未登録'
+  const text = [`🎁 ${title}`, `LINE名：${lineName}`, `IGアカウント名：${instagram}`].join('\n')
 
   try {
     const response = await fetch(env.GIFTING_SLACK_WEBHOOK_URL, {
@@ -32,4 +44,3 @@ export async function notifyInfluencerRegistration(
     console.error('[influencer-slack] Slack通知中に例外が発生しました:', error)
   }
 }
-
