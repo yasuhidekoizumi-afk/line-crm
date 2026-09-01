@@ -300,7 +300,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                         />
                         {b.linkUrl?.trim() && (
                           <p className="text-[11px] text-gray-400 mt-1">
-                            ※ アップロード画像は大きく表示されるリッチメッセージとして送信されます。外部URLの場合のみFlexに変換されます。
+                            ※ リンク付き画像は、端末を問わず表示できるFlexメッセージとして送信されます。
                           </p>
                         )}
                       </div>

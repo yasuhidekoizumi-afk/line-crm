@@ -16,7 +16,6 @@ import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js'
 import { assertLineBroadcastAllowed } from './delivery-safety.js';
 
 const MULTICAST_BATCH_SIZE = 500;
-const DEFAULT_IMAGE_MAP_SIZE = { width: 1040, height: 1040 };
 
 interface BroadcastDedupeContext {
   date: string;
@@ -29,24 +28,6 @@ export function isSendableLineUserId(lineUserId: string | null | undefined): lin
 
 function normalizeSendableLineUserId(lineUserId: string): string {
   return lineUserId.trim();
-}
-
-function toImageMapBaseUrl(imageUrl: string): string | null {
-  const trimmed = imageUrl.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    const match = parsed.pathname.match(/^\/images\/([^/]+)$/);
-    if (!match) return null;
-    const imageId = decodeURIComponent(match[1]).replace(/\.(jpe?g|png|webp|gif)$/i, '');
-    if (!imageId) return null;
-    parsed.pathname = `/images/imagemap/${encodeURIComponent(imageId)}`;
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return null;
-  }
 }
 
 function uniqueBySendableLineUserId<T extends { line_user_id: string }>(
@@ -618,22 +599,9 @@ function buildMessage(messageType: string, messageContent: string, altText?: str
       // 遷移を実現できないため、Flex メッセージ（imageコンポーネント + action.uri）に変換する。
       const linkUrl = parsed.linkUrl?.trim();
       if (linkUrl) {
-        const imageMapBaseUrl = toImageMapBaseUrl(parsed.originalContentUrl);
-        if (imageMapBaseUrl) {
-          return {
-            type: 'imagemap',
-            baseUrl: imageMapBaseUrl,
-            altText: altText || '画像メッセージ',
-            baseSize: DEFAULT_IMAGE_MAP_SIZE,
-            actions: [
-              {
-                type: 'uri',
-                linkUri: linkUrl,
-                area: { x: 0, y: 0, width: DEFAULT_IMAGE_MAP_SIZE.width, height: DEFAULT_IMAGE_MAP_SIZE.height },
-              },
-            ],
-          };
-        }
+        // Imagemap は端末ごとに幅の異なる5画像（240/300/460/700/1040px）が必要。
+        // 元画像1枚を全サイズURLで返すと端末によって表示できないため、
+        // リンク付き画像は全LINEクライアント対応のFlexとして送信する。
         return {
           type: 'flex',
           altText: altText || '画像メッセージ',
