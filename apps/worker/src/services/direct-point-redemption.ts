@@ -20,12 +20,23 @@ type Reservation = {
 };
 
 const now = () => new Date().toISOString();
+const SHOPIFY_API_VERSION = '2026-07';
+
+type DiscountCreateResponse = {
+  data?: { discountCodeBasicCreate?: { codeDiscountNode?: { id?: string } | null; userErrors?: Array<{ field?: string[]; message?: string; code?: string }> } | null };
+  errors?: Array<{ message?: string; extensions?: { code?: string } }>;
+};
+
+function isShopifyAccessError(status: number, payload: DiscountCreateResponse): boolean {
+  if (status === 401 || status === 403) return true;
+  return JSON.stringify(payload).toLowerCase().includes('access denied');
+}
 
 async function deleteShopifyCode(env: DirectPointRedemptionEnv, code: string): Promise<boolean> {
   const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
   const adminToken = await getShopifyAdminToken(env);
   if (!shopDomain || !adminToken) return false;
-  const lookup = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+  const lookup = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
     body: JSON.stringify({
@@ -37,7 +48,7 @@ async function deleteShopifyCode(env: DirectPointRedemptionEnv, code: string): P
   const lookupJson = await lookup.json() as { data?: { codeDiscountNodeByCode?: { id?: string } | null }; errors?: unknown };
   const id = lookupJson.data?.codeDiscountNodeByCode?.id;
   if (lookupJson.errors || !id) return !lookupJson.errors;
-  const deleted = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+  const deleted = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
     body: JSON.stringify({
@@ -83,10 +94,7 @@ export async function createDirectPointReservation(
   const pointValue = parseFloat((await getLoyaltySetting(env.DB, 'point_value').catch(() => '1')) ?? '1') || 1;
   const discountAmount = Math.floor(input.points * pointValue);
   const code = `ORYZAE-DR-${input.shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
-  const discount = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
-    body: JSON.stringify({
+  const requestBody = JSON.stringify({
       query: `mutation CreatePointDiscount($basicCodeDiscount: DiscountCodeBasicInput!) {
         discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
           codeDiscountNode { id }
@@ -114,15 +122,33 @@ export async function createDirectPointReservation(
           usageLimit: 1,
         },
       },
-    }),
-  });
-  if (!discount.ok) return { ok: false, error: 'ポイント割引の準備に失敗しました' };
-  const discountJson = await discount.json() as {
-    data?: { discountCodeBasicCreate?: { codeDiscountNode?: { id?: string } | null; userErrors?: unknown[] } | null };
-    errors?: unknown;
+    });
+  const createDiscount = async (token: string) => {
+    const response = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
+      body: requestBody,
+    });
+    const payload = await response.json().catch(() => ({})) as DiscountCreateResponse;
+    return { response, payload };
   };
+
+  let attempt = await createDiscount(adminToken);
+  // 短命トークンのアプリに write_discounts がない場合のみ、既存の管理トークンへ退避する。
+  // 通信失敗や5xxでは重複作成を避けるため再試行しない。
+  if (isShopifyAccessError(attempt.response.status, attempt.payload)
+      && env.SHOPIFY_ADMIN_TOKEN
+      && env.SHOPIFY_ADMIN_TOKEN !== adminToken) {
+    attempt = await createDiscount(env.SHOPIFY_ADMIN_TOKEN);
+  }
+  const discountJson = attempt.payload;
   const discountResult = discountJson.data?.discountCodeBasicCreate;
-  if (discountJson.errors || !discountResult?.codeDiscountNode?.id || (discountResult.userErrors?.length ?? 0) > 0) {
+  if (!attempt.response.ok || discountJson.errors || !discountResult?.codeDiscountNode?.id || (discountResult.userErrors?.length ?? 0) > 0) {
+    console.error('[direct-point-redemption] Shopify discount creation failed', {
+      status: attempt.response.status,
+      graphqlErrors: discountJson.errors,
+      userErrors: discountResult?.userErrors,
+    });
     return { ok: false, error: 'ポイント割引の準備に失敗しました' };
   }
 
