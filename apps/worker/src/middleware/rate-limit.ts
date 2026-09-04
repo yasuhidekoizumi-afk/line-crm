@@ -95,8 +95,15 @@ const UNAUTHENTICATED_WINDOW = 60_000; // 1 min
 export async function rateLimitMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
   const path = new URL(c.req.url).pathname;
 
-  // Skip rate limiting for docs / static assets
-  if (path === '/docs' || path === '/openapi.json' || path.startsWith('/r/')) {
+  // ドキュメント・静的アセット・LINE配信用画像はレート制限しない。
+  // /images/ はLINEクライアント／LINE側CDNから短時間に集中取得されるため、
+  // IP単位の制限を掛けると一斉配信時に画像だけ429になる。
+  if (
+    path === '/docs'
+    || path === '/openapi.json'
+    || path.startsWith('/r/')
+    || path.startsWith('/images/')
+  ) {
     return next();
   }
 
