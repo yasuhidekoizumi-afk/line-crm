@@ -116,6 +116,8 @@ import { processBirthdayCoupons } from './services/birthday-coupon.js';
 import { fetchAndStoreLineOfficialFriendInsights } from './services/line-official-insights.js';
 import { cronWatchdog } from './routes/cron-watchdog.js';
 import { finishCronExecution, startCronExecution } from './services/cron-monitor.js';
+import { getPendingWebhookEvents, markWebhookProcessed, markWebhookFailed, type WebhookInboxRow } from './services/webhook-inbox.js';
+import { handleEvent as handleWebhookEvent } from './routes/webhook.js';
 
 declare const __APP_VERSION__: string;
 declare const __GIT_SHA__: string;
@@ -403,6 +405,53 @@ app.notFound((c) => {
   return c.notFound();
 });
 
+/**
+ * webhook_inbox の未処理イベントを再処理する（1分Cronから呼ばれる）。
+ * 失敗イベントは attempt_count で管理し、3回で 'failed' 固定（handleEvent内でmarkWebhookFailed）。
+ */
+async function reprocessPendingWebhookEvents(env: Env['Bindings']): Promise<void> {
+  const pending = await getPendingWebhookEvents(env.DB, 50);
+  if (pending.length === 0) return;
+  console.log(`[webhook-inbox] reprocessing ${pending.length} pending events`);
+
+  // アカウント別にLineClientをキャッシュ（再処理内で使い回す）
+  const clients = new Map<string, LineClient>();
+  const defaultClient = new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN);
+
+  for (const row of pending as WebhookInboxRow[]) {
+    try {
+      const event = JSON.parse(row.payload) as Parameters<typeof handleWebhookEvent>[2];
+      let client = defaultClient;
+      if (row.line_account_id) {
+        const cached = clients.get(row.line_account_id);
+        if (cached) {
+          client = cached;
+        } else {
+          const account = await getLineAccounts(env.DB)
+            .then((accs) => accs.find((a) => a.id === row.line_account_id));
+          if (account?.channel_access_token) {
+            client = new LineClient(account.channel_access_token);
+            clients.set(row.line_account_id, client);
+          }
+        }
+      }
+      await handleWebhookEvent(
+        env.DB,
+        client,
+        event,
+        env.LINE_CHANNEL_ACCESS_TOKEN,
+        row.line_account_id,
+        env.WORKER_URL,
+        env,
+      );
+      await markWebhookProcessed(env.DB, row.id);
+    } catch (err) {
+      console.error(`[webhook-inbox] reprocess failed for ${row.id}:`, err);
+      await markWebhookFailed(env.DB, row.id, err);
+    }
+  }
+}
+
 async function buildCommonCronJobs(
   env: Env['Bindings'],
   options: { includeScheduledBroadcasts?: boolean } = {},
@@ -468,6 +517,7 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
           .then((jobs) => Promise.all(jobs).then(() => undefined)),
       ),
       runCronJob('resume-syncing-shopify-segments', resumeSyncingShopifySegments(env)),
+      runCronJob('webhook-inbox-reprocess', reprocessPendingWebhookEvents(env)),
     ]);
     await finishCronExecution(env.DB, executionId);
     return;

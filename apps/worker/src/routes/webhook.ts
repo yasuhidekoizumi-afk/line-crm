@@ -18,6 +18,7 @@ import { fireEvent } from '../services/event-bus.js';
 import { recordLineFollowEvent } from '../services/delivery-safety.js';
 import { notifyInfluencerRegistration } from '../services/influencer-slack-notify.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
+import { insertWebhookInbox, markWebhookProcessed, markWebhookFailed } from '../services/webhook-inbox.js';
 import type { Env } from '../index.js';
 
 const webhook = new Hono<Env>();
@@ -64,13 +65,37 @@ webhook.post('/webhook', async (c) => {
 
   const lineClient = new LineClient(channelAccessToken);
 
+  // 受信イベントを即座に永続化（消失防止）。LINE再送（同一webhookEventId）はINSERT側でUNIQUE拒否。
+  // ponytail: inbox INSERT自体の失敗は配信継続を優先して握りつぶす（ログに残る）。
+  const inboxIds = new Map<number, string>();
+  try {
+    for (let i = 0; i < body.events.length; i++) {
+      const event = body.events[i];
+      const webhookEventId =
+        (event as { webhookEventId?: string }).webhookEventId ?? null;
+      const inboxId = await insertWebhookInbox(db, {
+        lineAccountId: matchedAccountId,
+        eventType: event.type,
+        webhookEventId,
+        payload: JSON.stringify(event),
+      });
+      if (inboxId) inboxIds.set(i, inboxId);
+    }
+  } catch (err) {
+    console.error('[webhook-inbox] bulk insert failed:', err);
+  }
+
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
   const processingPromise = (async () => {
-    for (const event of body.events) {
+    for (let i = 0; i < body.events.length; i++) {
+      const event = body.events[i];
+      const inboxId = inboxIds.get(i) ?? null;
       try {
         await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env);
+        if (inboxId) await markWebhookProcessed(db, inboxId).catch(() => {});
       } catch (err) {
         console.error('Error handling webhook event:', err);
+        if (inboxId) await markWebhookFailed(db, inboxId, err).catch(() => {});
       }
     }
   })();
@@ -562,3 +587,4 @@ async function notifyKoizumiLineEscalation(
 }
 
 export { webhook };
+export { handleEvent };
