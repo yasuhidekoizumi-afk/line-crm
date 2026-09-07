@@ -425,7 +425,7 @@ async function buildCommonCronJobs(
   }
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
-  jobs.push(processLoyaltyExpirations(env.DB));
+  jobs.push(processLoyaltyExpirations(env.DB).then(() => undefined));
   jobs.push(expireGifts(env.DB).then((n) => {
     if (n > 0) console.log(`[egift] expired ${n} gifts`);
   }).catch(() => {}).then(() => {}));

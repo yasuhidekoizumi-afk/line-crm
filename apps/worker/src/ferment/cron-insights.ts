@@ -9,7 +9,7 @@
  *   - 最適な送信時刻（過去開封ログから）
  */
 
-import type { FermentEnv } from './types.js';
+import type { FermentEnv, FermentBindings } from './types.js';
 
 interface CustomerForCalc {
   customer_id: string;
@@ -50,7 +50,7 @@ function calculate30dProbability(avgIntervalDays: number, daysSinceLast: number)
 }
 
 /** 顧客ごとに最適な送信時刻を過去の opened_at ログから抽出 */
-async function calculateBestSendHour(env: FermentEnv, customerId: string): Promise<number | null> {
+async function calculateBestSendHour(env: FermentBindings, customerId: string): Promise<number | null> {
   const r = await env.DB
     .prepare(
       `SELECT
@@ -68,7 +68,7 @@ async function calculateBestSendHour(env: FermentEnv, customerId: string): Promi
 }
 
 /** メイン: 全顧客のインサイトを再計算 */
-export async function recomputeAllCustomerInsights(env: FermentEnv): Promise<{
+export async function recomputeAllCustomerInsights(env: FermentBindings): Promise<{
   total_processed: number;
   updated: number;
   errors: number;

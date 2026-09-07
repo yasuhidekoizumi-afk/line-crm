@@ -102,12 +102,12 @@ export async function listShopifySegments(env: ShopifySegmentEnv): Promise<Shopi
   let after: string | null = null;
   // セグメント数は高々数百。安全側に最大10ページ（=2500件）で打ち切る。
   for (let page = 0; page < 10; page++) {
-    const data = await shopifyGraphQL<{
+    const data: {
       segments: {
         nodes: Array<{ id: string; name: string; query: string; lastEditDate: string | null }>;
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
       };
-    }>(
+    } = await shopifyGraphQL(
       env,
       `query($after: String) {
         segments(first: 250, after: $after) {

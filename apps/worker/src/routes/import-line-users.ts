@@ -1,8 +1,12 @@
 import { Hono } from 'hono';
 import { upsertCustomer, generateFermentId } from '@line-crm/db';
+import { requireRole } from '../middleware/role-guard.js';
 import type { Env } from '../index.js';
 
 const importLineUsers = new Hono<Env>();
+
+// 顧客データの大量upsert/rollback（DELETE含む）を行うため owner のみ。
+importLineUsers.use('/api/admin/*', requireRole('owner'));
 
 /** gid://shopify/Customer/123 や 123 から数値IDを取り出す */
 function extractShopifyId(raw?: string): string | null {

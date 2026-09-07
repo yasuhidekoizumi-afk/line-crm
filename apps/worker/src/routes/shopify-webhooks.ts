@@ -17,24 +17,16 @@ import { saveOrderMetafields, saveCustomerMetafields } from '../services/shopify
 import { persistShopifyOrder, type ShopifyOrderPayload } from '../services/shopify-orders.js';
 import { refundUnusedPointCode, findPendingCodeByFriendId, markPointCodeUsedByFriendId } from '../services/loyalty-code-refund.js';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
+import { verifyShopifyHmac } from '../ferment/routes/phase2.js';
 import type { Env } from '../index.js';
 
 const shopifyWebhooks = new Hono<Env>();
 const PAY_FORWARD_REWARD_POINTS = 500;
 const PAY_FORWARD_MIN_ORDER_AMOUNT = 3000;
 
-function verifyTokenParam(url: string, expected: string): boolean {
-  try {
-    const u = new URL(url);
-    const token = u.searchParams.get('token') ?? '';
-    if (token.length !== expected.length) return false;
-    let diff = 0;
-    for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
-    return diff === 0;
-  } catch {
-    return false;
-  }
-}
+// Shopify Webhook認証は HMAC 署名検証に一本化した。
+// 旧来の ?token= クエリ比較は URL がShopify設定画面・ログ・Refererに露出するため廃止。
+// Webhook再登録は loyalty.ts の register-fulfillment-webhook（token不要版に修正済み）で行う。
 
 function findAttributeValue(
   attrs: Array<{ name?: string; key?: string; value?: string | number | null }> | undefined,
@@ -194,8 +186,9 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   if (!secret) {
     return c.json({ success: false, error: 'Webhook secret not configured' }, 500);
   }
-  if (!verifyTokenParam(c.req.url, secret)) {
-    return c.json({ success: false, error: 'Invalid token' }, 401);
+  const hmacHeader = c.req.header('X-Shopify-Hmac-Sha256') ?? c.req.header('x-shopify-hmac-sha256');
+  if (!(await verifyShopifyHmac(secret, rawBody, hmacHeader))) {
+    return c.json({ success: false, error: 'Invalid HMAC signature' }, 401);
   }
 
   let order: {
@@ -451,7 +444,10 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-cancelled', async (c) => {
   const rawBody = await c.req.text();
   const secret = (c.env as unknown as Record<string, string | undefined>).SHOPIFY_WEBHOOK_SECRET;
   if (!secret) return c.json({ success: false, error: 'Webhook secret not configured' }, 500);
-  if (!verifyTokenParam(c.req.url, secret)) return c.json({ success: false, error: 'Invalid token' }, 401);
+  const hmacHeader = c.req.header('X-Shopify-Hmac-Sha256') ?? c.req.header('x-shopify-hmac-sha256');
+  if (!(await verifyShopifyHmac(secret, rawBody, hmacHeader))) {
+    return c.json({ success: false, error: 'Invalid HMAC signature' }, 401);
+  }
 
   let order: { id: number | string };
   try {
@@ -506,7 +502,10 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-fulfilled', async (c) => {
   const rawBody = await c.req.text();
   const secret = (c.env as unknown as Record<string, string | undefined>).SHOPIFY_WEBHOOK_SECRET;
   if (!secret) return c.json({ success: false, error: 'Webhook secret not configured' }, 500);
-  if (!verifyTokenParam(c.req.url, secret)) return c.json({ success: false, error: 'Invalid token' }, 401);
+  const hmacHeader = c.req.header('X-Shopify-Hmac-Sha256') ?? c.req.header('x-shopify-hmac-sha256');
+  if (!(await verifyShopifyHmac(secret, rawBody, hmacHeader))) {
+    return c.json({ success: false, error: 'Invalid HMAC signature' }, 401);
+  }
 
   let order: import('../services/shipping-line-notify.js').ShipOrderLite;
   try {

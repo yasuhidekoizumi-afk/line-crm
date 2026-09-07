@@ -52,10 +52,11 @@ aiRoutes.post('/body-suggestion', async (c) => {
 
   try {
     const result = await generatePersonalizedBody(apiKey, {
-      template: { subject_base: body.purpose, body_html: '', ai_system_prompt: systemPrompt } as Parameters<typeof generatePersonalizedBody>[1]['template'],
-      customer: { display_name: '{{name}}', region: 'JP', language: 'ja' } as Parameters<typeof generatePersonalizedBody>[1]['customer'],
+      systemPrompt,
+      baseContent: '',
+      customerContext: { display_name: '{{name}}', region: 'JP', language: 'ja', ltv_tier: 'mid', past_products: [], last_interaction: '', tags: [] },
     });
-    return c.json({ success: true, data: { body_html: result.body_html } });
+    return c.json({ success: true, data: { body_html: result.html } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return c.json({ success: false, error: msg }, 500);
@@ -163,7 +164,11 @@ attributionRoutes.post('/order-created', async (c) => {
     email?: string;
     total_price?: string;
     id?: number | string;
-  }>().catch(() => ({}));
+  }>().catch(() => ({} as {
+    email?: string;
+    total_price?: string;
+    id?: number | string;
+  }));
   const email = body.email?.toLowerCase();
   if (!email) return c.json({ success: true, data: { skipped: 'no email' } });
 

@@ -3,7 +3,7 @@
  */
 
 import { generateFermentId } from '@line-crm/db';
-import type { FermentEnv } from './types.js';
+import type { FermentEnv, FermentBindings } from './types.js';
 
 interface AnomalyMetric {
   type: string;
@@ -14,7 +14,7 @@ interface AnomalyMetric {
 }
 
 /** 異常検知（15分毎） */
-export async function detectAnomalies(env: FermentEnv): Promise<{ detected: number }> {
+export async function detectAnomalies(env: FermentBindings): Promise<{ detected: number }> {
   const env_ = env as unknown as FermentEnv['Bindings'];
   const anomalies: AnomalyMetric[] = [];
 
@@ -148,7 +148,7 @@ export async function detectAnomalies(env: FermentEnv): Promise<{ detected: numb
 }
 
 /** 戦略エージェント自動起動（毎日 09:00 JST） */
-export async function generateDailyStrategy(env: FermentEnv): Promise<{ generated: boolean }> {
+export async function generateDailyStrategy(env: FermentBindings): Promise<{ generated: boolean }> {
   // POST /strategy/generate 相当を内部実行
   const env_ = env as unknown as FermentEnv['Bindings'];
   const apiKey = env_.GEMINI_API_KEY;
@@ -167,7 +167,7 @@ export async function generateDailyStrategy(env: FermentEnv): Promise<{ generate
 }
 
 /** 週次振り返りレポート（毎週月曜 09:00 JST） */
-export async function generateWeeklyReport(env: FermentEnv): Promise<{ generated: boolean }> {
+export async function generateWeeklyReport(env: FermentBindings): Promise<{ generated: boolean }> {
   const env_ = env as unknown as FermentEnv['Bindings'];
   const apiKey = env_.GEMINI_API_KEY;
   if (!apiKey) return { generated: false };
@@ -178,7 +178,7 @@ export async function generateWeeklyReport(env: FermentEnv): Promise<{ generated
  * Gemini 新モデル検知（日次）
  * Google AI Studio の /models を叩いて、新規追加されたモデルを Slack 通知。
  */
-export async function detectNewGeminiModels(env: FermentEnv): Promise<{ new_models: string[] }> {
+export async function detectNewGeminiModels(env: FermentBindings): Promise<{ new_models: string[] }> {
   const env_ = env as unknown as FermentEnv['Bindings'];
   const apiKey = env_.GEMINI_API_KEY;
   if (!apiKey) return { new_models: [] };

@@ -2,10 +2,10 @@
  * FERMENT Phase 5 cron jobs
  */
 
-import type { FermentEnv } from './types.js';
+import type { FermentEnv, FermentBindings } from './types.js';
 
 /** Churn Risk Score を全顧客で再計算 */
-export async function recomputeChurnRisk(env: FermentEnv): Promise<{ updated: number }> {
+export async function recomputeChurnRisk(env: FermentBindings): Promise<{ updated: number }> {
   // 簡易ロジック:
   //   - 90日以上未購入 = 高リスク
   //   - 過去3メールすべて未開封 = 高リスク
@@ -29,7 +29,7 @@ export async function recomputeChurnRisk(env: FermentEnv): Promise<{ updated: nu
 }
 
 /** 件名学習データ更新（campaign 完了時に開封率を集計して subject_line_history に記録） */
-export async function aggregateSubjectHistory(env: FermentEnv): Promise<{ aggregated: number }> {
+export async function aggregateSubjectHistory(env: FermentBindings): Promise<{ aggregated: number }> {
   const r = await env.DB
     .prepare(
       `INSERT INTO subject_line_history (id, subject, total_sent, total_opened, open_rate, campaign_id)
@@ -51,7 +51,7 @@ export async function aggregateSubjectHistory(env: FermentEnv): Promise<{ aggreg
 }
 
 /** データ保持期間ポリシーに基づくデータ自動削除 */
-export async function applyDataRetentionPolicy(env: FermentEnv): Promise<{
+export async function applyDataRetentionPolicy(env: FermentBindings): Promise<{
   email_logs_deleted: number;
   audit_logs_deleted: number;
 }> {
@@ -81,7 +81,7 @@ export async function applyDataRetentionPolicy(env: FermentEnv): Promise<{
 }
 
 /** スケジュール配信レポートのチェック・送信 */
-export async function processScheduledReports(env: FermentEnv): Promise<{ sent: number }> {
+export async function processScheduledReports(env: FermentBindings): Promise<{ sent: number }> {
   // 毎週月曜9時に実行される想定で、is_active=1 の reports を処理
   const reports = await env.DB
     .prepare("SELECT * FROM ferment_scheduled_reports WHERE is_active = 1")

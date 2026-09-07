@@ -619,7 +619,7 @@ loyalty.post('/api/loyalty/:friendId/adjust', async (c) => {
 
     await upsertLoyaltyPoint(c.env.DB, friendId, {
       balance: newBalance,
-      limitedBalance: current.limited_balance ?? 0,
+      limitedBalance: current?.limited_balance ?? 0,
       totalSpent: currentTotalSpent,
       rank: newRank,
       shopifyCustomerId: current?.shopify_customer_id ?? undefined,
@@ -1137,7 +1137,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-email', async (c) 
     if (sigErr) return sigErr;
 
     const shopifyCustomerId = c.req.param('shopifyCustomerId');
-    const body = await c.req.json<{ email?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ email?: string }>().catch(() => ({} as { email?: string }));
     const email = String(body.email ?? '').trim().toLowerCase();
 
     if (!email) {
@@ -1476,7 +1476,7 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
       success: true,
       data: {
         earnedPoints: awardedPoints,
-        limitedExpiresAt,
+        limitedExpiresAt: null as string | null,
         birthday,
         message: `🎂 誕生日登録ありがとうございます！${awardedPoints}ptを付与しました`,
       },
@@ -1979,7 +1979,7 @@ loyalty.post('/api/loyalty/admin/register-fulfillment-webhook', async (c) => {
     if (!shopDomain || !adminToken) return c.json({ success: false, error: 'Shopify 設定が未構成です' }, 500);
     if (!secret) return c.json({ success: false, error: 'SHOPIFY_WEBHOOK_SECRET が未設定です' }, 500);
 
-    const callbackUrl = `${workerUrl}/api/shopify/webhooks/orders-fulfilled?token=${secret}`;
+    const callbackUrl = `${workerUrl}/api/shopify/webhooks/orders-fulfilled`;
     const res = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
       method: 'POST',
       headers: { 'X-Shopify-Access-Token': adminToken, 'Content-Type': 'application/json' },
@@ -1996,8 +1996,8 @@ loyalty.post('/api/loyalty/admin/register-fulfillment-webhook', async (c) => {
     const userErrors = j.data?.webhookSubscriptionCreate?.userErrors ?? [];
     const id = j.data?.webhookSubscriptionCreate?.webhookSubscription?.id;
     if (id) {
-      // コールバックURLにはシークレットが含まれるため、応答ではマスクして返す
-      return c.json({ success: true, data: { action: 'registered', id, callbackUrl: `${workerUrl}/api/shopify/webhooks/orders-fulfilled?token=***` } });
+      // コールバックURLにシークレットは含まれない（HMAC署名で認証するため）
+      return c.json({ success: true, data: { action: 'registered', id, callbackUrl: `${workerUrl}/api/shopify/webhooks/orders-fulfilled` } });
     }
     const already = userErrors.some((e) => /already|taken|exist/i.test(e.message));
     if (already) return c.json({ success: true, data: { action: 'already_registered', userErrors } });
@@ -2985,7 +2985,7 @@ loyalty.post('/api/loyalty/admin/link-by-name', async (c) => {
 // ────────────────────────────────────────────────────────────────────
 loyalty.post('/api/loyalty/admin/test-link-coupon', async (c) => {
   try {
-    const body = await c.req.json<{ shopifyCustomerId?: string; lineUserId?: string; expiryDays?: number }>().catch(() => ({}));
+    const body = await c.req.json<{ shopifyCustomerId?: string; lineUserId?: string; expiryDays?: number }>().catch(() => ({} as { shopifyCustomerId?: string; lineUserId?: string; expiryDays?: number }));
     const shopifyCustomerId = (body.shopifyCustomerId ?? '').trim();
     if (!shopifyCustomerId) {
       return c.json({ success: false, error: 'shopifyCustomerId は必須です' }, 400);

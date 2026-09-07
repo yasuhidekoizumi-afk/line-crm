@@ -20,6 +20,7 @@ import {
   getEmailFlowSteps,
 } from '@line-crm/db';
 import { verifyResendWebhook, parseResendWebhookEvent } from '@line-crm/email-sdk';
+import type { Context } from 'hono';
 import type { FermentEnv } from '../types.js';
 
 export const webhookRoutes = new Hono<FermentEnv>();
@@ -143,13 +144,29 @@ webhookRoutes.post('/resend', async (c) => {
 // ============================================================
 
 async function handleShopifyWebhook(
-  c: Parameters<Parameters<typeof webhookRoutes.post>[1]>[0],
+  c: Context<FermentEnv>,
   region: 'JP' | 'US',
 ): Promise<Response> {
-  // 共有シークレット認証
+  // 共有シークレット認証（fail-closed: 未設定なら503で拒否）。
+  // 以前は expectedToken 未設定時に検証スキップ＝無認証で通っていた（監査でP0）。
+  // 本番の実シークレット名は FERMENT_SHOPIFY_TOKEN（FERMENT_SETUP.md 参照）のため
+  // 両方の名前を受け、どちらか片方でも設定されていればそれを正とする。
+  const expectedToken =
+    c.env.FERMENT_SHOPIFY_WEBHOOK_SECRET ?? c.env.FERMENT_SHOPIFY_TOKEN;
+  if (!expectedToken) {
+    console.error('[FERMENT] FERMENT_SHOPIFY_WEBHOOK_SECRET / FERMENT_SHOPIFY_TOKEN not configured');
+    return c.json({ error: 'Webhook secret not configured' }, 503);
+  }
   const token = c.req.header('X-Ferment-Token') ?? c.req.header('x-ferment-token');
-  const expectedToken = c.env.FERMENT_SHOPIFY_WEBHOOK_SECRET;
-  if (expectedToken && token !== expectedToken) {
+  if (!token || token.length !== expectedToken.length) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  // 定数時間比較（タイミング攻撃対策）
+  let diff = 0;
+  for (let i = 0; i < expectedToken.length; i++) {
+    diff |= token.charCodeAt(i) ^ expectedToken.charCodeAt(i);
+  }
+  if (diff !== 0) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 

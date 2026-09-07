@@ -677,7 +677,7 @@ ${listData.products.map((p) => `${p.id}: ${p.title}`).join('\n')}
       const inline = p.inline_data ?? p.inlineData;
       if (inline?.data) {
         imageB64 = inline.data;
-        imageMime = inline.mime_type ?? inline.mimeType ?? 'image/png';
+        imageMime = (inline as { mime_type?: string; mimeType?: string }).mime_type ?? (inline as { mimeType?: string }).mimeType ?? 'image/png';
         break;
       }
     }

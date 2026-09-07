@@ -16,26 +16,14 @@ import {
   generateFermentId,
 } from '@line-crm/db';
 import { executeFlowStep } from './send-engine.js';
+import type { FermentBindings } from './types.js';
 
-interface FermentEnv {
-  DB: D1Database;
-  RESEND_API_KEY?: string;
-  ANTHROPIC_API_KEY?: string;
-  GEMINI_API_KEY?: string;
-  SLACK_WEBHOOK_URL?: string;
-  FERMENT_FROM_EMAIL_JP?: string;
-  FERMENT_FROM_EMAIL_US?: string;
-  FERMENT_FROM_NAME_JP?: string;
-  FERMENT_FROM_NAME_US?: string;
-  FERMENT_UNSUBSCRIBE_BASE_URL?: string;
-  FERMENT_HMAC_SECRET?: string;
-}
 
 /**
  * 期限が来たフロー enrollment を処理する
  * 配送時間枠: 9:00〜23:00 JST（LINE側と統一）
  */
-export async function processFlowDeliveries(env: FermentEnv): Promise<void> {
+export async function processFlowDeliveries(env: FermentBindings): Promise<void> {
   // JST配送時間枠チェック
   const jstHour = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', hour: 'numeric', hour12: false });
   const hour = parseInt(jstHour, 10);

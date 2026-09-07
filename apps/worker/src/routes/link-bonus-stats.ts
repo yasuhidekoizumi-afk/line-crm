@@ -6,16 +6,19 @@
  *  - reason='LINE連携ボーナス' の transaction を since 以降で集計。
  *  - friend_id 単位の DISTINCT 数 = 連携人数。
  *
- * 認証: 他の admin endpoint と同じく内部用ノーガード（呼び出しは Worker URL を知る人のみ）。
+ * 認証: authMiddleware 通過後、owner ロール必須（requireRole）。
  *
  * 呼び方:
  *   POST /api/admin/link-bonus-stats
  *   body: { since?: 'YYYY-MM-DD'（既定 2026-04-01）, daily?: boolean }
  */
 import { Hono } from 'hono';
+import { requireRole } from '../middleware/role-guard.js';
 import type { Env } from '../index.js';
 
 const linkBonusStats = new Hono<Env>();
+
+linkBonusStats.use('/api/admin/*', requireRole('owner'));
 
 linkBonusStats.post('/api/admin/link-bonus-stats', async (c) => {
   const body = await c.req

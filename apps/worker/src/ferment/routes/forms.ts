@@ -97,6 +97,9 @@ export const formPublicRoutes = new Hono<FermentEnv>();
 /** 埋め込み用 JS スニペット配信 */
 formPublicRoutes.get('/embed/:formId.js', async (c) => {
   const formId = c.req.param('formId');
+  if (!formId) return c.text('// FERMENT form not found or inactive', 404, {
+    'Content-Type': 'application/javascript; charset=utf-8',
+  });
   const form = await getFermentForm(c.env.DB, formId);
   if (!form || form.is_active !== 1) {
     return c.text('// FERMENT form not found or inactive', 404, {
@@ -212,6 +215,7 @@ formPublicRoutes.post('/:formId/view', async (c) => {
  */
 formPublicRoutes.post('/:formId/submit', async (c) => {
   const formId = c.req.param('formId');
+  if (!formId) return c.json({ success: false, error: 'formId is required' }, 400);
   const body = await c.req.json<{
     email?: string;
     display_name?: string;
@@ -219,7 +223,14 @@ formPublicRoutes.post('/:formId/submit', async (c) => {
     lineUserId?: string;
     friendId?: string;
     data?: Record<string, unknown>;
-  }>().catch(() => ({}));
+  }>().catch(() => ({} as {
+    email?: string;
+    display_name?: string;
+    source_url?: string;
+    lineUserId?: string;
+    friendId?: string;
+    data?: Record<string, unknown>;
+  }));
 
   const form = await getFermentForm(c.env.DB, formId);
   if (!form || form.is_active !== 1) {
@@ -383,17 +394,17 @@ formPublicRoutes.post('/:formId/submit', async (c) => {
 });
 
 // CORS preflight
-formPublicRoutes.options('/:formId/submit', (c) =>
-  c.text('', 204, {
+formPublicRoutes.options('/:formId/submit', () =>
+  new Response(null, { status: 204, headers: {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
-  }),
+  } }),
 );
-formPublicRoutes.options('/:formId/view', (c) =>
-  c.text('', 204, {
+formPublicRoutes.options('/:formId/view', () =>
+  new Response(null, { status: 204, headers: {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  }),
+  } }),
 );

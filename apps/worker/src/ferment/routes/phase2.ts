@@ -19,7 +19,7 @@ export const cartWebhookRoutes = new Hono<FermentEnv>();
  * Shopify Webhook の HMAC SHA256 署名を検証する。
  * Shopify は X-Shopify-Hmac-Sha256 ヘッダに base64 エンコード署名を付ける。
  */
-async function verifyShopifyHmac(
+export async function verifyShopifyHmac(
   secret: string,
   rawBody: string,
   hmacHeader: string | undefined,
@@ -147,7 +147,14 @@ reviewRoutes.post('/submit', async (c) => {
     product_title?: string;
     rating?: number;
     comment?: string;
-  }>().catch(() => ({}));
+  }>().catch(() => ({} as {
+    email?: string;
+    order_id?: string;
+    product_id?: string;
+    product_title?: string;
+    rating?: number;
+    comment?: string;
+  }));
 
   if (!body.email || !body.rating) {
     return c.json({ success: false, error: 'email and rating required' }, 400);
@@ -181,11 +188,14 @@ reviewRoutes.post('/submit', async (c) => {
   return c.json({ success: true }, 200, { 'Access-Control-Allow-Origin': '*' });
 });
 
-reviewRoutes.options('/submit', (c) =>
-  c.text('', 204, {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+reviewRoutes.options('/submit', () =>
+  new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
   }),
 );
 

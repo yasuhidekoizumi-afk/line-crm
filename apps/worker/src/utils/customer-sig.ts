@@ -66,8 +66,9 @@ export async function verifyCustomerSignature(
  * 署名はクエリパラメータで受ける（GET/POST共通で扱え、bodyの二重読みを避けるため）。
  */
 export async function checkCustomerSig(
-  // 各ルートの Env 型差を吸収するため最小限の形で受ける
-  c: Context<{ Bindings: { REQUIRE_CUSTOMER_SIG?: string; LINK_SHOPIFY_SIGNING_SECRET?: string } }>,
+  // 各ルートの Env 型差を吸収するため最小限の形で受ける（Variables 不一致を避ねるためジェネリックAny的な構造）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c: Context<any>,
   shopifyCustomerId: string,
 ): Promise<Response | null> {
   if (c.env.REQUIRE_CUSTOMER_SIG !== '1') return null;

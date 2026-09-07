@@ -74,7 +74,9 @@ staff.get('/api/staff/me', async (c) => {
 
 // GET /api/staff/:id/line-accounts — その担当者に割り当て済みの公式LINE
 staff.get('/api/staff/:id/line-accounts', requireRole('owner', 'admin'), async (c) => {
-  const member = await getStaffById(c.env.DB, c.req.param('id'));
+  const id = c.req.param('id');
+  if (!id) return c.json({ success: false, error: 'id is required' }, 400);
+  const member = await getStaffById(c.env.DB, id);
   if (!member) return c.json({ success: false, error: 'Staff member not found' }, 404);
   const accountIds = await getAccessibleLineAccountIds(c.env.DB, member.id, member.role);
   return c.json({ success: true, data: accountIds });
@@ -82,17 +84,23 @@ staff.get('/api/staff/:id/line-accounts', requireRole('owner', 'admin'), async (
 
 // PUT /api/staff/:id/line-accounts/:accountId — SNS担当者を特定公式LINEだけに割り当てる
 staff.put('/api/staff/:id/line-accounts/:accountId', requireRole('owner', 'admin'), async (c) => {
-  const member = await getStaffById(c.env.DB, c.req.param('id'));
+  const id = c.req.param('id');
+  const accountId = c.req.param('accountId');
+  if (!id || !accountId) return c.json({ success: false, error: 'id and accountId are required' }, 400);
+  const member = await getStaffById(c.env.DB, id);
   if (!member) return c.json({ success: false, error: 'Staff member not found' }, 404);
   const body = await c.req.json<{ accountRole?: 'account_admin' | 'operator' }>();
   const accountRole = body.accountRole ?? 'operator';
   if (!['account_admin', 'operator'].includes(accountRole)) return c.json({ success: false, error: 'invalid accountRole' }, 400);
-  await setStaffLineAccountPermission(c.env.DB, member.id, c.req.param('accountId'), accountRole);
-  return c.json({ success: true, data: { staffId: member.id, lineAccountId: c.req.param('accountId'), accountRole } });
+  await setStaffLineAccountPermission(c.env.DB, member.id, accountId, accountRole);
+  return c.json({ success: true, data: { staffId: member.id, lineAccountId: accountId, accountRole } });
 });
 
 staff.delete('/api/staff/:id/line-accounts/:accountId', requireRole('owner', 'admin'), async (c) => {
-  await removeStaffLineAccountPermission(c.env.DB, c.req.param('id'), c.req.param('accountId'));
+  const id = c.req.param('id');
+  const accountId = c.req.param('accountId');
+  if (!id || !accountId) return c.json({ success: false, error: 'id and accountId are required' }, 400);
+  await removeStaffLineAccountPermission(c.env.DB, id, accountId);
   return c.json({ success: true, data: null });
 });
 

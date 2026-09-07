@@ -1210,7 +1210,7 @@ liffRoutes.post('/api/liff/promo-grant', async (c) => {
       points: promo.points,
       balanceAfter: newBalance + (loyaltyPoint.limited_balance ?? 0),
       reason: promo.reason,
-      expiresAt,
+      expiryDays,
     });
 
     // LINEプッシュ通知（ノンブロッキング）

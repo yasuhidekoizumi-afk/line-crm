@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import { LineClient } from '@line-crm/line-sdk';
 import { upsertCustomer, generateFermentId, getLineAccountById } from '@line-crm/db';
+import { requireRole } from '../middleware/role-guard.js';
 import type { Env } from '../index.js';
+
+const adminBackfillSocialplus = new Hono<Env>();
+
+// 顧客/LINE連携データの大量書換を行うため owner のみ。
+adminBackfillSocialplus.use('/api/admin/*', requireRole('owner'));
 
 /**
  * Shopify顧客メタフィールド `socialplus.line`（値=LINE userId）を line-crm に取り込む
@@ -30,8 +36,6 @@ import type { Env } from '../index.js';
  *
  * 想定チャンクサイズ: 100〜200件/呼び出し（Cloudflare Worker のサブリクエスト上限内）。
  */
-
-const adminBackfillSocialplus = new Hono<Env>();
 
 type BackfillItem = {
   shopifyCustomerId: string;

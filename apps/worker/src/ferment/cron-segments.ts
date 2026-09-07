@@ -10,21 +10,14 @@ import { getSegments, getAutomations } from '@line-crm/db';
 import { computeSegment, querySegmentCustomerIds } from './segment-engine.js';
 import { executeAutomationActions } from './segment-automation.js';
 import { syncShopifySegmentChunk } from './shopify-segments.js';
+import type { FermentBindings } from './types.js';
 
-interface FermentEnv {
-  DB: D1Database;
-  // Shopify ミラーセグメント同期に使用
-  SHOPIFY_SHOP_DOMAIN?: string;
-  SHOPIFY_ADMIN_TOKEN?: string;
-  SHOPIFY_CLIENT_ID?: string;
-  SHOPIFY_CLIENT_SECRET?: string;
-}
 
 /** Shopify ミラーの再同期間隔（最終同期からこの時間を超えたら再取得） */
 const SHOPIFY_RESYNC_INTERVAL_MS = 20 * 60 * 60 * 1000; // 20時間
 
 /** 同期途中のShopifyミラーだけを1分ごとに進める。通常の全セグメント再計算は行わない。 */
-export async function resumeSyncingShopifySegments(env: FermentEnv): Promise<void> {
+export async function resumeSyncingShopifySegments(env: FermentBindings): Promise<void> {
   const pending = await env.DB
     .prepare(`SELECT segment_id FROM segments WHERE source = 'shopify' AND sync_status = 'syncing' ORDER BY updated_at ASC LIMIT 3`)
     .all<{ segment_id: string }>();
@@ -38,9 +31,10 @@ export async function resumeSyncingShopifySegments(env: FermentEnv): Promise<voi
 /**
  * 全セグメントを再計算し、セグメント参入オートメーションを発火する
  */
-export async function recomputeAllSegments(env: FermentEnv): Promise<void> {
+export async function recomputeAllSegments(env: FermentBindings): Promise<void> {
   const segments = await getSegments(env.DB);
-  const automations = await getAutomations(env.DB, { eventType: 'segment_enter', isActive: true });
+  const allAutomations = await getAutomations(env.DB);
+  const automations = allAutomations.filter((a) => a.event_type === 'segment_enter' && a.is_active);
 
   for (const segment of segments) {
     try {

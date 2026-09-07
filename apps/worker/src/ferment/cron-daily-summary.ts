@@ -9,16 +9,13 @@
  */
 
 import { notifySlack } from './slack-notifier.js';
+import type { FermentBindings } from './types.js';
 
-interface FermentEnv {
-  DB: D1Database;
-  SLACK_WEBHOOK_URL?: string;
-}
 
 /**
  * 前日の配信サマリーを集計して Slack に投稿する
  */
-export async function sendDailySummary(env: FermentEnv): Promise<void> {
+export async function sendDailySummary(env: FermentBindings): Promise<void> {
   if (!env.SLACK_WEBHOOK_URL) return;
 
   // 前日の範囲（JST ベース）

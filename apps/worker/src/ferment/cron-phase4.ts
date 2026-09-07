@@ -9,11 +9,11 @@
  */
 
 import { generateFermentId, parseCustomerTags } from '@line-crm/db';
-import type { FermentEnv } from './types.js';
+import type { FermentEnv, FermentBindings } from './types.js';
 
 // ─── A/B テスト勝者選定 ───────────────────────────
 
-export async function selectABWinners(env: FermentEnv): Promise<{ selected: number }> {
+export async function selectABWinners(env: FermentBindings): Promise<{ selected: number }> {
   // 配信開始から1時間以上経過した A/B キャンペーンを取得
   const candidates = await env.DB
     .prepare(
@@ -55,7 +55,7 @@ export async function selectABWinners(env: FermentEnv): Promise<{ selected: numb
 
 // ─── カゴ落ちリマインダー ─────────────────────────
 
-export async function processCartReminders(env: FermentEnv): Promise<{ sent: number }> {
+export async function processCartReminders(env: FermentBindings): Promise<{ sent: number }> {
   // 1時間以上前にカート放棄、未復帰、未送信 or 24時間以上経過で未送信2回目
   const carts = await env.DB
     .prepare(
@@ -97,7 +97,7 @@ export async function processCartReminders(env: FermentEnv): Promise<{ sent: num
 
 // ─── 商品レコメンド affinity 計算 ─────────────────
 
-export async function recomputeProductAffinity(env: FermentEnv): Promise<{ customers_processed: number }> {
+export async function recomputeProductAffinity(env: FermentBindings): Promise<{ customers_processed: number }> {
   // 簡易：customers.tags ベースで人気商品を顧客にスコアリング
   // 実際の協調フィルタリングは Shopify orders API が必要なので、初期はタグマッチング
   const popular = await env.DB
@@ -139,7 +139,7 @@ export async function recomputeProductAffinity(env: FermentEnv): Promise<{ custo
 
 // ─── 週次メールカウントリセット ──────────────────
 
-export async function resetWeeklyEmailCounts(env: FermentEnv): Promise<{ reset: number }> {
+export async function resetWeeklyEmailCounts(env: FermentBindings): Promise<{ reset: number }> {
   const r = await env.DB
     .prepare(
       `UPDATE customers SET weekly_email_count = 0,
@@ -152,7 +152,7 @@ export async function resetWeeklyEmailCounts(env: FermentEnv): Promise<{ reset: 
 
 // ─── スケジュール送信処理（best_send_hour 用） ──
 
-export async function processScheduledSends(env: FermentEnv): Promise<{ processed: number }> {
+export async function processScheduledSends(env: FermentBindings): Promise<{ processed: number }> {
   const due = await env.DB
     .prepare(
       `SELECT scheduled_id FROM scheduled_email_sends

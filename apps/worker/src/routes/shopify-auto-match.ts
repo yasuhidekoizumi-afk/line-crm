@@ -51,7 +51,7 @@ shopifyAutoMatch.get('/api/shopify/auto-match/stats', async (c) => {
 // POST /api/shopify/auto-match/run — バッチマッチング実行
 shopifyAutoMatch.post('/api/shopify/auto-match/run', async (c) => {
   try {
-    const body = await c.req.json<{ limit?: number }>().catch(() => ({}));
+    const body = await c.req.json<{ limit?: number }>().catch(() => ({} as { limit?: number }));
     // customer_name カラムがない場合は、既存の shopify_customer_id + email + phone ベースのマッチングにフォールバック
     const hasCN = await hasCustomerNameColumn(c.env.DB);
     const result = await batchMatchAll(c.env.DB, {

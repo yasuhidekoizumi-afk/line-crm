@@ -11,25 +11,13 @@
 import { getScheduledCampaignsDue, updateEmailCampaign } from '@line-crm/db';
 import { executeCampaign } from './send-engine.js';
 import { notifySlack } from './slack-notifier.js';
+import type { FermentBindings } from './types.js';
 
-interface FermentEnv {
-  DB: D1Database;
-  RESEND_API_KEY?: string;
-  ANTHROPIC_API_KEY?: string;
-  GEMINI_API_KEY?: string;
-  SLACK_WEBHOOK_URL?: string;
-  FERMENT_FROM_EMAIL_JP?: string;
-  FERMENT_FROM_EMAIL_US?: string;
-  FERMENT_FROM_NAME_JP?: string;
-  FERMENT_FROM_NAME_US?: string;
-  FERMENT_UNSUBSCRIBE_BASE_URL?: string;
-  FERMENT_HMAC_SECRET?: string;
-}
 
 /**
  * 送信時刻を過ぎたスケジュール済みキャンペーンを処理する
  */
-export async function processScheduledEmailCampaigns(env: FermentEnv): Promise<void> {
+export async function processScheduledEmailCampaigns(env: FermentBindings): Promise<void> {
   const dueCampaigns = await getScheduledCampaignsDue(env.DB);
 
   for (const campaign of dueCampaigns) {

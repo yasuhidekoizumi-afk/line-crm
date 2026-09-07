@@ -5,6 +5,10 @@
  * ferment/ ディレクトリ内の全ファイルで使用。
  */
 
+// Cron等の関数が受け取るのは index.ts から渡されるフラットなBindings（実ランタイム準拠）。
+// Honoルートは Context<FermentEnv> で c.env = Bindings として受ける。
+export type FermentBindings = FermentEnv['Bindings'];
+
 export type FermentEnv = {
   Bindings: {
     DB: D1Database;
@@ -31,6 +35,8 @@ export type FermentEnv = {
     IMAGES?: R2Bucket;
     SLACK_WEBHOOK_URL?: string;
     FERMENT_SHOPIFY_WEBHOOK_SECRET?: string;
+    // 本番で実運用されている共有トークン（secret list 確認済み・FERMENT_SETUP.md 参照）
+    FERMENT_SHOPIFY_TOKEN?: string;
     FERMENT_HMAC_SECRET?: string;
     // Shopify Webhook の HMAC SHA256 検証用シークレット
     SHOPIFY_WEBHOOK_SECRET?: string;

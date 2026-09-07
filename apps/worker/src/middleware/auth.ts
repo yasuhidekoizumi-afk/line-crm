@@ -33,7 +33,6 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/api/loyalty/campaign-award' ||
     path.match(/^\/api\/pay-forward\/[^/]+$/) ||
     path === '/api/pay-forward/claim' ||
-    path === '/api/admin/run-migration' ||
     path === '/api/shopify/orders/backfill' ||
     path === '/api/shopify/auto-match/stats' ||
     path === '/api/shopify/auto-match/run' ||

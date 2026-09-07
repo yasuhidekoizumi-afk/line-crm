@@ -476,7 +476,7 @@ phase5Routes.post('/approval/:campaignId/request', async (c) => {
 });
 
 phase5Routes.post('/approval/:campaignId/approve', async (c) => {
-  const body = await c.req.json<{ approved_by?: string }>().catch(() => ({}));
+  const body = await c.req.json<{ approved_by?: string }>().catch(() => ({} as { approved_by?: string }));
   await c.env.DB
     .prepare(
       "UPDATE email_campaigns SET approval_status = 'approved', approved_by = ?, approved_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours') WHERE campaign_id = ?",

@@ -30,22 +30,9 @@ import {
 } from '@line-crm/db';
 import { personalizeEmail } from './personalize.js';
 import { notifySlack } from './slack-notifier.js';
+import type { FermentBindings } from './types.js';
 
 /** Worker の Env 型（index.ts で定義される完全な型を参照） */
-interface FermentEnv {
-  DB: D1Database;
-  RESEND_API_KEY?: string;
-  ANTHROPIC_API_KEY?: string;
-  GEMINI_API_KEY?: string;
-  SLACK_WEBHOOK_URL?: string;
-  FERMENT_FROM_EMAIL_JP?: string;
-  FERMENT_FROM_EMAIL_US?: string;
-  FERMENT_FROM_NAME_JP?: string;
-  FERMENT_FROM_NAME_US?: string;
-  FERMENT_UNSUBSCRIBE_BASE_URL?: string;
-  FERMENT_HMAC_SECRET?: string;
-  WORKER_URL?: string;
-}
 
 /** メール1通を送信してログに記録する */
 async function sendOneEmail(
@@ -54,7 +41,7 @@ async function sendOneEmail(
   campaignId: string | null,
   flowId: string | null,
   stepId: string | null,
-  env: FermentEnv,
+  env: FermentBindings,
 ): Promise<{ ok: boolean; logId: string }> {
   const logId = generateFermentId('log');
 
@@ -162,7 +149,7 @@ async function sendOneEmail(
  */
 export async function executeCampaign(
   campaignId: string,
-  env: FermentEnv,
+  env: FermentBindings,
   batchOffset = 0,
 ): Promise<{ sent: number; failed: number; done: boolean }> {
   const campaign = await getEmailCampaignById(env.DB, campaignId);
@@ -176,9 +163,9 @@ export async function executeCampaign(
       let accessToken: string;
       if (campaign.line_account_id) {
         const account = await getLineAccountById(env.DB, campaign.line_account_id);
-        accessToken = account?.channel_access_token ?? (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+        accessToken = account?.channel_access_token ?? env.LINE_CHANNEL_ACCESS_TOKEN;
       } else {
-        accessToken = (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+        accessToken = env.LINE_CHANNEL_ACCESS_TOKEN;
       }
       const lineClient = new LineClient(accessToken);
       const { processBroadcastSend } = await import('../services/broadcast.js');
@@ -186,7 +173,7 @@ export async function executeCampaign(
         env.DB,
         lineClient,
         campaignId,
-        (env as Record<string, string>).WORKER_URL,
+        env.WORKER_URL,
       );
       return { sent: 0, failed: 0, done: true };
     } catch (err) {
@@ -275,7 +262,7 @@ export async function executeFlowStep(
   templateId: string | null,
   flowId: string,
   stepId: string,
-  env: FermentEnv,
+  env: FermentBindings,
   step?: { channel?: string; message_type?: string; message_content?: string; line_account_id?: string },
 ): Promise<{ ok: boolean }> {
   // LINE チャネル
@@ -288,9 +275,9 @@ export async function executeFlowStep(
       let accessToken: string;
       if (step.line_account_id) {
         const account = await getLineAccountById(env.DB, step.line_account_id);
-        accessToken = account?.channel_access_token ?? (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+        accessToken = account?.channel_access_token ?? env.LINE_CHANNEL_ACCESS_TOKEN;
       } else {
-        accessToken = (env as Record<string, string>).LINE_CHANNEL_ACCESS_TOKEN;
+        accessToken = env.LINE_CHANNEL_ACCESS_TOKEN;
       }
       const lineClient = new LineClient(accessToken);
       const { buildMessage } = await import('../services/step-delivery.js');

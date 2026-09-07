@@ -228,7 +228,7 @@ emailFlowRoutes.post('/flows/:flowId/enrollments/:enrollmentId/pause', async (c)
 emailFlowRoutes.post('/flows/:flowId/enrollments/:enrollmentId/resume', async (c) => {
   try {
     const enrollmentId = c.req.param('enrollmentId');
-    const body = await c.req.json<{ delay_hours?: number }>().catch(() => ({}));
+    const body = await c.req.json<{ delay_hours?: number }>().catch(() => ({} as { delay_hours?: number }));
     const delayHours = body.delay_hours ?? 0;
     const nextSendAt = new Date(Date.now() + delayHours * 60 * 60 * 1000).toISOString();
     await updateEnrollment(c.env.DB, enrollmentId, {

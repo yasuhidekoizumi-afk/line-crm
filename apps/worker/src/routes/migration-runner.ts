@@ -1,7 +1,14 @@
 import { Hono } from 'hono';
 import type { Env } from '../index.js';
+import { requireRole } from '../middleware/role-guard.js';
 
 const migrationRunner = new Hono<Env>();
+
+// 破壊的DDL（ALTER/RECREATE/DROP）を実行する管理エンドポイント。
+// 認証ミドルウェアは通るが、owner権限を持つAPIキーのみ実行可能。
+// 元々 auth.ts の公開例外リストに入っていたため認証なしで呼べたが、
+// これは監査でP0と判定され除外済み（middleware/auth.ts 参照）。
+migrationRunner.use('/api/admin/*', requireRole('owner'));
 
 migrationRunner.post('/api/admin/run-migration', async (c) => {
   const results: string[] = [];
