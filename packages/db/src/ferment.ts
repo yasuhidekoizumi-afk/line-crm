@@ -908,6 +908,36 @@ export async function getDueEnrollments(
   return result.results;
 }
 
+/**
+ * 送信前にenrollmentを原子的にclaimする（二重送信防止）。
+ *
+ * Cron重複実行・Watchdog並走時に同一enrollmentが複数ワーカーで拾われる問題の対策。
+ * next_send_atを条件に含めたCAS（compare-and-swap）で、
+ * 「取得時刻以降に誰かが更新していない」場合のみclaim成功。
+ * claim失敗＝別ワーカーが処理中とみなし、そのenrollmentはスキップ。
+ *
+ * LINEステップ配信（claimFriendScenarioForDelivery）と同一パターン。
+ */
+export async function claimEnrollmentForDelivery(
+  db: D1Database,
+  enrollmentId: string,
+  oldNextSendAt: string,
+): Promise<boolean> {
+  // lease: 現在+30分。フロー配信は1ステップ完結なのでLINE側(3分)より長め。
+  // 30分経過後も updateEnrollment が次ステップ/完了で上書きするため、
+  // lease切れは再送ではなく正常後続処理が上書きする。
+  const leaseUntil = new Date(Date.now() + 30 * 60_000).toISOString();
+  const result = await db
+    .prepare(
+      `UPDATE email_flow_enrollments
+       SET next_send_at = ?
+       WHERE enrollment_id = ? AND next_send_at = ? AND status = 'active'`,
+    )
+    .bind(leaseUntil, enrollmentId, oldNextSendAt)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
 export async function updateEnrollment(
   db: D1Database,
   enrollmentId: string,

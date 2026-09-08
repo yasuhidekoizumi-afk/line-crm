@@ -10,6 +10,7 @@
 
 import {
   getDueEnrollments,
+  claimEnrollmentForDelivery,
   updateEnrollment,
   getEmailFlowSteps,
   getCustomerById,
@@ -35,6 +36,12 @@ export async function processFlowDeliveries(env: FermentBindings): Promise<void>
 
   for (const enrollment of enrollments) {
     try {
+      // 二重送信防止: 原子的claim（CAS）。失敗=別ワーカー処理中のためスキップ。
+      if (enrollment.next_send_at) {
+        const claimed = await claimEnrollmentForDelivery(env.DB, enrollment.enrollment_id, enrollment.next_send_at);
+        if (!claimed) continue;
+      }
+
       const steps = await getEmailFlowSteps(env.DB, enrollment.flow_id);
       const currentStep = steps.find((s) => s.step_order === enrollment.current_step);
 
