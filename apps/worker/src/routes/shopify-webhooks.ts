@@ -264,6 +264,20 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   const existing = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
   if (!existing) {
     // LINE 未連携顧客 — 保留テーブルに記録（後で紐付け時にバックフィル可能）
+    // さらに F1→連携誘導実験の割付を非同期で行う（email一致の実UID友だちが居れば誘導/対照タグ）
+    const email = order.email ?? order.customer?.email ?? null;
+    if (email) {
+      c.executionCtx?.waitUntil(
+        import('../services/f1-link-experiment.js')
+          .then(({ assignF1LinkExperimentTag }) => assignF1LinkExperimentTag(c.env.DB, { shopifyCustomerId, email }))
+          .then((r) => {
+            if (r.assigned === 'guide' || r.assigned === 'control') {
+              console.log(`[f1-link-exp] assigned=${r.assigned} customer=${shopifyCustomerId}`);
+            }
+          })
+          .catch((err) => console.error('[f1-link-exp] assign failed:', err)),
+      );
+    }
     try {
       await c.env.DB
         .prepare(
