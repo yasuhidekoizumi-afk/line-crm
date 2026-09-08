@@ -458,6 +458,7 @@ export async function addLoyaltyTransaction(
     staffId?: string;
     sourceTxId?: string;
     expiryDays?: number; // award トランザクションの有効期限（日数）。省略時は365日
+    idempotencyKey?: string; // 冪等キー（idx_loyalty_tx_idempotency UNIQUE）。重複INSERTはUNIQUE違反で弾く
   },
 ): Promise<void> {
   const now = jstNow();
@@ -471,8 +472,8 @@ export async function addLoyaltyTransaction(
       : null;
   await db
     .prepare(
-      `INSERT INTO loyalty_transactions (id, friend_id, type, points, balance_after, reason, order_id, staff_id, created_at, expires_at, source_tx_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO loyalty_transactions (id, friend_id, type, points, balance_after, reason, order_id, staff_id, created_at, expires_at, source_tx_id, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       crypto.randomUUID(),
@@ -486,6 +487,7 @@ export async function addLoyaltyTransaction(
       now,
       expiresAt,
       input.sourceTxId ?? null,
+      input.idempotencyKey ?? null,
     )
     .run();
 }

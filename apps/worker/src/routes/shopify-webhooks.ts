@@ -324,21 +324,34 @@ shopifyWebhooks.post('/api/shopify/webhooks/orders-paid', async (c) => {
   const newBalance = currentBalance + earnedPoints;
   const newRank = determineRank(newTotalSpent);
 
+  // 冪等キーによる原子的二重付与防止（056のUNIQUE INDEXを利用）。
+  // 旧来の「SELECT確認→残高更新→INSERT」は並行到着で競合するため、
+  // 先に取引INSERTを試み、UNIQUE違反なら既に付与済みとして残高更新を回避する。
+  try {
+    await addLoyaltyTransaction(c.env.DB, {
+      friendId: existing.friend_id,
+      type: 'award',
+      points: earnedPoints,
+      balanceAfter: newBalance + (existing.limited_balance ?? 0),
+      reason: `購入ポイント付与（¥${orderAmount.toLocaleString('ja-JP')}）`,
+      orderId,
+      expiryDays,
+      idempotencyKey: `orders-paid:${orderId}`,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('UNIQUE') || msg.includes('constraint')) {
+      console.log(`[orders-paid] duplicate award prevented for order=${orderId}`);
+      return c.json({ success: true, data: { skipped: true, reason: 'already_awarded' } });
+    }
+    throw err;
+  }
+
   await upsertLoyaltyPoint(c.env.DB, existing.friend_id, {
     balance: newBalance,
     totalSpent: newTotalSpent,
     rank: newRank,
     shopifyCustomerId,
-  });
-
-  await addLoyaltyTransaction(c.env.DB, {
-    friendId: existing.friend_id,
-    type: 'award',
-    points: earnedPoints,
-    balanceAfter: newBalance + (existing.limited_balance ?? 0),
-    reason: `購入ポイント付与（¥${orderAmount.toLocaleString('ja-JP')}）`,
-    orderId,
-    expiryDays,
   });
 
   let payForwardReward: { rewarded: boolean; reason?: string; referrerCustomerId?: string } | null = null;
