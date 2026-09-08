@@ -506,6 +506,19 @@ export async function processBroadcastSend(
       failedCount,
       errorSummary,
     });
+
+    // 配信直後の解除数スナップショット（068: ブロック率計測の基準点）。
+    // 失敗してもブロック率計測だけは止めないため握りつぶす。
+    try {
+      const { countRecentUnfollows } = await import('./delivery-safety.js');
+      const snapshot = await countRecentUnfollows(db, broadcast.line_account_id, 24 * 60);
+      await db
+        .prepare('UPDATE broadcasts SET unfollow_count_at_send = ? WHERE id = ?')
+        .bind(snapshot, broadcastId)
+        .run();
+    } catch (err) {
+      console.error(`[broadcast] unfollow snapshot failed for ${broadcastId}:`, err);
+    }
   } catch (err) {
     // LINE送信後にWorkerが落ちると再送が最も危険なため、自動でdraftへ戻さない。
     await updateBroadcastStatus(db, broadcastId, 'sent', {

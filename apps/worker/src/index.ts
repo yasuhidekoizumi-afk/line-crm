@@ -545,6 +545,13 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     );
   } else if (cronExpr === '0 0 * * *') {
     jobs.push(sendDailySummary(env));
+    // 送信24h経過した配信のブロック率を計算（068）
+    jobs.push(
+      import('./services/broadcast-block-metrics.js')
+        .then(({ computeBroadcastUnfollowRates }) => computeBroadcastUnfollowRates(env.DB))
+        .then((n) => { if (n > 0) console.log(`[broadcast-block-metrics] updated ${n} broadcasts`); })
+        .catch((e) => console.error('[broadcast-block-metrics] error:', e)),
+    );
     jobs.push(
       import('./services/customer-journey.js')
         .then(({ recomputeCustomerJourney }) => recomputeCustomerJourney(env.DB))
