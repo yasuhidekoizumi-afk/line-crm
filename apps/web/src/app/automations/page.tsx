@@ -7,7 +7,8 @@ import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 
-import type { AutomationEventType, AutomationAction } from '@line-crm/shared'
+import type { AutomationEventType, AutomationAction, Tag, Scenario } from '@line-crm/shared'
+import ActionBuilder from '@/components/automations/action-builder'
 
 interface Automation {
   id: string
@@ -56,7 +57,7 @@ interface CreateFormState {
   name: string
   description: string
   eventType: AutomationEventType
-  actionsJson: string
+  actions: AutomationAction[]
   conditionsJson: string
   priority: number
 }
@@ -65,7 +66,7 @@ const initialForm: CreateFormState = {
   name: '',
   description: '',
   eventType: 'friend_add',
-  actionsJson: '[\n  {\n    "type": "add_tag",\n    "params": {}\n  }\n]',
+  actions: [],
   conditionsJson: '{}',
   priority: 0,
 }
@@ -99,6 +100,8 @@ export default function AutomationsPage() {
   const [form, setForm] = useState<CreateFormState>({ ...initialForm })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const [allTags, setAllTags] = useState<Tag[]>([])
+  const [allScenarios, setAllScenarios] = useState<(Scenario & { stepCount?: number })[]>([])
 
   const loadAutomations = useCallback(async () => {
     setLoading(true)
@@ -120,6 +123,8 @@ export default function AutomationsPage() {
   useEffect(() => {
     loadAutomations()
     fermentApi.segments.list().then(r => { if (r.success && r.data) setSegments(r.data) }).catch(() => {})
+    api.tags.list().then(r => { if (r.success) setAllTags(r.data) }).catch(() => {})
+    api.scenarios.list().then(r => { if (r.success) setAllScenarios(r.data) }).catch(() => {})
   }, [loadAutomations])
 
   const handleCreate = async () => {
@@ -127,15 +132,13 @@ export default function AutomationsPage() {
       setFormError('ルール名を入力してください')
       return
     }
-
-    let parsedActions: AutomationAction[]
-    let parsedConditions: Record<string, unknown>
-    try {
-      parsedActions = JSON.parse(form.actionsJson)
-    } catch {
-      setFormError('アクションのJSON形式が正しくありません')
+    if (form.actions.length === 0) {
+      setFormError('アクションを1つ以上追加してください')
       return
     }
+
+    const parsedActions = form.actions
+    let parsedConditions: Record<string, unknown>
     try {
       parsedConditions = JSON.parse(form.conditionsJson)
     } catch {
@@ -264,13 +267,12 @@ export default function AutomationsPage() {
               </div>
             )}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">アクション (JSON)</label>
-              <textarea
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
-                rows={6}
-                placeholder='[{"type": "add_tag", "params": {"tagId": "..."}}]'
-                value={form.actionsJson}
-                onChange={(e) => setForm({ ...form, actionsJson: e.target.value })}
+              <label className="block text-xs font-medium text-gray-600 mb-1">アクション</label>
+              <ActionBuilder
+                actions={form.actions}
+                onChange={(actions) => setForm({ ...form, actions })}
+                tags={allTags}
+                scenarios={allScenarios}
               />
             </div>
             <div>
