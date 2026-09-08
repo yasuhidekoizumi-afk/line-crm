@@ -245,6 +245,34 @@ export async function recomputeCustomerJourney(db: D1Database): Promise<Recomput
 
   // 既存行の更新: 2回目購入・累計は時間経過で変わるため、全行を現実に合わせて再計算する。
   // （これまで新規顧客のINSERTのみで、既存行のF2到達が永遠に反映されない欠陥があった）
+  //
+  // 同時に friend_id の再解決も行う（067: 同定改善）。
+  // 優先順位（高→低）:
+  //   1. loyalty_points.shopify_customer_id → 実UIDのfriend（shopify_customer_id）
+  //   2. 既存: customers経由の実UID friend（customer_join）
+  // friend_idが既に設定されている行は上書きしない（手動確定を尊重）。
+  await db
+    .prepare(
+      `UPDATE customer_journey
+       SET friend_id = (
+         SELECT lp.friend_id FROM loyalty_points lp
+         JOIN friends f ON f.id = lp.friend_id
+         WHERE lp.shopify_customer_id = customer_journey.shopify_customer_id
+           AND f.line_user_id LIKE 'U%'
+         LIMIT 1
+       ),
+       match_source = 'shopify_customer_id',
+       match_confirmed_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+       WHERE friend_id IS NULL
+         AND EXISTS (
+           SELECT 1 FROM loyalty_points lp
+           JOIN friends f ON f.id = lp.friend_id
+           WHERE lp.shopify_customer_id = customer_journey.shopify_customer_id
+             AND f.line_user_id LIKE 'U%'
+         )`,
+    )
+    .run();
+
   await db
     .prepare(
       `WITH ordered AS (
