@@ -27,6 +27,8 @@ function thisMonthJst(): string {
 interface FermentStats { totalCustomers: number | null; emailSubscribers: number | null; emailTemplates: number | null; emailCampaigns: number | null; totalSent30d: number | null; totalOpened30d: number | null; totalClicked30d: number | null; attributedRevenue30d: number | null; predictedClvSum: number | null; highIntent: number | null; topCampaigns: Array<{ campaign_id: string; name: string; total_sent: number; total_opened: number; total_attributed_revenue: number }> }
 interface ApiResultGeneric<T> { success: boolean; data?: T; meta?: { total: number } }
 interface LoyaltyStats { totalMembers: number | null; rankBreakdown: { rank: string; count: number }[] | null; thisMonthAwarded: number | null; thisMonthRedeemed: number | null; thisMonthNewMembers: number | null; lastMonthAwarded: number | null; lastMonthRedeemed: number | null; lastMonthNewMembers: number | null }
+// ダッシュボード用: 配信可能F1・直近ブロック率（/api/customer-journey/overview-now）
+interface OverviewNow { sendableF1: number | null; blockRate30dPct: number | null; unfollows30d: number | null }
 
 function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }: { title: string; value: number | null; loading: boolean; icon: React.ReactNode; href: string; accentColor?: string }) {
   return (
@@ -70,6 +72,8 @@ export default function DashboardPage() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   // 当月のLINE配信数/上限（LINE公式ダッシュボードと同じ数字）
   const [quota, setQuota] = useState<{ totalUsage: number; limit: number | null; usagePct: number | null } | null>(null)
+  // 配信可能F1・ブロック率（overview-now）— F2施策の分母と配信健全性を毎朝見る
+  const [overviewNow, setOverviewNow] = useState<OverviewNow>({ sendableF1: null, blockRate30dPct: null, unfollows30d: null })
 
   const loadStats = useCallback(async () => {
     try {
@@ -140,8 +144,16 @@ export default function DashboardPage() {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { setLoading(true); setError(''); Promise.allSettled([loadStats(), loadFerment(), loadLoyalty()]) }, [loadStats, loadFerment, loadLoyalty])
-  useInterval(() => { loadStats() }, autoRefresh ? 60_000 : null)
+  // 配信可能F1・ブロック率（自動更新にも参加させる）
+  const loadOverviewNow = useCallback(async () => {
+    try {
+      const res = await fetchApi<ApiResultGeneric<OverviewNow>>('/api/customer-journey/overview-now')
+      if (res.success && res.data) setOverviewNow({ sendableF1: res.data.sendableF1 ?? null, blockRate30dPct: res.data.blockRate30dPct ?? null, unfollows30d: res.data.unfollows30d ?? null })
+    } catch { /* ignore: ダッシュボードは他KPIだけで継続 */ }
+  }, [])
+
+  useEffect(() => { setLoading(true); setError(''); Promise.allSettled([loadStats(), loadFerment(), loadLoyalty(), loadOverviewNow()]) }, [loadStats, loadFerment, loadLoyalty, loadOverviewNow])
+  useInterval(() => { loadStats(); loadOverviewNow() }, autoRefresh ? 60_000 : null)
 
   return (
     <div>
@@ -173,6 +185,38 @@ export default function DashboardPage() {
         <StatCard title="友だち数" value={stats.friendCount} loading={loading} href="/customers" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>} />
         <StatCard title="アクティブシナリオ数" value={stats.activeScenarioCount} loading={loading} href="/scenarios" accentColor="#3B82F6" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>} />
         <StatCard title="今月の配信数" value={stats.broadcastCount} loading={loading} href="/broadcasts" accentColor="#8B5CF6" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>} />
+      </div>
+
+      {/* 配信可能F1・直近ブロック率（F2施策の分母と配信健全性） */}
+      <div className="mb-8 bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg" style={{ backgroundColor: '#06C755' }}>
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+            </span>
+            <p className="text-sm font-semibold text-gray-800">配信健全性</p>
+          </div>
+          <p className="text-xs text-gray-400">毎分自動更新</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <p className="text-xs text-gray-500 mb-1">配信可能なF1顧客</p>
+            <p className="text-xl font-bold tabular-nums text-gray-900">{overviewNow.sendableF1 !== null ? overviewNow.sendableF1.toLocaleString('ja-JP') : '—'} 人</p>
+            <p className="text-[11px] text-gray-400 mt-1">実UID・フォロー中の初回購入者。連携誘導の分母。</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">直近30日 ブロック率</p>
+            <p className={`text-xl font-bold tabular-nums ${overviewNow.blockRate30dPct !== null && overviewNow.blockRate30dPct > 0.5 ? 'text-red-600' : 'text-gray-900'}`}>
+              {overviewNow.blockRate30dPct !== null ? `${overviewNow.blockRate30dPct.toFixed(2)}%` : '—'}
+            </p>
+            <p className="text-[11px] text-gray-400 mt-1">解除数 ÷ 配信成功数（30日）</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 mb-1">直近30日 解除数</p>
+            <p className="text-xl font-bold tabular-nums text-gray-900">{overviewNow.unfollows30d !== null ? overviewNow.unfollows30d.toLocaleString('ja-JP') : '—'} 件</p>
+            <p className="text-[11px] text-gray-400 mt-1">ブロック率と併せて配信頻度の目安に</p>
+          </div>
+        </div>
       </div>
 
       {/* 当月のLINEメッセージ配信数（LINE公式アカウントと同じ数字。message/quota API） */}

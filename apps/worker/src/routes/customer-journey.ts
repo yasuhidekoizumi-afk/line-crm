@@ -445,4 +445,45 @@ customerJourney.get('/api/customer-journey/segment', async (c) => {
   return c.json({ success: true, data: stats.results ?? [] });
 });
 
+// ─── ダッシュボード用: 配信可能F1・直近ブロック率 ─────────────────
+// 毎朝の「今日何を見るか」用の軽量集計。重いようであれば日次Cronでキャッシュ化する。
+customerJourney.get('/api/customer-journey/overview-now', async (c) => {
+  // 配信可能F1 = 実UID保持 && フォロー中（LINE配信が実際に届く母数）
+  const sendableF1 = await c.env.DB
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM customer_journey cj
+       JOIN friends f ON f.id = cj.friend_id
+       WHERE f.line_user_id LIKE 'U%' AND f.is_following = 1`,
+    )
+    .first<{ n: number }>();
+
+  // 直近30日のブロック率（配信別の率の平均ではなく、期間内unfollow ÷ 期間内配信成功総数）
+  const blockStats = await c.env.DB
+    .prepare(
+      `SELECT
+         COALESCE(SUM(e.unf), 0) AS unfollows,
+         COALESCE((SELECT SUM(success_count) FROM broadcasts
+                   WHERE status = 'sent' AND sent_at >= strftime('%Y-%m-%dT%H:%M:%f','now','-30 days','+9 hours')), 0) AS sent
+       FROM (
+         SELECT COUNT(*) AS unf FROM line_follow_events
+         WHERE event_type = 'unfollow'
+           AND created_at >= strftime('%Y-%m-%dT%H:%M:%f','now','-30 days','+9 hours')
+       ) e`,
+    )
+    .first<{ unfollows: number; sent: number }>();
+
+  return c.json({
+    success: true,
+    data: {
+      sendableF1: sendableF1?.n ?? 0,
+      // 配信済みのない期間は null（0%と表示しない）
+      blockRate30dPct: blockStats && blockStats.sent > 0
+        ? Math.round((10000 * blockStats.unfollows) / blockStats.sent) / 100
+        : null,
+      unfollows30d: blockStats?.unfollows ?? 0,
+    },
+  });
+});
+
 export { customerJourney };
