@@ -1,6 +1,7 @@
 import { extractFlexAltText } from '../utils/flex-alt-text.js';
 import {
   getFriendScenariosDueForDelivery,
+  claimFriendScenarioForDelivery,
   getScenarioSteps,
   advanceFriendScenario,
   completeFriendScenario,
@@ -82,6 +83,10 @@ export async function processStepDeliveries(
   for (let i = 0; i < dueFriendScenarios.length; i++) {
     const fs = dueFriendScenarios[i];
     try {
+      // 二重送信防止: 原子的claim（CAS）。失敗=別ワーカー処理中のためスキップ。
+      const claimed = await claimFriendScenarioForDelivery(db, fs.id, fs.next_delivery_at!);
+      if (!claimed) continue;
+
       // Stealth: add small random delay between deliveries to avoid burst patterns
       if (i > 0) {
         await sleep(addJitter(50, 200));

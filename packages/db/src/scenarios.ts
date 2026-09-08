@@ -378,6 +378,37 @@ export async function getFriendScenariosDueForDelivery(
     .sort((a, b) => new Date(a.next_delivery_at!).getTime() - new Date(b.next_delivery_at!).getTime());
 }
 
+/**
+ * 送信前にfriend_scenarioを原子的にclaimする（二重送信防止）。
+ *
+ * Cron重複実行・Watchdog並走時に同一friend_scenarioが複数ワーカーで拾われる問題の対策。
+ * next_delivery_atを条件に含めたCAS（compare-and-swap）で、
+ * 「取得時刻以降に誰かが更新していない」場合のみclaim成功。
+ * claim失敗＝別ワーカーが処理中とみなし、そのfriend_scenarioはスキップ。
+ *
+ * 成功時: next_delivery_at が oldNextDeliveryAt から lease時刻(+3分) に変わる
+ * 失敗時: 0行更新
+ */
+export async function claimFriendScenarioForDelivery(
+  db: D1Database,
+  id: string,
+  oldNextDeliveryAt: string,
+): Promise<boolean> {
+  // lease: 現在+3分。処理が3分以内に完了すれば通常どおり次ステップが進む。
+  // 3分超過しても advance/complete は別途走るため、lease切れは再送ではなく正常後続処理が上書きする。
+  const leaseUntil = new Date(Date.now() + 9 * 60 * 60_000 + 3 * 60_000)
+    .toISOString().slice(0, -1) + '+09:00';
+  const result = await db
+    .prepare(
+      `UPDATE friend_scenarios
+       SET next_delivery_at = ?, updated_at = ?
+       WHERE id = ? AND next_delivery_at = ? AND status = 'active'`,
+    )
+    .bind(leaseUntil, jstNow(), id, oldNextDeliveryAt)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
 export async function advanceFriendScenario(
   db: D1Database,
   id: string,
