@@ -18,6 +18,8 @@ const ACTION_TYPE_LABELS: Record<AutomationAction['type'], string> = {
   switch_rich_menu: 'リッチメニューを切替',
 }
 
+export const AUTOMATION_ACTION_TYPE_LABELS = ACTION_TYPE_LABELS
+
 const ACTION_TYPES = Object.keys(ACTION_TYPE_LABELS) as AutomationAction['type'][]
 
 interface Props {

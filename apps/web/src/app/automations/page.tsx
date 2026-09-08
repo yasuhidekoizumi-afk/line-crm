@@ -171,6 +171,26 @@ export default function AutomationsPage() {
     }
   }
 
+  const actionSummary = (action: AutomationAction): string => {
+    const p = action.params
+    switch (action.type) {
+      case 'add_tag':
+        return `タグ「${allTags.find((t) => t.id === p.tagId)?.name ?? '???'}」を付与`
+      case 'remove_tag':
+        return `タグ「${allTags.find((t) => t.id === p.tagId)?.name ?? '???'}」を外す`
+      case 'start_scenario':
+        return `シナリオ「${allScenarios.find((s) => s.id === p.scenarioId)?.name ?? '???'}」を開始`
+      case 'send_message':
+        return p.messageType === 'flex'
+          ? 'Flexメッセージを送信'
+          : `メッセージ「${String(p.content ?? '').slice(0, 24)}${String(p.content ?? '').length > 24 ? '…' : ''}」を送信`
+      case 'send_webhook':
+        return `Webhook送信（${String(p.url ?? '').slice(0, 30)}…）`
+      case 'switch_rich_menu':
+        return `リッチメニュー切替（${String(p.richMenuId ?? '')}）`
+    }
+  }
+
   const handleToggleActive = async (id: string, current: boolean) => {
     try {
       await api.automations.update(id, { isActive: !current })
@@ -379,10 +399,25 @@ export default function AutomationsPage() {
               </div>
 
               {/* Meta info */}
-              <div className="flex items-center gap-4 text-xs text-gray-400 mb-3">
+              <div className="flex items-center gap-4 text-xs text-gray-400 mb-2">
                 <span>アクション: {automation.actions.length}件</span>
                 <span>優先度: {automation.priority}</span>
               </div>
+
+              {/* Action summary: ルール内容を日本語で表示（JSONのまま見せない） */}
+              {automation.actions.length > 0 && (
+                <div className="space-y-1 mb-3">
+                  {automation.actions.slice(0, 3).map((a, i) => (
+                    <p key={i} className="text-xs text-gray-600 flex items-start gap-1.5">
+                      <span className="font-medium text-gray-400 shrink-0">{i + 1}.</span>
+                      <span className="min-w-0 break-words">{actionSummary(a)}</span>
+                    </p>
+                  ))}
+                  {automation.actions.length > 3 && (
+                    <p className="text-xs text-gray-400">…ほか {automation.actions.length - 3} 件</p>
+                  )}
+                </div>
+              )}
 
               {/* Actions */}
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
