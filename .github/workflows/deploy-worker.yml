@@ -11,11 +11,26 @@ on:
       - 'packages/line-sdk/**'
       - '.github/workflows/deploy-worker.yml'
 
+# 同じ本番Workerへのデプロイが重なった場合、古い実行を先に完了させてから進める。
+concurrency:
+  group: deploy-production-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   deploy:
+    # 本番WorkerはGitHubのmainからだけデプロイする。
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify production source
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -59,4 +74,5 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/worker
-          command: deploy
+          # wrangler.tomlの既定名はローカル安全用。本番名はmainのCIだけが指定する。
+          command: deploy --name oryzae-line-crm --message "GitHub main ${{ github.sha }}"

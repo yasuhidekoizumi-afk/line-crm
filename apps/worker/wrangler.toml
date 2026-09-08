@@ -1,4 +1,6 @@
-name = "oryzae-line-crm"
+# 安全策: ローカルから `wrangler deploy` を実行しても本番Workerを上書きしない。
+# 本番名 `oryzae-line-crm` は、main限定のGitHub Actionsが --name で明示する。
+name = "oryzae-line-crm-local"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 workers_dev = true
