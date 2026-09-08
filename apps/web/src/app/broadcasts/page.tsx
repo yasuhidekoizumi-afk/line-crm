@@ -386,6 +386,8 @@ function BroadcastsPageInner() {
   const [showCreate, setShowCreate] = useState(!!initialDraft || !!aiAction)
   const [editingBroadcast, setEditingBroadcast] = useState<ApiBroadcast | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<ApiBroadcastDetail | null>(null)
+  // 失敗理由の行内展開（ホバー依存の解消・タップでも表示できるように）
+  const [expandedErrorId, setExpandedErrorId] = useState<string | null>(null)
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null)
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [archivingId, setArchivingId] = useState<string | null>(null)
@@ -1040,13 +1042,20 @@ function BroadcastsPageInner() {
                               : `成功 ${broadcast.successCount.toLocaleString('ja-JP')} / ${broadcast.totalCount.toLocaleString('ja-JP')} 件`}
                           </span>
                           {(broadcast.failedCount ?? 0) > 0 && (
-                            <span
-                              className="block text-xs font-medium text-red-600 cursor-help"
-                              title={broadcast.errorSummary ?? '理由は記録されていません'}
-                            >
-                              ⚠ 失敗 {broadcast.failedCount.toLocaleString('ja-JP')} 件
-                              {broadcast.errorSummary ? '（ホバーで理由表示）' : ''}
-                            </span>
+                            <>
+                              <span className="block text-xs font-medium text-red-600">
+                                ⚠ 失敗 {broadcast.failedCount.toLocaleString('ja-JP')} 件
+                              </span>
+                              {broadcast.errorSummary && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedErrorId(expandedErrorId === broadcast.id ? null : broadcast.id)}
+                                  className={`block max-w-[280px] text-left text-[11px] text-red-500 underline underline-offset-2 hover:text-red-700 ${expandedErrorId === broadcast.id ? '' : 'truncate'}`}
+                                >
+                                  {broadcast.errorSummary}
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       ) : (
