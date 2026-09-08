@@ -374,6 +374,58 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
           </button>
         </div>
 
+        {/* タイムライン: ステップ全体の流れを一覧で把握する（時系列バー） */}
+        {scenario.steps.length > 0 && (
+          <div className="mb-5 overflow-x-auto pb-1">
+            <div className="flex items-center gap-1 min-w-max">
+              {/* トリガー起点 */}
+              <div className="flex flex-col items-center shrink-0">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 text-gray-600 whitespace-nowrap">
+                  {triggerOptions.find(o => o.value === scenario.triggerType)?.label ?? scenario.triggerType}
+                </span>
+              </div>
+              {scenario.steps
+                .sort((a, b) => a.stepOrder - b.stepOrder)
+                .map((step) => (
+                  <div key={step.id} className="flex items-center gap-1 shrink-0">
+                    {/* 前ステップからの遅延（最初のステップはトリガーから） */}
+                    <div className="flex flex-col items-center px-1">
+                      <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                      <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                        {formatDelay(step.delayMinutes)}
+                      </span>
+                    </div>
+                    {/* ステップバッジ */}
+                    <div className="flex flex-col items-center">
+                      <span
+                        className={`inline-flex items-center justify-center w-9 h-9 rounded-full text-xs font-bold text-white shadow-sm ${
+                          step.messageType === 'text' ? 'bg-blue-500' :
+                          step.messageType === 'image' ? 'bg-purple-500' :
+                          'bg-orange-500'
+                        }`}
+                      >
+                        {step.stepOrder}
+                      </span>
+                      <span className="mt-0.5 text-[10px] text-gray-500 whitespace-nowrap max-w-[72px] truncate">
+                        {messageTypeOptions.find(o => o.value === step.messageType)?.label ?? step.messageType}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              {/* 終点 */}
+              <div className="flex items-center gap-1 shrink-0">
+                <div className="flex flex-col items-center px-1">
+                  <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-full text-xs font-bold bg-gray-200 text-gray-500">終</span>
+                  <span className="mt-0.5 text-[10px] text-gray-400">完了</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Step form */}
         {showStepForm && (
           <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
