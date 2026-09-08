@@ -243,7 +243,54 @@ export async function recomputeCustomerJourney(db: D1Database): Promise<Recomput
       .run();
   }
 
-  // ロイヤルティランクを一括UPDATE
+  // 既存行の更新: 2回目購入・累計は時間経過で変わるため、全行を現実に合わせて再計算する。
+  // （これまで新規顧客のINSERTのみで、既存行のF2到達が永遠に反映されない欠陥があった）
+  await db
+    .prepare(
+      `WITH ordered AS (
+         SELECT
+           shopify_customer_id,
+           shopify_order_id,
+           processed_at,
+           total_price,
+           ROW_NUMBER() OVER (PARTITION BY shopify_customer_id ORDER BY processed_at ASC) AS rn,
+           COUNT(*)        OVER (PARTITION BY shopify_customer_id) AS total_orders,
+           SUM(total_price) OVER (PARTITION BY shopify_customer_id) AS total_revenue
+         FROM shopify_orders
+         WHERE ${VALID_ORDER_WHERE}
+       ),
+       ${LINE_LINK_CTES}
+       UPDATE customer_journey SET (
+         second_order_at, second_order_id, second_order_value, days_to_second, second_was_line_linked,
+         total_orders, total_revenue, is_currently_line_linked, computed_at
+       ) = (
+         SELECT
+           s.processed_at, s.shopify_order_id, s.total_price,
+           CAST(julianday(s.processed_at) - julianday(f.processed_at) AS INTEGER),
+           CASE
+             WHEN (fs.line_user_id LIKE 'U%')
+               OR COALESCE(cls.has_line, 0) = 1
+               OR COALESCE(clc.has_line, 0) = 1
+               OR COALESCE(cle.has_line, 0) = 1 THEN 1
+             ELSE 0
+           END,
+           f.total_orders, f.total_revenue,
+           ${HAS_LINE_LINK_EXPR},
+           strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+         FROM ordered f
+         LEFT JOIN ordered s ON s.shopify_customer_id = f.shopify_customer_id AND s.rn = 2
+         LEFT JOIN friends fs ON fs.id = customer_journey.friend_id
+         LEFT JOIN friends ff ON ff.id = customer_journey.friend_id
+         LEFT JOIN customer_line_by_shopify cls ON cls.shopify_customer_id = customer_journey.shopify_customer_id
+         LEFT JOIN customer_line_by_customer clc ON clc.customer_id = customer_journey.customer_id
+         LEFT JOIN customer_line_by_email cle ON cle.email_norm = LOWER(f.email)
+         WHERE f.shopify_customer_id = customer_journey.shopify_customer_id AND f.rn = 1
+       )
+       WHERE EXISTS (SELECT 1 FROM ordered WHERE ordered.shopify_customer_id = customer_journey.shopify_customer_id)`,
+    )
+    .run();
+
+  // ロイヤルティランクを一括UPDATE（既存行も毎回更新）
   await db
     .prepare(
       `UPDATE customer_journey

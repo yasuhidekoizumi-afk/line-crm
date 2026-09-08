@@ -546,6 +546,12 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
   } else if (cronExpr === '0 0 * * *') {
     jobs.push(sendDailySummary(env));
     jobs.push(
+      import('./services/customer-journey.js')
+        .then(({ recomputeCustomerJourney }) => recomputeCustomerJourney(env.DB))
+        .then((r) => { console.log(`[customer-journey] daily recompute: ${r.total_customers} customers, ${r.with_repeat} with F2`); })
+        .catch((e) => console.error('[customer-journey] daily recompute failed:', e)),
+    );
+    jobs.push(
       fetchAndStoreLineOfficialFriendInsights(env.DB)
         .then((rows) => {
           if (rows.length > 0) console.log(`[line-official-insights] stored=${rows.length}`);
