@@ -133,24 +133,8 @@ images.get('/images/imagemap/:id/:size', async (c) => {
   return new Response(object.body, { headers });
 });
 
-// GET /images/:key — serve image (public, no auth)
-images.get('/images/:key', async (c) => {
-  const key = c.req.param('key');
-  // iOS系の画像ローダーはRangeリクエストで画像を取得する場合がある。
-  // R2へRangeヘッダーを渡し、部分取得時は206とContent-Rangeを正しく返す。
-  const object = await c.env.IMAGES.get(key, { range: c.req.raw.headers });
-
-  if (!object) {
-    return c.json({ success: false, error: 'Image not found' }, 404);
-  }
-
-  const headers = createImageHeaders(object);
-  const status = applyRangeHeaders(headers, object);
-
-  return new Response(object.body, { status, headers });
-});
-
 // HEAD /images/:key — 本体を返さず、画像取得前の互換性確認に応答する
+// HonoがGETをHEADにも適用する前に、明示的なHEADルートを登録する。
 images.on('HEAD', '/images/:key', async (c) => {
   const key = c.req.param('key');
   const object = await c.env.IMAGES.head(key);
@@ -163,6 +147,27 @@ images.on('HEAD', '/images/:key', async (c) => {
   headers.set('Content-Length', String(object.size));
 
   return new Response(null, { status: 200, headers });
+});
+
+// GET /images/:key — serve image (public, no auth)
+images.get('/images/:key', async (c) => {
+  const key = c.req.param('key');
+  // iOS系の画像ローダーはRangeリクエストで画像を取得する場合がある。
+  // Range指定がある場合だけR2へ渡し、部分取得時は206とContent-Rangeを返す。
+  const range = c.req.header('Range');
+  const object = range
+    ? await c.env.IMAGES.get(key, { range: new Headers({ Range: range }) })
+    : await c.env.IMAGES.get(key);
+
+  if (!object) {
+    return c.json({ success: false, error: 'Image not found' }, 404);
+  }
+
+  const headers = createImageHeaders(object);
+  const status = range ? applyRangeHeaders(headers, object) : 200;
+  if (!range) headers.set('Content-Length', String(object.size));
+
+  return new Response(object.body, { status, headers });
 });
 
 // DELETE /api/images/:key — delete image
