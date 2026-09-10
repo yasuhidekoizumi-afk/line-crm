@@ -9,6 +9,12 @@ interface DashboardData {
   byLevel: Array<{ level: string; cnt: number; avg_conf: number; cost: number }>
   byOutcome: Array<{ outcome: string; cnt: number }>
   byCategory: Array<{ category: string; cnt: number }>
+  // 「今日やること」: L3滞留・金銭フラグ・最古の承認待ち・日別トレンド
+  l3PendingCnt?: number
+  l3OldestHours?: number
+  moneyFlagCount?: number
+  oldestPendingDraftAt?: string | null
+  dailyTrend?: Array<{ day: string; cnt: number }>
 }
 
 interface PendingDraft {
@@ -21,6 +27,12 @@ interface PendingDraft {
     money_flag?: boolean
   } | null
   createdAt: string
+}
+
+function formatHoursAge(iso: string): string {
+  const hours = Math.floor((Date.now() - new Date(iso).getTime()) / (60 * 60 * 1000))
+  if (hours < 1) return '1時間未満'
+  return `${hours}時間`
 }
 
 const LEVEL_LABEL: Record<string, { label: string; color: string }> = {
@@ -125,6 +137,69 @@ export default function CsDashboardPage() {
             <KpiCard label="承認率" value={approvalRate !== null ? `${approvalRate}%` : '-'} />
             <KpiCard label="AIコスト合計" value={`¥${totalCost.toFixed(2)}`} />
           </div>
+
+          {/* 要対応アラート: 「今日やること」を最初に見せる */}
+          {(data.l3PendingCnt ?? 0) > 0 || (data.moneyFlagCount ?? 0) > 0 || drafts.length > 0 ? (
+            <div className="mb-6">
+              {(data.l3PendingCnt ?? 0) > 0 && (
+                <a href="/chats?status=escalated" className="flex items-center justify-between gap-3 p-4 rounded-lg border-2 border-red-300 bg-red-50 mb-2 hover:bg-red-100 transition-colors block">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🚨</span>
+                    <div>
+                      <p className="text-sm font-bold text-red-900">L3エスカレ滞留 {data.l3PendingCnt} 件</p>
+                      <p className="text-xs text-red-700 mt-0.5">最長 {data.l3OldestHours ?? 0} 時間放置 — 最優先で対応してください</p>
+                    </div>
+                  </div>
+                  <span className="text-xs text-red-600 shrink-0">チャットを開く →</span>
+                </a>
+              )}
+              {(data.moneyFlagCount ?? 0) > 0 && (
+                <div className="flex items-center justify-between gap-3 p-4 rounded-lg border-2 border-yellow-300 bg-yellow-50 mb-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">💰</span>
+                    <div>
+                      <p className="text-sm font-bold text-yellow-900">期間内の金銭関連問い合わせ {data.moneyFlagCount} 件</p>
+                      <p className="text-xs text-yellow-700 mt-0.5">返金・クレーム等。対応は慎重に（CS画面で要約を確認）</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {data.oldestPendingDraftAt && (
+                <div className="flex items-center justify-between gap-3 p-4 rounded-lg border border-purple-300 bg-purple-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">✍️</span>
+                    <div>
+                      <p className="text-sm font-bold text-purple-900">承認待ち {drafts.length} 件（最古 {formatHoursAge(data.oldestPendingDraftAt)} 前に生成）</p>
+                      <p className="text-xs text-purple-700 mt-0.5">古いものから順に承認してください</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* 日別トレンド（急増検知用） */}
+          {data.dailyTrend && data.dailyTrend.length > 1 && (
+            <Section title="日別件数トレンド">
+              <div className="flex items-end gap-1 h-24">
+                {data.dailyTrend.map((row, idx) => {
+                  const max = Math.max(...data.dailyTrend!.map((x) => x.cnt), 1)
+                  const isLast = idx === data.dailyTrend!.length - 1
+                  return (
+                    <div key={row.day} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                      <span className="text-[10px] text-gray-500">{row.cnt}</span>
+                      <div
+                        className={`w-full rounded-t ${isLast ? 'bg-green-500' : 'bg-purple-300'}`}
+                        style={{ height: `${Math.max(4, (row.cnt / max) * 100)}%` }}
+                        title={`${row.day}: ${row.cnt}件`}
+                      />
+                      <span className="text-[9px] text-gray-400 truncate w-full text-center">{row.day.slice(5)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
 
           {/* By Level */}
           <Section title="レベル別件数">

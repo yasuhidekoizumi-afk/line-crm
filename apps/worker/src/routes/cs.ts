@@ -629,6 +629,39 @@ cs.get('/api/cs/dashboard', async (c) => {
       .bind(sinceDate)
       .all<{ category: string; cnt: number }>();
 
+    // 「今日やること」集計: L3滞留・金銭フラグ・古い承認待ち・日別トレンド
+    const [l3Pending, moneyFlagCount, oldestDraft, dailyTrend] = await Promise.all([
+      // L3エスカレ中のチャット（未解決）
+      c.env.DB.prepare(
+        `SELECT COUNT(*) AS cnt, COALESCE(MAX(
+           CAST((julianday('now','+9 hours') - julianday(updated_at)) * 24 AS INTEGER)
+         ), 0) AS oldest_hours
+         FROM chats WHERE ai_status = 'l3_escalated'`,
+      ).first<{ cnt: number; oldest_hours: number }>(),
+      // 期間内の金銭フラグ付き判定（事故監視）
+      c.env.DB.prepare(
+        `SELECT COUNT(*) AS cnt FROM ai_decision_log
+         WHERE created_at >= ? AND money_flag = 1`,
+      )
+        .bind(sinceDate)
+        .first<{ cnt: number }>(),
+      // 最古の承認待ち下書き（経過時間）
+      c.env.DB.prepare(
+        `SELECT ai_drafts.created_at FROM ai_drafts
+         JOIN chats ON chats.id = ai_drafts.chat_id
+         WHERE ai_drafts.status = 'pending' AND chats.ai_status = 'l2_draft_pending'
+         ORDER BY ai_drafts.created_at ASC LIMIT 1`,
+      ).first<{ created_at: string }>(),
+      // 日別トレンド（期間内を日単位で集計）
+      c.env.DB.prepare(
+        `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS cnt
+         FROM ai_decision_log WHERE created_at >= ?
+         GROUP BY substr(created_at, 1, 10) ORDER BY day`,
+      )
+        .bind(sinceDate)
+        .all<{ day: string; cnt: number }>(),
+    ]);
+
     return c.json({
       success: true,
       data: {
@@ -636,6 +669,11 @@ cs.get('/api/cs/dashboard', async (c) => {
         byLevel: levelStats.results,
         byOutcome: outcomeStats.results,
         byCategory: categoryStats.results,
+        l3PendingCnt: l3Pending?.cnt ?? 0,
+        l3OldestHours: l3Pending?.oldest_hours ?? 0,
+        moneyFlagCount: moneyFlagCount?.cnt ?? 0,
+        oldestPendingDraftAt: oldestDraft?.created_at ?? null,
+        dailyTrend: dailyTrend?.results ?? [],
       },
     });
   } catch (e) {
