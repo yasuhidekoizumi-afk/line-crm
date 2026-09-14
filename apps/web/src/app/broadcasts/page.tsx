@@ -902,7 +902,7 @@ function BroadcastsPageInner() {
                       {selectedDetail.trackedLinks.map((link) => (
                         <tr key={link.id}>
                           <td className="max-w-[260px] px-3 py-2">
-                            <div className="truncate font-medium text-gray-800">{link.name}</div>
+                            <div className="break-words font-medium text-gray-800">{link.name}</div>
                             <div className="truncate text-xs text-gray-500">最終遷移先: {link.originalUrl}</div>
                           </td>
                           <td className="px-3 py-2 text-right text-gray-700">
