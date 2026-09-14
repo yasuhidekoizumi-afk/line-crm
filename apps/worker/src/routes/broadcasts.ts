@@ -220,12 +220,14 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
 
   let clickEvents = 0;
   let uniqueClickCount = 0;
+  let unidentifiedClickEvents = 0;
   let linkStats: Array<{
     id: string;
     name: string;
     originalUrl: string;
     clickCount: number;
     uniqueClickCount: number;
+    unidentifiedClickEvents: number;
   }> = [];
 
   if (linkIds.length > 0) {
@@ -234,27 +236,30 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       .prepare(
         `SELECT
            COUNT(*) as clickEvents,
-           COUNT(DISTINCT COALESCE(friend_id, link_clicks.id)) as uniqueClickCount
+           COUNT(DISTINCT friend_id) as uniqueClickCount,
+           SUM(CASE WHEN friend_id IS NULL THEN 1 ELSE 0 END) as unidentifiedClickEvents
          FROM link_clicks
          WHERE tracked_link_id IN (${placeholders})`,
       )
       .bind(...linkIds)
-      .first<{ clickEvents: number; uniqueClickCount: number }>();
+      .first<{ clickEvents: number; uniqueClickCount: number; unidentifiedClickEvents: number }>();
     clickEvents = total?.clickEvents ?? 0;
     uniqueClickCount = total?.uniqueClickCount ?? 0;
+    unidentifiedClickEvents = total?.unidentifiedClickEvents ?? 0;
 
     const perLink = await db
       .prepare(
         `SELECT
            tracked_link_id as id,
            COUNT(*) as clickCount,
-           COUNT(DISTINCT COALESCE(friend_id, link_clicks.id)) as uniqueClickCount
+           COUNT(DISTINCT friend_id) as uniqueClickCount,
+           SUM(CASE WHEN friend_id IS NULL THEN 1 ELSE 0 END) as unidentifiedClickEvents
          FROM link_clicks
          WHERE tracked_link_id IN (${placeholders})
          GROUP BY tracked_link_id`,
       )
       .bind(...linkIds)
-      .all<{ id: string; clickCount: number; uniqueClickCount: number }>();
+      .all<{ id: string; clickCount: number; uniqueClickCount: number; unidentifiedClickEvents: number }>();
     const perLinkMap = new Map(perLink.results.map((item) => [item.id, item]));
     linkStats = links.map((link) => {
       const stat = perLinkMap.get(link.id);
@@ -264,6 +269,7 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
         originalUrl: link.original_url,
         clickCount: stat?.clickCount ?? link.click_count ?? 0,
         uniqueClickCount: stat?.uniqueClickCount ?? 0,
+        unidentifiedClickEvents: stat?.unidentifiedClickEvents ?? 0,
       };
     });
   }
@@ -306,6 +312,7 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       openRate: manualMetrics?.open_rate ?? null,
       clickEvents,
       uniqueClickCount: effectiveUniqueClickCount,
+      unidentifiedClickEvents,
       clickRate,
       trackedLinkCount: links.length,
       officialClickCount: null as number | null,
@@ -358,6 +365,10 @@ async function applyOfficialInteractionStats(
     detail.metrics.officialClickRate = typeof officialClickCount === 'number' && denominator > 0
       ? (officialClickCount / denominator) * 100
       : null;
+    if (typeof officialClickCount === 'number') {
+      detail.metrics.uniqueClickCount = officialClickCount;
+      detail.metrics.clickRate = detail.metrics.officialClickRate;
+    }
     detail.metrics.officialStatsStatus = 'available';
   } catch (error) {
     console.warn(`LINE interaction stats unavailable for broadcast ${broadcast.id}:`, error);
