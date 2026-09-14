@@ -186,6 +186,16 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
       return
     }
 
+    if (
+      form.sendMode !== 'draft'
+      && form.blocks.length > 1
+      && !window.confirm(
+        `この配信は、LINE上で${form.blocks.length}通に分かれて届きます。\nこの内容で${form.sendMode === 'now' ? '今すぐ送信' : '予約'}しますか？`,
+      )
+    ) {
+      return
+    }
+
     setSaving(true)
     setError('')
     try {
@@ -269,6 +279,16 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             メッセージ <span className="text-red-500">*</span>
             <span className="text-xs text-gray-400 ml-2">テキスト・画像・Flexを縦に追加できます（最大5件）</span>
           </label>
+          <div className={`mb-3 rounded-md border px-3 py-2 text-sm ${
+            form.blocks.length > 1
+              ? 'border-amber-300 bg-amber-50 font-semibold text-amber-900'
+              : 'border-gray-200 bg-gray-50 text-gray-700'
+          }`}>
+            LINE上では {form.blocks.length} 通として届きます
+            {form.blocks.length > 1 && (
+              <span className="ml-2 text-xs font-normal">（本文・画像・カードは別々の吹き出しです）</span>
+            )}
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
             <MessageBlocksEditor
               value={form.blocks}

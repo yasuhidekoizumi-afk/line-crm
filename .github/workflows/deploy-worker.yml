@@ -75,4 +75,10 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/worker
           # wrangler.tomlの既定名はローカル安全用。本番名はmainのCIだけが指定する。
-          command: deploy --name oryzae-line-crm --message "GitHub main ${{ github.sha }}"
+          command: >-
+            deploy
+            --name oryzae-line-crm
+            --message "GitHub main ${{ github.sha }}"
+            --triggers "* * * * *"
+            --triggers "0 * * * *"
+            --triggers "0 0 * * *"

@@ -131,6 +131,20 @@ function formatMessageType(type: ApiBroadcast['messageType']): string {
   return type
 }
 
+function getLineMessageCount(broadcast: Pick<ApiBroadcast, 'messageType' | 'messageContent'>): number {
+  if (broadcast.messageType !== 'multi') return 1
+  try {
+    const parsed = JSON.parse(broadcast.messageContent)
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed.length : 1
+  } catch {
+    return 1
+  }
+}
+
+function formatMessageDelivery(broadcast: Pick<ApiBroadcast, 'messageType' | 'messageContent'>): string {
+  return `${formatMessageType(broadcast.messageType)} / LINE上は${getLineMessageCount(broadcast)}通`
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -776,7 +790,7 @@ function BroadcastsPageInner() {
                     テスト
                   </span>
                 )}
-                <span className="text-xs text-gray-500">{formatMessageType(selectedDetail.messageType)}</span>
+                <span className="text-xs text-gray-500">{formatMessageDelivery(selectedDetail)}</span>
               </div>
               <h2 className="text-lg font-semibold text-gray-900">{selectedDetail.title}</h2>
               <p className="mt-1 text-sm text-gray-500">
@@ -993,7 +1007,7 @@ function BroadcastsPageInner() {
                       <div>
                         <p className="text-sm font-medium text-gray-900">{broadcast.title}</p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {formatMessageType(broadcast.messageType)}
+                          {formatMessageDelivery(broadcast)}
                           {broadcast.isTest ? ' / テスト' : ''}
                           {broadcast.archivedAt ? ' / アーカイブ済み' : ''}
                         </p>
