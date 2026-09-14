@@ -881,7 +881,7 @@ function BroadcastsPageInner() {
             <section>
               <h3 className="mb-3 text-sm font-semibold text-gray-900">CTA別クリック</h3>
               <p className="mb-3 text-xs leading-5 text-gray-500">
-                LINE上のCTAを押すと計測用URLを経由し、下記の「最終遷移先」へ転送されます。カードごと・CTAごとに別々に集計し、画像の表示取得は含みません。「クリック人数」は識別できた同じ人の重複を除いた数、「総タップ」は再タップと未識別タップを含む合計です。
+                LINE上のCTAを押すと計測用URLを経由し、下記の「最終遷移先」へ転送されます。現在の配信はカードごと・CTAごとに別々に集計し、画像の表示取得は含みません。旧配信で計測リンクがCTA位置ごとに分かれていない場合は、推測で分割せず合算値として表示します。「クリック人数」は識別できた同じ人の重複を除いた数、「総タップ」は再タップと未識別タップを含む合計です。
               </p>
               {selectedDetail.trackedLinks.length === 0 ? (
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
@@ -904,6 +904,11 @@ function BroadcastsPageInner() {
                           <td className="max-w-[260px] px-3 py-2">
                             <div className="break-words font-medium text-gray-800">{link.name}</div>
                             <div className="truncate text-xs text-gray-500">最終遷移先: {link.originalUrl}</div>
+                            {link.isLegacyAggregate && (
+                              <div className="mt-1 text-[11px] leading-4 text-amber-700">
+                                旧配信のため、この内訳はカード別に分割できません。
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-right text-gray-700">
                             {link.uniqueClickCount.toLocaleString('ja-JP')}
@@ -915,12 +920,16 @@ function BroadcastsPageInner() {
                             {link.clickCount.toLocaleString('ja-JP')}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            <Link
-                              href={`/tracked-links?linkId=${encodeURIComponent(link.id)}`}
-                              className="inline-flex min-h-[36px] items-center rounded-md bg-green-50 px-3 text-xs font-medium text-green-700 hover:bg-green-100"
-                            >
-                              クリック者を見る
-                            </Link>
+                            {link.isLegacyAggregate ? (
+                              <span className="text-[11px] text-gray-400">合算表示</span>
+                            ) : (
+                              <Link
+                                href={`/tracked-links?linkId=${encodeURIComponent(link.id)}`}
+                                className="inline-flex min-h-[36px] items-center rounded-md bg-green-50 px-3 text-xs font-medium text-green-700 hover:bg-green-100"
+                              >
+                                クリック者を見る
+                              </Link>
+                            )}
                           </td>
                         </tr>
                       ))}

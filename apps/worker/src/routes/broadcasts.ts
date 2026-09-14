@@ -260,20 +260,80 @@ export function legacyTrackedLinkName(
   return `${joinedLabels}（旧配信・合算）`;
 }
 
+type TrackedLinkRow = {
+  id: string;
+  name: string;
+  original_url: string;
+  click_count: number;
+};
+
+type TrackedLinkGroup = {
+  ids: string[];
+  name: string;
+  original_url: string;
+  fallbackClickCount: number;
+  isLegacyAggregate: boolean;
+};
+
+/**
+ * 旧版は同じURLをCTA位置ではなくURL単位で処理していた。
+ * また予約配信が重複実行された場合、同じCTAに複数の計測リンクが発行された。
+ * そのため `auto:` リンクは「CTA番号」ではなく、遷移先ごとの論理CTAとして束ねる。
+ */
+export function groupTrackedLinksByLogicalCta(
+  links: TrackedLinkRow[],
+  descriptors: ActionableLinkDescriptor[],
+): TrackedLinkGroup[] {
+  const groups: TrackedLinkGroup[] = [];
+  const legacyByUrl = new Map<string, TrackedLinkRow[]>();
+
+  for (const link of links) {
+    if (!link.name.startsWith('auto: ')) {
+      groups.push({
+        ids: [link.id],
+        name: link.name,
+        original_url: link.original_url,
+        fallbackClickCount: link.click_count ?? 0,
+        isLegacyAggregate: false,
+      });
+      continue;
+    }
+    const matches = legacyByUrl.get(link.original_url) ?? [];
+    matches.push(link);
+    legacyByUrl.set(link.original_url, matches);
+  }
+
+  for (const sameDestinationLinks of legacyByUrl.values()) {
+    const representative = sameDestinationLinks[0];
+    const matchingDescriptors = descriptors.filter((descriptor) =>
+      descriptor.url === representative.original_url
+      || extractTrackingLinkIds(descriptor.url).some((id) => sameDestinationLinks.some((link) => link.id === id)),
+    );
+    let name = legacyTrackedLinkName(representative, matchingDescriptors);
+    if (sameDestinationLinks.length > 1) {
+      name = name.replace(/（旧配信(?:・合算)?）$/, matchingDescriptors.length > 1
+        ? '（旧配信・CTA位置合算／重複発行分を統合）'
+        : '（旧配信・重複発行分を統合）');
+    }
+    groups.push({
+      ids: sameDestinationLinks.map((link) => link.id),
+      name,
+      original_url: representative.original_url,
+      fallbackClickCount: sameDestinationLinks.reduce((sum, link) => sum + (link.click_count ?? 0), 0),
+      isLegacyAggregate: sameDestinationLinks.length > 1 || matchingDescriptors.length > 1,
+    });
+  }
+
+  return groups;
+}
+
 async function getTrackedLinksForBroadcast(
   db: D1Database,
   broadcastId: string,
   messageType: string,
   content: string,
 ) {
-  type LinkRow = {
-    id: string;
-    name: string;
-    original_url: string;
-    click_count: number;
-  };
-
-  let directLinks: LinkRow[] = [];
+  let directLinks: TrackedLinkRow[] = [];
   try {
     const result = await db
       .prepare(
@@ -283,7 +343,7 @@ async function getTrackedLinksForBroadcast(
          ORDER BY created_at ASC`,
       )
       .bind(broadcastId)
-      .all<LinkRow>();
+      .all<TrackedLinkRow>();
     directLinks = result.results;
   } catch (e) {
     if (!String(e).includes('broadcast_id')) throw e;
@@ -306,9 +366,9 @@ async function getTrackedLinksForBroadcast(
        WHERE id IN (${placeholders})`,
     )
     .bind(...actionableIds)
-    .all<LinkRow>();
+    .all<TrackedLinkRow>();
 
-  const map = new Map<string, LinkRow>();
+  const map = new Map<string, TrackedLinkRow>();
   for (const link of [...directLinks, ...embedded.results]) map.set(link.id, link);
   return Array.from(map.values()).filter(isActionable);
 }
@@ -319,6 +379,7 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
     row.message_type,
     row.message_content,
   );
+  const linkGroups = groupTrackedLinksByLogicalCta(links, actionableDescriptors);
   const linkIds = links.map((link) => link.id);
 
   const sentLog = await db
@@ -336,6 +397,7 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
     clickCount: number;
     uniqueClickCount: number;
     unidentifiedClickEvents: number;
+    isLegacyAggregate: boolean;
   }> = [];
 
   if (linkIds.length > 0) {
@@ -369,21 +431,33 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       .bind(...linkIds)
       .all<{ id: string; clickCount: number; uniqueClickCount: number; unidentifiedClickEvents: number }>();
     const perLinkMap = new Map(perLink.results.map((item) => [item.id, item]));
-    linkStats = links.map((link) => {
-      const stat = perLinkMap.get(link.id);
+    linkStats = await Promise.all(linkGroups.map(async (group) => {
+      let stat = group.ids.length === 1 ? perLinkMap.get(group.ids[0]) : undefined;
+      if (group.ids.length > 1) {
+        const groupPlaceholders = group.ids.map(() => '?').join(',');
+        stat = await db
+          .prepare(
+            `SELECT
+               COUNT(*) as clickCount,
+               COUNT(DISTINCT friend_id) as uniqueClickCount,
+               SUM(CASE WHEN friend_id IS NULL THEN 1 ELSE 0 END) as unidentifiedClickEvents
+             FROM link_clicks
+             WHERE tracked_link_id IN (${groupPlaceholders})`,
+          )
+          .bind(...group.ids)
+          .first<{ id: string; clickCount: number; uniqueClickCount: number; unidentifiedClickEvents: number }>()
+          ?? undefined;
+      }
       return {
-        id: link.id,
-        // 旧版の「auto: URL」は遷移先との二重表示になり意味が分かりづらい。
-        // 新版は送信時に「カード番号 / CTA番号 / ボタン名」を保存する。
-        name: link.name.startsWith('auto: ')
-          ? legacyTrackedLinkName(link, actionableDescriptors)
-          : link.name,
-        originalUrl: link.original_url,
-        clickCount: stat?.clickCount ?? link.click_count ?? 0,
+        id: group.ids[0],
+        name: group.name,
+        originalUrl: group.original_url,
+        clickCount: stat?.clickCount ?? group.fallbackClickCount,
         uniqueClickCount: stat?.uniqueClickCount ?? 0,
         unidentifiedClickEvents: stat?.unidentifiedClickEvents ?? 0,
+        isLegacyAggregate: group.isLegacyAggregate,
       };
-    });
+    }));
   }
 
   type ManualMetrics = {
@@ -426,7 +500,7 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       uniqueClickCount: effectiveUniqueClickCount,
       unidentifiedClickEvents,
       clickRate,
-      trackedLinkCount: links.length,
+      trackedLinkCount: linkGroups.length,
       officialClickCount: null as number | null,
       officialClickRate: null as number | null,
       officialStatsStatus: manualMetrics?.open_count != null || manualMetrics?.open_rate != null
