@@ -189,19 +189,23 @@ async function getTrackedLinksForBroadcast(
     if (!String(e).includes('broadcast_id')) throw e;
   }
 
-  const ids = extractTrackingLinkIds(content);
   const actionableUrls = extractActionableUrls(messageType, content);
-  const isActionable = (link: LinkRow) => actionableUrls.has(link.original_url) || ids.includes(link.id);
-  if (ids.length === 0) return directLinks.filter(isActionable);
+  // 旧版ではFlex画像URLまで計測リンクへ変換していた。
+  // メッセージ全体からIDを拾うと、その画像用リンクもCTAとして復活してしまうため、
+  // URIアクション内にある計測リンクIDだけを採用する。
+  const actionableIds = extractTrackingLinkIds(Array.from(actionableUrls).join('\n'));
+  const isActionable = (link: LinkRow) =>
+    actionableUrls.has(link.original_url) || actionableIds.includes(link.id);
+  if (actionableIds.length === 0) return directLinks.filter(isActionable);
 
-  const placeholders = ids.map(() => '?').join(',');
+  const placeholders = actionableIds.map(() => '?').join(',');
   const embedded = await db
     .prepare(
       `SELECT id, name, original_url, click_count
        FROM tracked_links
        WHERE id IN (${placeholders})`,
     )
-    .bind(...ids)
+    .bind(...actionableIds)
     .all<LinkRow>();
 
   const map = new Map<string, LinkRow>();
@@ -261,11 +265,13 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       .bind(...linkIds)
       .all<{ id: string; clickCount: number; uniqueClickCount: number; unidentifiedClickEvents: number }>();
     const perLinkMap = new Map(perLink.results.map((item) => [item.id, item]));
-    linkStats = links.map((link) => {
+    linkStats = links.map((link, index) => {
       const stat = perLinkMap.get(link.id);
       return {
         id: link.id,
-        name: link.name,
+        // 旧版の「auto: URL」は遷移先との二重表示になり意味が分かりづらい。
+        // 新版は送信時に「カード番号 / CTA番号 / ボタン名」を保存する。
+        name: link.name.startsWith('auto: ') ? `CTA${index + 1}（旧配信）` : link.name,
         originalUrl: link.original_url,
         clickCount: stat?.clickCount ?? link.click_count ?? 0,
         uniqueClickCount: stat?.uniqueClickCount ?? 0,
