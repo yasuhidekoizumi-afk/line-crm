@@ -203,6 +203,9 @@ export interface BroadcastDetail extends Broadcast {
     uniqueClickCount: number;
     clickRate: number | null;
     trackedLinkCount: number;
+    officialClickCount: number | null;
+    officialClickRate: number | null;
+    officialStatsStatus: 'available' | 'pending' | 'not_configured' | 'unavailable';
   };
   trackedLinks: Array<{
     id: string;

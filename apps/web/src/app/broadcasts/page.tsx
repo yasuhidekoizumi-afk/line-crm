@@ -815,17 +815,30 @@ function BroadcastsPageInner() {
                 {formatPercent(selectedDetail.metrics.openRate)}
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                開封数 {selectedDetail.metrics.openCount == null ? '未計測' : selectedDetail.metrics.openCount.toLocaleString('ja-JP')}
+                {selectedDetail.metrics.officialStatsStatus === 'not_configured'
+                  ? 'この配信は計測設定なし'
+                  : selectedDetail.metrics.officialStatsStatus === 'pending'
+                    ? 'LINE公式の集計待ち'
+                    : selectedDetail.metrics.openCount == null
+                      ? '20人未満のため非表示'
+                      : `開封数 ${selectedDetail.metrics.openCount.toLocaleString('ja-JP')}`}
               </div>
             </div>
             <div className="rounded-md bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">リンククリック率</div>
+              <div className="text-xs text-gray-500">計測リンククリック率</div>
               <div className="mt-1 text-2xl font-semibold text-gray-900">
                 {formatPercent(selectedDetail.metrics.clickRate)}
               </div>
               <div className="mt-1 text-xs text-gray-500">
                 クリック人数 {selectedDetail.metrics.uniqueClickCount.toLocaleString('ja-JP')} / イベント {selectedDetail.metrics.clickEvents.toLocaleString('ja-JP')}
               </div>
+              {selectedDetail.metrics.officialStatsStatus === 'available' && (
+                <div className="mt-1 text-xs text-gray-500">
+                  LINE公式 全URL {selectedDetail.metrics.officialClickCount == null
+                    ? '20人未満のため非表示'
+                    : `${selectedDetail.metrics.officialClickCount.toLocaleString('ja-JP')}人 (${formatPercent(selectedDetail.metrics.officialClickRate)})`}
+                </div>
+              )}
             </div>
             <div className="rounded-md bg-gray-50 p-4">
               <div className="text-xs text-gray-500">配信ログ</div>
@@ -852,6 +865,9 @@ function BroadcastsPageInner() {
 
             <section>
               <h3 className="mb-3 text-sm font-semibold text-gray-900">リンク別クリック</h3>
+              <p className="mb-3 text-xs leading-5 text-gray-500">
+                「人数」は同じ人の重複を除いた数、「回数」は再タップを含む合計です。画像の表示取得は除外しています。
+              </p>
               {selectedDetail.trackedLinks.length === 0 ? (
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
                   計測リンクはありません。

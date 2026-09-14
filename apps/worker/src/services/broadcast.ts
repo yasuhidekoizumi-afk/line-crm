@@ -17,6 +17,12 @@ import { assertLineBroadcastAllowed } from './delivery-safety.js';
 
 const MULTICAST_BATCH_SIZE = 500;
 
+/** LINEの制約（半角英数/アンダースコア、30文字以内）に収めた配信固有ユニット名。 */
+export function buildBroadcastAggregationUnit(broadcastId: string): string {
+  const normalized = broadcastId.replace(/[^a-zA-Z0-9]/g, '');
+  return `br_${normalized.slice(0, 27)}`;
+}
+
 interface BroadcastDedupeContext {
   date: string;
   sentLineUserIds: Set<string>;
@@ -269,11 +275,27 @@ export async function processBroadcastSend(
   let failedCount = 0;
   let dedupeSkippedCount = 0;
   const errorMessages: string[] = [];
+  const aggregationUnit = broadcast.target_type === 'all'
+    ? null
+    : buildBroadcastAggregationUnit(broadcast.id);
+
+  if (aggregationUnit) {
+    await db
+      .prepare('UPDATE broadcasts SET line_aggregation_unit = ? WHERE id = ?')
+      .bind(aggregationUnit, broadcast.id)
+      .run();
+  }
 
   try {
     if (broadcast.target_type === 'all') {
       // Use LINE broadcast API (sends to all followers)
-      await lineClient.broadcast(messages);
+      const requestId = await lineClient.broadcast(messages);
+      if (requestId) {
+        await db
+          .prepare('UPDATE broadcasts SET line_request_id = ? WHERE id = ?')
+          .bind(requestId, broadcast.id)
+          .run();
+      }
       // We don't have exact count for broadcast API, set as 0 (unknown)
       totalCount = 0;
       successCount = 0;
@@ -326,7 +348,7 @@ export async function processBroadcastSend(
         }
 
         try {
-          await lineClient.multicast(lineUserIds, batchMessages);
+          await lineClient.multicast(lineUserIds, batchMessages, aggregationUnit ?? undefined);
           if (activeDedupeContext) {
             try {
               await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, lineUserIds, now);
@@ -386,7 +408,7 @@ export async function processBroadcastSend(
         const batch = validFriends.slice(i, i + MULTICAST_BATCH_SIZE);
         const batchUserIds = batch.map((f) => normalizeSendableLineUserId(f.line_user_id));
         try {
-          await lineClient.multicast(batchUserIds, messages);
+          await lineClient.multicast(batchUserIds, messages, aggregationUnit ?? undefined);
           if (activeDedupeContext) {
             try {
               await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batchUserIds, now);
@@ -451,7 +473,7 @@ export async function processBroadcastSend(
         }
 
         try {
-          await lineClient.multicast(batch, batchMessages);
+          await lineClient.multicast(batch, batchMessages, aggregationUnit ?? undefined);
           if (activeDedupeContext) {
             try {
               await recordBroadcastRecipientSends(db, broadcast, activeDedupeContext.date, batch, now);

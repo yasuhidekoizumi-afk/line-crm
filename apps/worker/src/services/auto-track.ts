@@ -35,6 +35,71 @@ function shouldSkip(url: string): boolean {
   return SKIP_PATTERNS.some((p) => p.test(url));
 }
 
+/** Flex内のタップ操作URLだけを抽出する。画像取得URLはクリックではないため除外する。 */
+export function extractFlexActionUris(value: unknown): string[] {
+  const urls = new Set<string>();
+
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+
+    const record = node as Record<string, unknown>;
+    if (record.type === 'uri') {
+      if (typeof record.uri === 'string' && !shouldSkip(record.uri.trim())) {
+        urls.add(record.uri.trim());
+      }
+      const altUri = record.altUri;
+      if (altUri && typeof altUri === 'object') {
+        const desktop = (altUri as Record<string, unknown>).desktop;
+        if (typeof desktop === 'string' && !shouldSkip(desktop.trim())) {
+          urls.add(desktop.trim());
+        }
+      }
+    }
+
+    Object.values(record).forEach(visit);
+  };
+
+  visit(value);
+  return Array.from(urls);
+}
+
+function replaceFlexActionUris(
+  value: unknown,
+  urlMap: Map<string, { trackingUrl: string; originalUrl: string; label: string }>,
+): unknown {
+  if (Array.isArray(value)) return value.map((item) => replaceFlexActionUris(item, urlMap));
+  if (!value || typeof value !== 'object') return value;
+
+  const source = value as Record<string, unknown>;
+  const result = Object.fromEntries(
+    Object.entries(source).map(([key, child]) => [key, replaceFlexActionUris(child, urlMap)]),
+  ) as Record<string, unknown>;
+
+  if (source.type !== 'uri') return result;
+
+  const replace = (url: string): string => {
+    const tracked = urlMap.get(url.trim());
+    if (!tracked) return url;
+    return isAppLinkDomain(tracked.originalUrl)
+      ? `${tracked.trackingUrl}${tracked.trackingUrl.includes('?') ? '&' : '?'}openExternalBrowser=1`
+      : tracked.trackingUrl;
+  };
+
+  if (typeof source.uri === 'string') result.uri = replace(source.uri);
+  if (source.altUri && typeof source.altUri === 'object') {
+    const altUri = source.altUri as Record<string, unknown>;
+    result.altUri = {
+      ...altUri,
+      ...(typeof altUri.desktop === 'string' ? { desktop: replace(altUri.desktop) } : {}),
+    };
+  }
+  return result;
+}
+
 /** Extract trackable URLs from content string */
 function extractUrls(content: string): Set<string> {
   const urls = new Set<string>();
@@ -154,6 +219,18 @@ export async function autoTrackContent(
 
   if (messageType === 'imagemap') {
     return autoTrackImageMapContent(db, content, workerUrl, broadcastId);
+  }
+
+  if (messageType === 'flex') {
+    try {
+      const parsed = JSON.parse(content) as unknown;
+      const urls = new Set(extractFlexActionUris(parsed));
+      if (urls.size === 0) return { messageType, content };
+      const urlMap = await createTrackingMap(db, urls, workerUrl, broadcastId);
+      return { messageType, content: JSON.stringify(replaceFlexActionUris(parsed, urlMap)) };
+    } catch {
+      return { messageType, content };
+    }
   }
 
   const urls = extractUrls(content);
