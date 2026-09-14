@@ -101,13 +101,71 @@ function serializeBroadcast(row: DbBroadcast) {
 }
 
 const TRACKING_LINK_ID_RE = /\/t\/([0-9a-fA-F-]{36})/g;
+const CONTENT_URL_RE = /https?:\/\/[^\s"'<>\])}]+/g;
 
 function extractTrackingLinkIds(value: string | null | undefined): string[] {
   if (!value) return [];
   return Array.from(new Set(Array.from(value.matchAll(TRACKING_LINK_ID_RE), (m) => m[1])));
 }
 
-async function getTrackedLinksForBroadcast(db: D1Database, broadcastId: string, content: string) {
+function extractActionableUrls(messageType: string, content: string): Set<string> {
+  const urls = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === 'string' && /^https?:\/\//.test(value.trim())) urls.add(value.trim());
+  };
+
+  if (messageType === 'text') {
+    for (const match of content.matchAll(CONTENT_URL_RE)) add(match[0].replace(/[.,;:!?)]+$/, ''));
+    return urls;
+  }
+
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (messageType === 'multi' && Array.isArray(parsed)) {
+      for (const block of parsed) {
+        if (!block || typeof block !== 'object') continue;
+        const item = block as { type?: string; content?: string };
+        if (item.type && typeof item.content === 'string') {
+          extractActionableUrls(item.type, item.content).forEach((url) => urls.add(url));
+        }
+      }
+      return urls;
+    }
+
+    if (messageType === 'image' && parsed && typeof parsed === 'object') {
+      add((parsed as Record<string, unknown>).linkUrl);
+      return urls;
+    }
+
+    const visit = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      const record = node as Record<string, unknown>;
+      if (record.type === 'uri') {
+        add(record.uri);
+        add(record.linkUri);
+        if (record.altUri && typeof record.altUri === 'object') {
+          add((record.altUri as Record<string, unknown>).desktop);
+        }
+      }
+      Object.values(record).forEach(visit);
+    };
+    visit(parsed);
+  } catch {
+    // 壊れたJSONはクリック対象を推測せず、誤集計を避ける。
+  }
+  return urls;
+}
+
+async function getTrackedLinksForBroadcast(
+  db: D1Database,
+  broadcastId: string,
+  messageType: string,
+  content: string,
+) {
   type LinkRow = {
     id: string;
     name: string;
@@ -132,7 +190,9 @@ async function getTrackedLinksForBroadcast(db: D1Database, broadcastId: string, 
   }
 
   const ids = extractTrackingLinkIds(content);
-  if (ids.length === 0) return directLinks;
+  const actionableUrls = extractActionableUrls(messageType, content);
+  const isActionable = (link: LinkRow) => actionableUrls.has(link.original_url) || ids.includes(link.id);
+  if (ids.length === 0) return directLinks.filter(isActionable);
 
   const placeholders = ids.map(() => '?').join(',');
   const embedded = await db
@@ -146,11 +206,11 @@ async function getTrackedLinksForBroadcast(db: D1Database, broadcastId: string, 
 
   const map = new Map<string, LinkRow>();
   for (const link of [...directLinks, ...embedded.results]) map.set(link.id, link);
-  return Array.from(map.values());
+  return Array.from(map.values()).filter(isActionable);
 }
 
 async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
-  const links = await getTrackedLinksForBroadcast(db, row.id, row.message_content);
+  const links = await getTrackedLinksForBroadcast(db, row.id, row.message_type, row.message_content);
   const linkIds = links.map((link) => link.id);
 
   const sentLog = await db
@@ -160,12 +220,14 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
 
   let clickEvents = 0;
   let uniqueClickCount = 0;
+  let unidentifiedClickEvents = 0;
   let linkStats: Array<{
     id: string;
     name: string;
     originalUrl: string;
     clickCount: number;
     uniqueClickCount: number;
+    unidentifiedClickEvents: number;
   }> = [];
 
   if (linkIds.length > 0) {
@@ -174,27 +236,30 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       .prepare(
         `SELECT
            COUNT(*) as clickEvents,
-           COUNT(DISTINCT COALESCE(friend_id, link_clicks.id)) as uniqueClickCount
+           COUNT(DISTINCT friend_id) as uniqueClickCount,
+           SUM(CASE WHEN friend_id IS NULL THEN 1 ELSE 0 END) as unidentifiedClickEvents
          FROM link_clicks
          WHERE tracked_link_id IN (${placeholders})`,
       )
       .bind(...linkIds)
-      .first<{ clickEvents: number; uniqueClickCount: number }>();
+      .first<{ clickEvents: number; uniqueClickCount: number; unidentifiedClickEvents: number }>();
     clickEvents = total?.clickEvents ?? 0;
     uniqueClickCount = total?.uniqueClickCount ?? 0;
+    unidentifiedClickEvents = total?.unidentifiedClickEvents ?? 0;
 
     const perLink = await db
       .prepare(
         `SELECT
            tracked_link_id as id,
            COUNT(*) as clickCount,
-           COUNT(DISTINCT COALESCE(friend_id, link_clicks.id)) as uniqueClickCount
+           COUNT(DISTINCT friend_id) as uniqueClickCount,
+           SUM(CASE WHEN friend_id IS NULL THEN 1 ELSE 0 END) as unidentifiedClickEvents
          FROM link_clicks
          WHERE tracked_link_id IN (${placeholders})
          GROUP BY tracked_link_id`,
       )
       .bind(...linkIds)
-      .all<{ id: string; clickCount: number; uniqueClickCount: number }>();
+      .all<{ id: string; clickCount: number; uniqueClickCount: number; unidentifiedClickEvents: number }>();
     const perLinkMap = new Map(perLink.results.map((item) => [item.id, item]));
     linkStats = links.map((link) => {
       const stat = perLinkMap.get(link.id);
@@ -204,6 +269,7 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
         originalUrl: link.original_url,
         clickCount: stat?.clickCount ?? link.click_count ?? 0,
         uniqueClickCount: stat?.uniqueClickCount ?? 0,
+        unidentifiedClickEvents: stat?.unidentifiedClickEvents ?? 0,
       };
     });
   }
@@ -246,11 +312,70 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       openRate: manualMetrics?.open_rate ?? null,
       clickEvents,
       uniqueClickCount: effectiveUniqueClickCount,
+      unidentifiedClickEvents,
       clickRate,
       trackedLinkCount: links.length,
+      officialClickCount: null as number | null,
+      officialClickRate: null as number | null,
+      officialStatsStatus: manualMetrics?.open_count != null || manualMetrics?.open_rate != null
+        ? 'available' as const
+        : (row.line_aggregation_unit || row.line_request_id)
+          ? 'pending' as const
+          : 'not_configured' as const,
     },
     trackedLinks: linkStats,
   };
+}
+
+function toLineInsightDate(value: string): string {
+  return value.slice(0, 10).replace(/-/g, '');
+}
+
+async function applyOfficialInteractionStats(
+  db: D1Database,
+  defaultAccessToken: string,
+  broadcast: DbBroadcast,
+  detail: Awaited<ReturnType<typeof getBroadcastDetail>>,
+): Promise<typeof detail> {
+  if (!broadcast.sent_at || (!broadcast.line_request_id && !broadcast.line_aggregation_unit)) {
+    return detail;
+  }
+
+  try {
+    const client = await resolveBroadcastLineClient(db, defaultAccessToken, broadcast);
+    const stats = broadcast.line_request_id
+      ? await client.getMessageInteractionStats(broadcast.line_request_id)
+      : await client.getAggregationStats(
+          broadcast.line_aggregation_unit!,
+          toLineInsightDate(broadcast.sent_at),
+          toLineInsightDate(broadcast.sent_at),
+        );
+
+    const delivered = stats.overview.delivered;
+    if (typeof delivered === 'number' && delivered > 0) detail.metrics.deliveredCount = delivered;
+    const denominator = detail.metrics.deliveredCount;
+    const openCount = stats.overview.uniqueImpression;
+    const officialClickCount = stats.overview.uniqueClick;
+
+    detail.metrics.openCount = openCount;
+    detail.metrics.openRate = typeof openCount === 'number' && denominator > 0
+      ? (openCount / denominator) * 100
+      : null;
+    detail.metrics.officialClickCount = officialClickCount;
+    detail.metrics.officialClickRate = typeof officialClickCount === 'number' && denominator > 0
+      ? (officialClickCount / denominator) * 100
+      : null;
+    if (typeof officialClickCount === 'number') {
+      detail.metrics.uniqueClickCount = officialClickCount;
+      detail.metrics.clickRate = detail.metrics.officialClickRate;
+    }
+    detail.metrics.officialStatsStatus = 'available';
+  } catch (error) {
+    console.warn(`LINE interaction stats unavailable for broadcast ${broadcast.id}:`, error);
+    detail.metrics.officialStatsStatus = 'pending';
+  }
+
+  return detail;
 }
 
 // GET /api/broadcasts - list all
@@ -376,8 +501,17 @@ broadcasts.get('/api/broadcasts/:id/detail', async (c) => {
     if (!broadcast) {
       return c.json({ success: false, error: 'Broadcast not found' }, 404);
     }
+    const denied = await requireLineAccountAccess(c, broadcast.line_account_id);
+    if (denied) return denied;
 
-    return c.json({ success: true, data: await getBroadcastDetail(c.env.DB, broadcast) });
+    const detail = await getBroadcastDetail(c.env.DB, broadcast);
+    const withOfficialStats = await applyOfficialInteractionStats(
+      c.env.DB,
+      c.env.LINE_CHANNEL_ACCESS_TOKEN,
+      broadcast,
+      detail,
+    );
+    return c.json({ success: true, data: withOfficialStats });
   } catch (err) {
     console.error('GET /api/broadcasts/:id/detail error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);

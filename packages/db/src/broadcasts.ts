@@ -28,6 +28,10 @@ export interface Broadcast {
   line_account_id: string | null;
   alt_text: string | null;
   archived_at: string | null;
+  /** LINE公式の配信単位統計に使うユニット名（push/multicast） */
+  line_aggregation_unit: string | null;
+  /** LINE公式の配信単位統計に使うリクエストID（broadcast） */
+  line_request_id: string | null;
   created_at: string;
 }
 

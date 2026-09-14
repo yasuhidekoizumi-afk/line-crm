@@ -285,6 +285,7 @@ export interface PushMessageRequest {
 export interface MulticastRequest {
   to: string[];
   messages: Message[];
+  customAggregationUnits?: string[];
 }
 
 export interface BroadcastRequest {
@@ -294,4 +295,24 @@ export interface BroadcastRequest {
 export interface ReplyMessageRequest {
   replyToken: string;
   messages: Message[];
+}
+
+export interface MessageInteractionOverview {
+  delivered?: number | null;
+  uniqueImpression: number | null;
+  uniqueClick: number | null;
+  uniqueMediaPlayed: number | null;
+  uniqueMediaPlayed100Percent: number | null;
+}
+
+export interface MessageInteractionStats {
+  overview: MessageInteractionOverview;
+  messages: Array<Record<string, unknown>>;
+  clicks: Array<{
+    seq: number;
+    url: string;
+    click: number | null;
+    uniqueClick: number | null;
+    uniqueClickOfRequest: number | null;
+  }>;
 }

@@ -829,16 +829,30 @@ function BroadcastsPageInner() {
                 {formatPercent(selectedDetail.metrics.openRate)}
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                開封数 {selectedDetail.metrics.openCount == null ? '未計測' : selectedDetail.metrics.openCount.toLocaleString('ja-JP')}
+                {selectedDetail.metrics.officialStatsStatus === 'not_configured'
+                  ? 'この配信は計測設定なし'
+                  : selectedDetail.metrics.officialStatsStatus === 'pending'
+                    ? 'LINE公式の集計待ち'
+                    : selectedDetail.metrics.openCount == null
+                      ? '20人未満のため非表示'
+                      : `開封数 ${selectedDetail.metrics.openCount.toLocaleString('ja-JP')}`}
               </div>
             </div>
             <div className="rounded-md bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">リンククリック率</div>
+              <div className="text-xs text-gray-500">
+                CTAクリック率{selectedDetail.metrics.officialClickCount == null ? '（識別済み）' : '（LINE公式）'}
+              </div>
               <div className="mt-1 text-2xl font-semibold text-gray-900">
                 {formatPercent(selectedDetail.metrics.clickRate)}
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                クリック人数 {selectedDetail.metrics.uniqueClickCount.toLocaleString('ja-JP')} / イベント {selectedDetail.metrics.clickEvents.toLocaleString('ja-JP')}
+                クリックした人 {selectedDetail.metrics.uniqueClickCount.toLocaleString('ja-JP')} / 配信成功 {selectedDetail.metrics.deliveredCount.toLocaleString('ja-JP')}
+              </div>
+              <div className="mt-1 text-xs text-gray-500">
+                総タップ {selectedDetail.metrics.clickEvents.toLocaleString('ja-JP')}回（再タップを含む）
+                {selectedDetail.metrics.unidentifiedClickEvents > 0
+                  ? ` / 未識別 ${selectedDetail.metrics.unidentifiedClickEvents.toLocaleString('ja-JP')}回`
+                  : ''}
               </div>
             </div>
             <div className="rounded-md bg-gray-50 p-4">
@@ -865,7 +879,10 @@ function BroadcastsPageInner() {
             </section>
 
             <section>
-              <h3 className="mb-3 text-sm font-semibold text-gray-900">リンク別クリック</h3>
+              <h3 className="mb-3 text-sm font-semibold text-gray-900">CTA別クリック</h3>
+              <p className="mb-3 text-xs leading-5 text-gray-500">
+                CTAとして設定したリンクだけを集計します。「クリック人数」は識別できた同じ人の重複を除いた数、「総タップ」は再タップと未識別タップを含む合計です。画像の表示取得は含みません。
+              </p>
               {selectedDetail.trackedLinks.length === 0 ? (
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
                   計測リンクはありません。
@@ -876,8 +893,8 @@ function BroadcastsPageInner() {
                     <thead className="bg-gray-50 text-xs text-gray-500">
                       <tr>
                         <th className="px-3 py-2 text-left font-semibold">リンク先</th>
-                        <th className="px-3 py-2 text-right font-semibold">人数</th>
-                        <th className="px-3 py-2 text-right font-semibold">回数</th>
+                        <th className="px-3 py-2 text-right font-semibold">クリック人数</th>
+                        <th className="px-3 py-2 text-right font-semibold">総タップ</th>
                         <th className="px-3 py-2 text-right font-semibold">詳細</th>
                       </tr>
                     </thead>
@@ -890,6 +907,9 @@ function BroadcastsPageInner() {
                           </td>
                           <td className="px-3 py-2 text-right text-gray-700">
                             {link.uniqueClickCount.toLocaleString('ja-JP')}
+                            {link.unidentifiedClickEvents > 0 && (
+                              <div className="text-[11px] text-gray-400">未識別 {link.unidentifiedClickEvents.toLocaleString('ja-JP')}回</div>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-right text-gray-700">
                             {link.clickCount.toLocaleString('ja-JP')}

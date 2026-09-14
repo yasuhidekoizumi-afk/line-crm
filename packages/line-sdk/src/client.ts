@@ -8,6 +8,7 @@ import type {
   RichMenuObject,
   UserProfile,
   FollowersInsight,
+  MessageInteractionStats,
 } from './types.js';
 
 const LINE_API_BASE = 'https://api.line.me/v2/bot';
@@ -17,11 +18,11 @@ export class LineClient {
 
   // ─── Core request helper ──────────────────────────────────────────────────
 
-  private async request<T = unknown>(
+  private async requestWithResponse<T = unknown>(
     path: string,
     body: object,
     method: 'GET' | 'POST' | 'DELETE' = 'POST',
-  ): Promise<T> {
+  ): Promise<{ data: T; response: Response }> {
     const url = `${LINE_API_BASE}${path}`;
 
     const options: RequestInit = {
@@ -48,10 +49,18 @@ export class LineClient {
     // Some endpoints (e.g. push, reply) return an empty body with 200.
     const contentType = res.headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {
-      return res.json() as Promise<T>;
+      return { data: await res.json() as T, response: res };
     }
 
-    return undefined as unknown as T;
+    return { data: undefined as unknown as T, response: res };
+  }
+
+  private async request<T = unknown>(
+    path: string,
+    body: object,
+    method: 'GET' | 'POST' | 'DELETE' = 'POST',
+  ): Promise<T> {
+    return (await this.requestWithResponse<T>(path, body, method)).data;
   }
 
   // ─── Profile ──────────────────────────────────────────────────────────────
@@ -102,6 +111,27 @@ export class LineClient {
     );
   }
 
+  async getMessageInteractionStats(requestId: string): Promise<MessageInteractionStats> {
+    return this.request<MessageInteractionStats>(
+      `/insight/message/event?requestId=${encodeURIComponent(requestId)}`,
+      {},
+      'GET',
+    );
+  }
+
+  async getAggregationStats(
+    customAggregationUnit: string,
+    from: string,
+    to: string,
+  ): Promise<MessageInteractionStats> {
+    const query = new URLSearchParams({ customAggregationUnit, from, to });
+    return this.request<MessageInteractionStats>(
+      `/insight/message/event/aggregation?${query.toString()}`,
+      {},
+      'GET',
+    );
+  }
+
   // ─── Messaging ───────────────────────────────────────────────────────────
 
   async pushMessage(to: string, messages: Message[]): Promise<void> {
@@ -109,19 +139,24 @@ export class LineClient {
     await this.request('/message/push', body);
   }
 
-  async multicast(to: string[], messages: Message[]): Promise<void> {
+  async multicast(to: string[], messages: Message[], customAggregationUnit?: string): Promise<void> {
     // 多層防御: NULL/空文字のユーザーIDが1件でも混じると LINE API がリクエスト全体を
     // 400 で弾き、バッチ全員(最大500人)への送信が失敗する。呼び出し側でも除外しているが、
     // 最後の砦としてここでも除外する。
     const validTo = to.filter((id) => typeof id === 'string' && id.trim() !== '');
     if (validTo.length === 0) return; // 有効な宛先ゼロなら何もしない（空バッチはスキップ）
-    const body: MulticastRequest = { to: validTo, messages };
+    const body: MulticastRequest = {
+      to: validTo,
+      messages,
+      ...(customAggregationUnit ? { customAggregationUnits: [customAggregationUnit] } : {}),
+    };
     await this.request('/message/multicast', body);
   }
 
-  async broadcast(messages: Message[]): Promise<void> {
+  async broadcast(messages: Message[]): Promise<string | null> {
     const body: BroadcastRequest = { messages };
-    await this.request('/message/broadcast', body);
+    const { response } = await this.requestWithResponse('/message/broadcast', body);
+    return response.headers.get('x-line-request-id');
   }
 
   async replyMessage(
