@@ -215,6 +215,8 @@ export interface BroadcastDetail extends Broadcast {
     clickCount: number;
     uniqueClickCount: number;
     unidentifiedClickEvents: number;
+    /** 旧配信でCTA位置別の計測IDを復元できず、複数位置または重複発行分を合算している */
+    isLegacyAggregate: boolean;
   }>;
 }
 
