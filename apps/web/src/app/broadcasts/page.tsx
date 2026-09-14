@@ -867,7 +867,7 @@ function BroadcastsPageInner() {
             <section>
               <h3 className="mb-3 text-sm font-semibold text-gray-900">CTA別クリック</h3>
               <p className="mb-3 text-xs leading-5 text-gray-500">
-                CTAとして設定したリンクだけを集計します。「クリック人数」は識別できた同じ人の重複を除いた数、「総タップ」は再タップと未識別タップを含む合計です。画像の表示取得は含みません。
+                LINE上のCTAを押すと計測用URLを経由し、下記の「最終遷移先」へ転送されます。カードごと・CTAごとに別々に集計し、画像の表示取得は含みません。「クリック人数」は識別できた同じ人の重複を除いた数、「総タップ」は再タップと未識別タップを含む合計です。
               </p>
               {selectedDetail.trackedLinks.length === 0 ? (
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
@@ -878,7 +878,7 @@ function BroadcastsPageInner() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-xs text-gray-500">
                       <tr>
-                        <th className="px-3 py-2 text-left font-semibold">リンク先</th>
+                        <th className="px-3 py-2 text-left font-semibold">CTAの場所 / 最終遷移先</th>
                         <th className="px-3 py-2 text-right font-semibold">クリック人数</th>
                         <th className="px-3 py-2 text-right font-semibold">総タップ</th>
                         <th className="px-3 py-2 text-right font-semibold">詳細</th>
@@ -889,7 +889,7 @@ function BroadcastsPageInner() {
                         <tr key={link.id}>
                           <td className="max-w-[260px] px-3 py-2">
                             <div className="truncate font-medium text-gray-800">{link.name}</div>
-                            <div className="truncate text-xs text-gray-500">{link.originalUrl}</div>
+                            <div className="truncate text-xs text-gray-500">最終遷移先: {link.originalUrl}</div>
                           </td>
                           <td className="px-3 py-2 text-right text-gray-700">
                             {link.uniqueClickCount.toLocaleString('ja-JP')}

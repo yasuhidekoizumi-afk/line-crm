@@ -67,35 +67,119 @@ export function extractFlexActionUris(value: unknown): string[] {
   return Array.from(urls);
 }
 
-function replaceFlexActionUris(
+function toTrackingUrl(trackingUrl: string, originalUrl: string): string {
+  return isAppLinkDomain(originalUrl)
+    ? `${trackingUrl}${trackingUrl.includes('?') ? '&' : '?'}openExternalBrowser=1`
+    : trackingUrl;
+}
+
+async function createTrackingDestination(
+  db: D1Database,
+  originalUrl: string,
+  workerUrl: string,
+  name: string,
+  broadcastId?: string | null,
+): Promise<string> {
+  const link = await createTrackedLink(db, {
+    name,
+    originalUrl,
+    broadcastId: broadcastId ?? null,
+  });
+  return toTrackingUrl(`${workerUrl}/t/${link.id}`, originalUrl);
+}
+
+type FlexTrackingLocation = {
+  messageIndex?: number;
+  cardIndex?: number;
+  actionIndex: number;
+};
+
+function flexTrackingName(location: FlexTrackingLocation, actionLabel?: string): string {
+  const message = location.messageIndex ? `${location.messageIndex}件目 / ` : '';
+  const card = location.cardIndex ? `カード${location.cardIndex}` : 'Flex';
+  const label = actionLabel?.trim() ? `「${actionLabel.trim()}」` : '';
+  return `${message}${card} / CTA${location.actionIndex}${label}`;
+}
+
+/**
+ * FlexのURIアクションを出現箇所ごとに別リンクとして計測する。
+ * 同じ遷移先でもカードごとにIDを分けるため、カルーセル間の比較ができる。
+ */
+async function replaceFlexActionUrisByOccurrence(
+  db: D1Database,
   value: unknown,
-  urlMap: Map<string, { trackingUrl: string; originalUrl: string; label: string }>,
-): unknown {
-  if (Array.isArray(value)) return value.map((item) => replaceFlexActionUris(item, urlMap));
+  workerUrl: string,
+  broadcastId: string | null | undefined,
+  location: FlexTrackingLocation,
+): Promise<unknown> {
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+    for (const item of value) {
+      result.push(await replaceFlexActionUrisByOccurrence(db, item, workerUrl, broadcastId, location));
+    }
+    return result;
+  }
   if (!value || typeof value !== 'object') return value;
 
   const source = value as Record<string, unknown>;
-  const result = Object.fromEntries(
-    Object.entries(source).map(([key, child]) => [key, replaceFlexActionUris(child, urlMap)]),
-  ) as Record<string, unknown>;
 
-  if (source.type !== 'uri') return result;
+  if (source.type === 'carousel' && Array.isArray(source.contents)) {
+    const result: Record<string, unknown> = { ...source };
+    const cards: unknown[] = [];
+    for (const [index, card] of source.contents.entries()) {
+      cards.push(await replaceFlexActionUrisByOccurrence(db, card, workerUrl, broadcastId, {
+        messageIndex: location.messageIndex,
+        cardIndex: index + 1,
+        actionIndex: 0,
+      }));
+    }
+    result.contents = cards;
+    return result;
+  }
 
-  const replace = (url: string): string => {
-    const tracked = urlMap.get(url.trim());
-    if (!tracked) return url;
-    return isAppLinkDomain(tracked.originalUrl)
-      ? `${tracked.trackingUrl}${tracked.trackingUrl.includes('?') ? '&' : '?'}openExternalBrowser=1`
-      : tracked.trackingUrl;
-  };
+  if (source.type === 'uri') {
+    const result: Record<string, unknown> = { ...source };
+    location.actionIndex += 1;
+    const name = flexTrackingName(
+      location,
+      typeof source.label === 'string' ? source.label : undefined,
+    );
+    const primaryUrl = typeof source.uri === 'string' ? source.uri.trim() : '';
+    let primaryTrackingUrl: string | null = null;
+    if (primaryUrl && !shouldSkip(primaryUrl)) {
+      primaryTrackingUrl = await createTrackingDestination(
+        db,
+        primaryUrl,
+        workerUrl,
+        name,
+        broadcastId,
+      );
+      result.uri = primaryTrackingUrl;
+    }
 
-  if (typeof source.uri === 'string') result.uri = replace(source.uri);
-  if (source.altUri && typeof source.altUri === 'object') {
-    const altUri = source.altUri as Record<string, unknown>;
-    result.altUri = {
-      ...altUri,
-      ...(typeof altUri.desktop === 'string' ? { desktop: replace(altUri.desktop) } : {}),
-    };
+    if (source.altUri && typeof source.altUri === 'object') {
+      const altUri = source.altUri as Record<string, unknown>;
+      const desktopUrl = typeof altUri.desktop === 'string' ? altUri.desktop.trim() : '';
+      let desktopTrackingUrl = altUri.desktop;
+      if (desktopUrl && desktopUrl === primaryUrl && primaryTrackingUrl) {
+        desktopTrackingUrl = primaryTrackingUrl;
+      } else if (desktopUrl && !shouldSkip(desktopUrl)) {
+        desktopTrackingUrl = await createTrackingDestination(
+          db,
+          desktopUrl,
+          workerUrl,
+          `${name}（PC）`,
+          broadcastId,
+        );
+      }
+      result.altUri = { ...altUri, ...(desktopUrl ? { desktop: desktopTrackingUrl } : {}) };
+    }
+    return result;
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(source)) {
+    result[key] = await replaceFlexActionUrisByOccurrence(db, child, workerUrl, broadcastId, location);
   }
   return result;
 }
@@ -210,6 +294,7 @@ export async function autoTrackContent(
   content: string,
   workerUrl: string,
   broadcastId?: string | null,
+  messageIndex?: number,
 ): Promise<AutoTrackResult> {
   if (messageType === 'multi') {
     return autoTrackMultiContent(db, content, workerUrl, broadcastId);
@@ -224,10 +309,12 @@ export async function autoTrackContent(
   if (messageType === 'flex') {
     try {
       const parsed = JSON.parse(content) as unknown;
-      const urls = new Set(extractFlexActionUris(parsed));
-      if (urls.size === 0) return { messageType, content };
-      const urlMap = await createTrackingMap(db, urls, workerUrl, broadcastId);
-      return { messageType, content: JSON.stringify(replaceFlexActionUris(parsed, urlMap)) };
+      if (extractFlexActionUris(parsed).length === 0) return { messageType, content };
+      const tracked = await replaceFlexActionUrisByOccurrence(db, parsed, workerUrl, broadcastId, {
+        messageIndex,
+        actionIndex: 0,
+      });
+      return { messageType, content: JSON.stringify(tracked) };
     } catch {
       return { messageType, content };
     }
@@ -270,7 +357,7 @@ async function autoTrackMultiContent(
     if (!Array.isArray(blocks)) return { messageType: 'multi', content };
 
     const trackedBlocks = await Promise.all(
-      blocks.map(async (block) => {
+      blocks.map(async (block, blockIndex) => {
         if (!block || typeof block !== 'object' || typeof block.content !== 'string') {
           return block;
         }
@@ -282,7 +369,14 @@ async function autoTrackMultiContent(
           };
         }
 
-        const tracked = await autoTrackContent(db, block.type, block.content, workerUrl, broadcastId);
+        const tracked = await autoTrackContent(
+          db,
+          block.type,
+          block.content,
+          workerUrl,
+          broadcastId,
+          blockIndex + 1,
+        );
         return {
           ...block,
           type: tracked.messageType,
