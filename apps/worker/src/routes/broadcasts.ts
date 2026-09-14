@@ -160,6 +160,106 @@ function extractActionableUrls(messageType: string, content: string): Set<string
   return urls;
 }
 
+type ActionableLinkDescriptor = {
+  url: string;
+  label: string;
+};
+
+export function extractActionableLinkDescriptors(
+  messageType: string,
+  content: string,
+  messageIndex?: number,
+): ActionableLinkDescriptor[] {
+  const descriptors: ActionableLinkDescriptor[] = [];
+  const messagePrefix = messageIndex ? `${messageIndex}件目 / ` : '';
+  const add = (value: unknown, label: string) => {
+    if (typeof value !== 'string' || !/^https?:\/\//.test(value.trim())) return;
+    descriptors.push({ url: value.trim(), label });
+  };
+
+  if (messageType === 'text') {
+    Array.from(content.matchAll(CONTENT_URL_RE)).forEach((match, index) => {
+      add(match[0].replace(/[.,;:!?)]+$/, ''), `${messagePrefix}CTA${index + 1}`);
+    });
+    return descriptors;
+  }
+
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (messageType === 'multi' && Array.isArray(parsed)) {
+      parsed.forEach((block, index) => {
+        if (!block || typeof block !== 'object') return;
+        const item = block as { type?: string; content?: string };
+        if (item.type && typeof item.content === 'string') {
+          descriptors.push(...extractActionableLinkDescriptors(item.type, item.content, index + 1));
+        }
+      });
+      return descriptors;
+    }
+
+    if (messageType === 'image' && parsed && typeof parsed === 'object') {
+      add((parsed as Record<string, unknown>).linkUrl, `${messagePrefix}画像リンク`);
+      return descriptors;
+    }
+
+    type Location = { cardIndex?: number; actionIndex: number };
+    const visit = (node: unknown, location: Location): void => {
+      if (Array.isArray(node)) {
+        node.forEach((item) => visit(item, location));
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      const record = node as Record<string, unknown>;
+
+      if (record.type === 'carousel' && Array.isArray(record.contents)) {
+        record.contents.forEach((card, index) => visit(card, { cardIndex: index + 1, actionIndex: 0 }));
+        return;
+      }
+
+      if (record.type === 'uri') {
+        location.actionIndex += 1;
+        const card = location.cardIndex ? `カード${location.cardIndex}` : 'Flex';
+        const actionLabel = typeof record.label === 'string' && record.label.trim()
+          ? `「${record.label.trim()}」`
+          : '';
+        const label = `${messagePrefix}${card} / CTA${location.actionIndex}${actionLabel}`;
+        add(record.uri, label);
+        add(record.linkUri, label);
+        if (record.altUri && typeof record.altUri === 'object') {
+          const desktop = (record.altUri as Record<string, unknown>).desktop;
+          if (desktop !== record.uri) add(desktop, `${label}（PC）`);
+        }
+        return;
+      }
+
+      Object.values(record).forEach((value) => visit(value, location));
+    };
+    visit(parsed, { actionIndex: 0 });
+  } catch {
+    // 壊れたJSONでは場所を推測しない。
+  }
+  return descriptors;
+}
+
+export function legacyTrackedLinkName(
+  link: { id: string; original_url: string },
+  descriptors: ActionableLinkDescriptor[],
+): string {
+  const labels = descriptors
+    .filter((descriptor) =>
+      descriptor.url === link.original_url || extractTrackingLinkIds(descriptor.url).includes(link.id),
+    )
+    .map((descriptor) => descriptor.label);
+  const uniqueLabels = Array.from(new Set(labels));
+  if (uniqueLabels.length === 0) return 'CTA（旧配信）';
+  if (uniqueLabels.length === 1) return `${uniqueLabels[0]}（旧配信）`;
+  const messagePrefix = uniqueLabels[0].match(/^(\d+件目 \/ )/)?.[1];
+  const joinedLabels = messagePrefix && uniqueLabels.every((label) => label.startsWith(messagePrefix))
+    ? `${messagePrefix}${uniqueLabels.map((label) => label.slice(messagePrefix.length)).join(' ＋ ')}`
+    : uniqueLabels.join(' ＋ ');
+  return `${joinedLabels}（旧配信・合算）`;
+}
+
 async function getTrackedLinksForBroadcast(
   db: D1Database,
   broadcastId: string,
@@ -215,6 +315,10 @@ async function getTrackedLinksForBroadcast(
 
 async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
   const links = await getTrackedLinksForBroadcast(db, row.id, row.message_type, row.message_content);
+  const actionableDescriptors = extractActionableLinkDescriptors(
+    row.message_type,
+    row.message_content,
+  );
   const linkIds = links.map((link) => link.id);
 
   const sentLog = await db
@@ -265,13 +369,15 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       .bind(...linkIds)
       .all<{ id: string; clickCount: number; uniqueClickCount: number; unidentifiedClickEvents: number }>();
     const perLinkMap = new Map(perLink.results.map((item) => [item.id, item]));
-    linkStats = links.map((link, index) => {
+    linkStats = links.map((link) => {
       const stat = perLinkMap.get(link.id);
       return {
         id: link.id,
         // 旧版の「auto: URL」は遷移先との二重表示になり意味が分かりづらい。
         // 新版は送信時に「カード番号 / CTA番号 / ボタン名」を保存する。
-        name: link.name.startsWith('auto: ') ? `CTA${index + 1}（旧配信）` : link.name,
+        name: link.name.startsWith('auto: ')
+          ? legacyTrackedLinkName(link, actionableDescriptors)
+          : link.name,
         originalUrl: link.original_url,
         clickCount: stat?.clickCount ?? link.click_count ?? 0,
         uniqueClickCount: stat?.uniqueClickCount ?? 0,
