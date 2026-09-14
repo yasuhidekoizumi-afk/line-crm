@@ -23,11 +23,8 @@ database_id = "e47571b1-cd3f-4791-9040-2c2e55034ed8"
 binding = "IMAGES"
 bucket_name = "oryzae-line-crm-images"
 
-[triggers]
-# 1分毎: 予約ブロードキャスト・ステップ配信・リマインダを拾う共通ハートビート
-# 1時間毎: FERMENT セグメント再計算
-# 毎日 0:00 UTC (9:00 JST): FERMENT 日次サマリー
-crons = ["* * * * *", "0 * * * *", "0 0 * * *"]
+# cronは本番Workerだけに必要。GitHub Actionsの本番デプロイ時に明示する。
+# このローカル安全用設定にcronを置くと、本番DBに対して予約処理が二重起動する。
 
 [vars]
 SHOPIFY_SHOP_DOMAIN = "yasuhide-koizumi.myshopify.com"

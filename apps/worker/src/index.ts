@@ -523,7 +523,9 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     return;
   }
 
-  const jobs = await buildCommonCronJobs(env);
+  // 予約配信は1分cronとwatchdogだけが担当する。
+  // 毎時・日次cronでも同じ処理を積むと、時刻の境界で同一配信を同時取得しやすくなる。
+  const jobs = await buildCommonCronJobs(env, { includeScheduledBroadcasts: false });
   if (cronExpr === '*/10 * * * *') {
     jobs.push(processScheduledEmailCampaigns(env));
     jobs.push(processFlowDeliveries(env));

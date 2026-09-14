@@ -584,11 +584,17 @@ export async function processScheduledBroadcasts(
       await processBroadcastSend(db, lineClient, broadcast.id, workerUrl, dedupeContext);
     } catch (err) {
       console.error(`Failed to send scheduled broadcast ${broadcast.id}:`, err);
-      // 予約のまま停止する場合でも、管理画面と本番DBから原因を追えるように残す。
-      // status は scheduled のままにして、復旧後の安全な再試行対象から外さない。
-      await updateBroadcastStatus(db, broadcast.id, 'scheduled', {
-        errorSummary: `予約実行エラー: ${(err instanceof Error ? err.message : String(err)).slice(0, 450)}`,
-      }).catch((logError) => {
+      // 別のcronが先に送信権を取得した場合、status は sending になっている。
+      // ここで scheduled に戻すと第三のcronが再取得でき、同じ配信を二重送信するため、
+      // まだ scheduled の行に限ってエラー文だけを記録し、状態は変更しない。
+      await db.prepare(
+        `UPDATE broadcasts
+         SET error_summary = ?
+         WHERE id = ? AND status = 'scheduled'`,
+      ).bind(
+        `予約実行エラー: ${(err instanceof Error ? err.message : String(err)).slice(0, 450)}`,
+        broadcast.id,
+      ).run().catch((logError) => {
         console.error(`Failed to record scheduled broadcast error ${broadcast.id}:`, logError);
       });
       // Continue with next broadcast
