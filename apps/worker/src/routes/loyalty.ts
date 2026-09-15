@@ -1095,6 +1095,32 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redemption-reservations', 
   }
 });
 
+// POST /api/loyalty/shopify/:shopifyCustomerId/redemption-reservations/reapply
+// 予約が残っている一方でカートから割引が外れた場合に、同じ割引を現在のカートへ付け直す。
+loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redemption-reservations/reapply', async (c) => {
+  try {
+    const shopifyCustomerId = c.req.param('shopifyCustomerId');
+    const sigErr = await checkCustomerSig(c as never, shopifyCustomerId);
+    if (sigErr) return sigErr;
+    const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
+    if (!point) return c.json({ success: false, error: 'ポイント利用予約が見つかりません' }, 404);
+    const reservation = await getActiveDirectPointReservation(c.env.DB, point.friend_id);
+    if (!reservation || reservation.status !== 'active' || reservation.shopify_customer_id !== shopifyCustomerId) {
+      return c.json({ success: false, error: 'ポイント利用予約が見つかりません' }, 404);
+    }
+    return c.json({
+      success: true,
+      data: {
+        redirect_path: `/discount/${encodeURIComponent(reservation.shopify_discount_code)}?redirect=/cart`,
+        points: reservation.points,
+        discount_amount: reservation.discount_amount,
+      },
+    });
+  } catch (_) {
+    return c.json({ success: false, error: 'ポイント割引の再適用に失敗しました' }, 500);
+  }
+});
+
 // POST /api/loyalty/shopify/:shopifyCustomerId/redemption-reservations/cancel
 loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/redemption-reservations/cancel', async (c) => {
   try {

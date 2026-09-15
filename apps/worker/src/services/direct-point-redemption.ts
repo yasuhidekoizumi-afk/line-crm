@@ -20,12 +20,13 @@ type Reservation = {
 };
 
 const now = () => new Date().toISOString();
+const SHOPIFY_API_VERSION = '2026-07';
 
 async function deleteShopifyCode(env: DirectPointRedemptionEnv, code: string): Promise<boolean> {
   const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
   const adminToken = await getShopifyAdminToken(env);
   if (!shopDomain || !adminToken) return false;
-  const lookup = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+  const lookup = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
     body: JSON.stringify({
@@ -37,7 +38,7 @@ async function deleteShopifyCode(env: DirectPointRedemptionEnv, code: string): P
   const lookupJson = await lookup.json() as { data?: { codeDiscountNodeByCode?: { id?: string } | null }; errors?: unknown };
   const id = lookupJson.data?.codeDiscountNodeByCode?.id;
   if (lookupJson.errors || !id) return !lookupJson.errors;
-  const deleted = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+  const deleted = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
     body: JSON.stringify({
@@ -83,7 +84,7 @@ export async function createDirectPointReservation(
   const pointValue = parseFloat((await getLoyaltySetting(env.DB, 'point_value').catch(() => '1')) ?? '1') || 1;
   const discountAmount = Math.floor(input.points * pointValue);
   const code = `ORYZAE-DR-${input.shopifyCustomerId.slice(-6)}-${Date.now().toString(36).toUpperCase()}`;
-  const discount = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+  const discount = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
     body: JSON.stringify({
@@ -104,6 +105,8 @@ export async function createDirectPointReservation(
           customerGets: {
             value: { discountAmount: { amount: String(discountAmount), appliesOnEachItem: false } },
             items: { all: true },
+            appliesOnOneTimePurchase: true,
+            appliesOnSubscription: true,
           },
           combinesWith: {
             productDiscounts: true,
@@ -111,6 +114,7 @@ export async function createDirectPointReservation(
             shippingDiscounts: true,
           },
           appliesOncePerCustomer: true,
+          recurringCycleLimit: 1,
           usageLimit: 1,
         },
       },
