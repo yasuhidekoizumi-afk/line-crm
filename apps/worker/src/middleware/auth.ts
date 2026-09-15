@@ -27,6 +27,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     // 実際の本人確認は各ルートの checkCustomerSig が担うため、ここでは
     // 管理者用Bearer認証を要求しない。
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redemption-reservations$/) ||
+    path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redemption-reservations\/reapply$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redemption-reservations\/cancel$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/history$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/profile-birthday$/) ||
