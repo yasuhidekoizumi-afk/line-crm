@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { useAccount } from '@/contexts/account-context'
 import { fetchApi } from '@/lib/api'
@@ -394,6 +394,15 @@ export default function InfluencersPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Influencer | null>(null)
+  const detailRef = useRef<HTMLElement>(null)
+  const showDetails = (item: Influencer) => {
+    setSelected(item)
+    // 詳細の描画後に移動し、一覧の下部から選んだ場合もすぐ確認できるようにする。
+    requestAnimationFrame(() => detailRef.current?.scrollIntoView({
+      block: 'start',
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+    }))
+  }
   const [tab, setTab] = useState<'profiles' | 'history'>('profiles')
   useEffect(() => {
     if (!selectedAccountId) return
@@ -530,44 +539,8 @@ export default function InfluencersPage() {
             </select>
           </div>
           {error && <p className="text-red-600 mb-4">{error}</p>}
-          <div className="overflow-x-auto bg-white border rounded-xl">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-500">
-                <tr>
-                  <th className="p-3">クリエイター</th>
-                  <th className="p-3">ジャンル</th>
-                  <th className="p-3">フォロワー数</th>
-                  <th className="p-3">連絡手段</th>
-                  <th className="p-3">連絡先</th>
-                  <th className="p-3">発送先</th>
-                  <th className="p-3">状態</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.friendId} onClick={() => setSelected(item)} className={`cursor-pointer border-t transition hover:bg-emerald-50 ${selected?.friendId === item.friendId ? 'bg-emerald-50' : ''}`}>
-                    <td className="p-3 font-medium">
-                      {item.displayName || '名称未登録'}
-                      <div className="text-xs font-normal text-gray-500">{item.instagramHandle || 'Instagram未登録'}</div>
-                    </td>
-                    <td className="p-3">{item.categories.join('・') || '—'}</td>
-                    <td className="p-3">{item.followerBand || '—'}</td>
-                    <td className="p-3">
-                      <span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold ${item.contactMethod === 'instagram_dm' ? 'bg-fuchsia-100 text-fuchsia-800' : 'bg-green-100 text-green-800'}`}>{item.contactMethod === 'instagram_dm' ? 'Instagram DM' : 'LINE'}</span>
-                    </td>
-                    <td className="p-3">{item.contactEmail || item.contactPhone || '—'}</td>
-                    <td className="p-3">{item.address?.prefecture || '未登録'}</td>
-                    <td className="p-3">
-                      <span className={`rounded-full px-2 py-1 text-xs ${item.profileCompletedAt ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{item.profileCompletedAt ? '登録済み' : '未登録'}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!loading && !items.length && <p className="p-8 text-center text-gray-500">該当するプロフィール登録者はいません。</p>}
-          </div>
           {selected && (
-            <section className="mt-6 overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-sm">
+            <section ref={detailRef} className="mb-6 scroll-mt-6 overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-sm">
               <div className="flex items-start justify-between gap-4 border-b border-emerald-100 bg-emerald-50 px-5 py-4">
                 <div>
                   <p className="text-xs font-semibold tracking-widest text-emerald-700">CREATOR RECORD</p>
@@ -619,6 +592,43 @@ export default function InfluencersPage() {
               </div>
             </section>
           )}
+          <div className="overflow-x-auto bg-white border rounded-xl">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-500">
+                <tr>
+                  <th className="p-3">クリエイター</th>
+                  <th className="p-3">ジャンル</th>
+                  <th className="p-3">フォロワー数</th>
+                  <th className="p-3">連絡手段</th>
+                  <th className="p-3">連絡先</th>
+                  <th className="p-3">発送先</th>
+                  <th className="p-3">状態</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.friendId} onClick={() => showDetails(item)} className={`cursor-pointer border-t transition hover:bg-emerald-50 ${selected?.friendId === item.friendId ? 'bg-emerald-50' : ''}`}>
+                    <td className="p-3 font-medium">
+                      {item.displayName || '名称未登録'}
+                      <div className="text-xs font-normal text-gray-500">{item.instagramHandle || 'Instagram未登録'}</div>
+                    </td>
+                    <td className="p-3">{item.categories.join('・') || '—'}</td>
+                    <td className="p-3">{item.followerBand || '—'}</td>
+                    <td className="p-3">
+                      <span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold ${item.contactMethod === 'instagram_dm' ? 'bg-fuchsia-100 text-fuchsia-800' : 'bg-green-100 text-green-800'}`}>{item.contactMethod === 'instagram_dm' ? 'Instagram DM' : 'LINE'}</span>
+                    </td>
+                    <td className="p-3">{item.contactEmail || item.contactPhone || '—'}</td>
+                    <td className="p-3">{item.address?.prefecture || '未登録'}</td>
+                    <td className="p-3">
+                      <span className={`rounded-full px-2 py-1 text-xs ${item.profileCompletedAt ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{item.profileCompletedAt ? '登録済み' : '未登録'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!loading && !items.length && <p className="p-8 text-center text-gray-500">該当するプロフィール登録者はいません。</p>}
+          </div>
+
         </>
       )}
       {manualForm && (
