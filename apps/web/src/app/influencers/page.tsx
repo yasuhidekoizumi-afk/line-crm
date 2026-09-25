@@ -39,6 +39,8 @@ type GiftingLog = {
   creatorName: string | null
   instagramHandle: string | null
   productName: string
+  campaignName: string | null
+  shipmentStatus: string
   productPageUrl: string | null
   status: string
   requestedAt: string | null
@@ -103,6 +105,8 @@ const statusLabels: Record<string, string> = {
 const blankLog = {
   friendId: '',
   productName: '',
+  campaignName: '',
+  shipmentStatus: 'pending',
   productPageUrl: '',
   status: 'requested',
   requestedAt: '',
@@ -118,21 +122,51 @@ const blankLog = {
   effectNotes: '',
 }
 
-function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; creators: Influencer[] }) {
+function GiftingHistory({ lineAccountId }: { lineAccountId: string }) {
+  const [creators, setCreators] = useState<Influencer[]>([])
+  const [search, setSearch] = useState('')
+  const [campaign, setCampaign] = useState('')
+  const [shipment, setShipment] = useState('')
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [loadingLogs, setLoadingLogs] = useState(true)
   const [logs, setLogs] = useState<GiftingLog[]>([])
   const [form, setForm] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const load = () =>
-    fetchApi<{ success: boolean; data: GiftingLog[] }>(`/api/influencer-gifting?lineAccountId=${lineAccountId}`)
-      .then((res) => setLogs(res.data || []))
-      .catch(() => setError('履歴を取得できませんでした。'))
+  const load = async () => {
+    setLoadingLogs(true)
+    setError('')
+    try {
+      const res = await fetchApi<{ success: boolean; data: GiftingLog[] }>(`/api/influencer-gifting?lineAccountId=${encodeURIComponent(lineAccountId)}`)
+      if (!res.success) throw new Error()
+      setLogs(res.data || [])
+    } catch { setError('履歴を取得できませんでした。再読み込みしてください。') }
+    finally { setLoadingLogs(false) }
+  }
   useEffect(() => {
     load()
+    fetchApi<{ success: boolean; data: Influencer[] }>(`/api/influencers?lineAccountId=${encodeURIComponent(lineAccountId)}`)
+      .then((res) => setCreators(res.data || []))
+      .catch(() => setError('クリエイター一覧を取得できませんでした。'))
   }, [lineAccountId])
+  const campaigns = [...new Set(logs.map((log) => log.campaignName).filter((name): name is string => Boolean(name)))].sort()
+  const visibleLogs = logs.filter((log) => {
+    const matchesCampaign = !campaign || (campaign === '__unassigned' ? !log.campaignName : log.campaignName === campaign)
+    const matchesShipment = !shipment || (shipment === 'action' ? ['pending', 'unknown'].includes(log.shipmentStatus) && !['declined', 'cancelled'].includes(log.status) : log.shipmentStatus === shipment)
+    return matchesCampaign && matchesShipment && [log.creatorName, log.instagramHandle, log.productName, log.campaignName].some((value) => value?.toLowerCase().includes(search.trim().toLowerCase()))
+  })
+  const updateShipment = async (log: GiftingLog, shipmentStatus: string) => {
+    setUpdatingId(log.id); setError('')
+    try {
+      const res = await fetchApi<{ success: boolean; data: GiftingLog }>(`/api/influencer-gifting/${log.id}/shipment`, { method: 'PATCH', body: JSON.stringify({ shipmentStatus }) })
+      if (!res.success) throw new Error()
+      setLogs((current) => current.map((item) => item.id === log.id ? res.data : item))
+    } catch { setError('送付状況を保存できませんでした。チェックは変更していません。') }
+    finally { setUpdatingId(null) }
+  }
   const save = async () => {
-    if (!form.friendId || !form.productName) {
-      setError('クリエイターと商品名を入力してください。')
+    if (!form.friendId || !form.productName.trim() || !form.campaignName.trim()) {
+      setError('クリエイター・募集案件名・商品名を入力してください。')
       return
     }
     setSaving(true)
@@ -161,32 +195,43 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-5 py-4">
         <div>
           <p className="text-xs font-semibold tracking-widest text-emerald-700">GIFTING LEDGER</p>
-          <h2 className="mt-1 text-lg font-bold">ギフティング履歴・効果測定</h2>
-          <p className="mt-1 text-sm text-slate-600">商品ページ、送付、投稿、SNS実績を案件ごとに記録します。</p>
+          <h2 className="mt-1 text-lg font-bold">募集案件・送付管理</h2>
+          <p className="mt-1 text-sm text-slate-600">過去に募集した案件も登録できます。案件とクリエイターごとに、商品送付・投稿を記録します。</p>
         </div>
-        <button onClick={() => setForm({ ...blankLog })} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800">
-          ギフティングを記録
+        <button disabled={updatingId !== null || saving} onClick={() => setForm({ ...blankLog })} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800">
+          案件への参加を記録
         </button>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
       {form && (
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-bold">{form.id ? 'ギフティング記録を更新' : '新しいギフティングを記録'}</h3>
-            <button onClick={() => setForm(null)} className="text-sm text-slate-500">
+            <h3 className="font-bold">{form.id ? 'ギフティング記録を更新' : '新しい案件への参加を記録'}</h3>
+            <button disabled={saving} onClick={() => setForm(null)} className="text-sm text-slate-500">
               閉じる
             </button>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="text-sm font-medium">
               クリエイター
-              <select value={form.friendId} onChange={(e) => setForm({ ...form, friendId: e.target.value })} className="mt-1 w-full rounded-lg border p-2">
+              <select disabled={Boolean(form.id)} value={form.friendId} onChange={(e) => setForm({ ...form, friendId: e.target.value })} className="mt-1 w-full rounded-lg border p-2">
                 <option value="">選択してください</option>
                 {creators.map((creator) => (
                   <option key={creator.friendId} value={creator.friendId}>
                     {creator.displayName || '名称未登録'} {creator.instagramHandle ? `(${creator.instagramHandle})` : ''}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="text-sm font-medium">
+              募集案件名（必須）
+              <input list="gifting-campaigns" maxLength={160} value={form.campaignName} onChange={(e) => setForm({ ...form, campaignName: e.target.value })} placeholder="例：2026年9月 秋のグラノーラ募集" className="mt-1 w-full rounded-lg border p-2" />
+              <datalist id="gifting-campaigns">{campaigns.map((name) => <option key={name} value={name} />)}</datalist>
+            </label>
+            <label className="text-sm font-medium">
+              送付状況
+              <select value={form.shipmentStatus} onChange={(e) => setForm({ ...form, shipmentStatus: e.target.value, shippedAt: e.target.value === 'shipped' ? form.shippedAt : '', status: e.target.value !== 'shipped' && form.status === 'shipped' ? 'accepted' : form.status })} className="mt-1 w-full rounded-lg border p-2">
+                <option value="unknown">要確認</option><option value="pending">未送付</option><option value="shipped">送付済み</option>
               </select>
             </label>
             <label className="text-sm font-medium">
@@ -199,7 +244,7 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
             </label>
             <label className="text-sm font-medium">
               進行状況
-              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="mt-1 w-full rounded-lg border p-2">
+              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value, shipmentStatus: e.target.value === 'shipped' ? 'shipped' : form.shipmentStatus })} className="mt-1 w-full rounded-lg border p-2">
                 {Object.entries(statusLabels).map(([key, label]) => (
                   <option key={key} value={key}>
                     {label}
@@ -212,8 +257,8 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
               <input type="date" value={form.requestedAt} onChange={(e) => setForm({ ...form, requestedAt: e.target.value })} className="mt-1 w-full rounded-lg border p-2" />
             </label>
             <label className="text-sm font-medium">
-              発送日
-              <input type="date" value={form.shippedAt} onChange={(e) => setForm({ ...form, shippedAt: e.target.value })} className="mt-1 w-full rounded-lg border p-2" />
+              発送日（実際の日付が分かる場合）
+              <input type="date" value={form.shippedAt} onChange={(e) => setForm({ ...form, shippedAt: e.target.value, shipmentStatus: e.target.value ? 'shipped' : form.shipmentStatus })} className="mt-1 w-full rounded-lg border p-2" />
             </label>
             <label className="text-sm font-medium">
               投稿日
@@ -241,12 +286,22 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
           </button>
         </div>
       )}
+      <div className="space-y-3 rounded-xl border bg-white p-4">
+        <div className="flex flex-wrap gap-3">
+          <input aria-label="案件・クリエイター検索" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="名前・Instagram・案件・商品で検索" className="min-w-64 flex-1 rounded-lg border px-3 py-2 text-sm" />
+          <select aria-label="募集案件で絞り込み" value={campaign} onChange={(e) => setCampaign(e.target.value)} className="max-w-full rounded-lg border px-3 py-2 text-sm"><option value="">すべての募集案件</option><option value="__unassigned">案件名未登録</option>{campaigns.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+          <select aria-label="送付状況で絞り込み" value={shipment} onChange={(e) => setShipment(e.target.value)} className="rounded-lg border px-3 py-2 text-sm"><option value="">すべての送付状況</option><option value="action">未送付・要確認（辞退・中止を除く）</option><option value="pending">未送付</option><option value="unknown">要確認</option><option value="shipped">送付済み</option></select>
+        </div>
+        <p className="text-xs text-slate-500">{visibleLogs.length} / {logs.length} 件。送付の記録がない過去案件は「要確認」です。送付済みにチェックし、実際の発送日は「編集」から記録してください。</p>
+        <button onClick={load} disabled={loadingLogs || updatingId !== null || saving} className="text-sm text-emerald-700">{loadingLogs ? '読み込み中…' : '履歴を再読み込み'}</button>
+      </div>
       <div className="overflow-x-auto rounded-xl border bg-white">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>
               <th className="p-3">クリエイター</th>
-              <th className="p-3">商品</th>
+              <th className="p-3">募集案件・商品</th>
+              <th className="p-3">送付チェック・発送日</th>
               <th className="p-3">進行状況</th>
               <th className="p-3">投稿日</th>
               <th className="p-3">投稿・効果</th>
@@ -254,13 +309,15 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
             </tr>
           </thead>
           <tbody>
-            {logs.map((log) => (
+            {visibleLogs.map((log) => (
               <tr key={log.id} className="border-t">
                 <td className="p-3 font-medium">
                   {log.creatorName || '名称未登録'}
                   <div className="text-xs text-slate-500">{log.instagramHandle || ''}</div>
                 </td>
                 <td className="p-3">
+                  <div className="mb-1 font-semibold">{log.campaignName || '案件名未登録'}</div>
+                  <div className="mb-1 text-xs text-slate-500">依頼日：{log.requestedAt || '未登録'}</div>
                   {log.productPageUrl ? (
                     <a href={log.productPageUrl} target="_blank" rel="noreferrer" className="text-emerald-700 underline">
                       {log.productName}
@@ -268,6 +325,14 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
                   ) : (
                     log.productName
                   )}
+                </td>
+                <td className="p-3">
+                  <label className="flex items-center gap-2 whitespace-nowrap">
+                    <input type="checkbox" checked={log.shipmentStatus === 'shipped'} disabled={updatingId !== null || Boolean(form) || loadingLogs} onChange={(e) => updateShipment(log, e.target.checked ? 'shipped' : 'pending')} aria-label={`${log.creatorName || '名称未登録'}・${log.campaignName || log.productName}の送付済み`} className="h-4 w-4 accent-emerald-700" />
+                    {log.shipmentStatus === 'shipped' ? '送付済み' : log.shipmentStatus === 'pending' ? '未送付' : '要確認'}
+                  </label>
+                  <div className="mt-1 text-xs text-slate-500">{log.shippedAt || (log.shipmentStatus === 'shipped' ? '発送日未登録' : '—')}</div>
+                  {log.shipmentStatus === 'unknown' && <button disabled={updatingId !== null || Boolean(form) || loadingLogs} onClick={() => updateShipment(log, 'pending')} className="mt-1 text-xs text-amber-800 underline disabled:opacity-50">未送付と確認</button>}
                 </td>
                 <td className="p-3">{statusLabels[log.status] || log.status}</td>
                 <td className="p-3">{log.postPublishedAt || '—'}</td>
@@ -283,10 +348,12 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
                 </td>
                 <td className="p-3">
                   <button
+                    disabled={updatingId !== null || saving || loadingLogs}
                     onClick={() =>
                       setForm({
                         ...blankLog,
                         ...log,
+                        campaignName: log.campaignName || '',
                         productPageUrl: log.productPageUrl || '',
                         requestedAt: log.requestedAt || '',
                         shippedAt: log.shippedAt || '',
@@ -310,7 +377,8 @@ function GiftingHistory({ lineAccountId, creators }: { lineAccountId: string; cr
             ))}
           </tbody>
         </table>
-        {!logs.length && <p className="p-8 text-center text-slate-500">まだギフティング履歴はありません。「ギフティングを記録」から追加してください。</p>}
+        {!loadingLogs && logs.length > 0 && !visibleLogs.length && <p className="p-8 text-center text-slate-500">条件に一致する案件はありません。</p>}
+        {!loadingLogs && !error && !logs.length && <p className="p-8 text-center text-slate-500">まだギフティング履歴はありません。「案件への参加を記録」から追加してください。</p>}
       </div>
     </section>
   )
@@ -446,11 +514,11 @@ export default function InfluencersPage() {
           クリエイター一覧
         </button>
         <button onClick={() => setTab('history')} className={`border-b-2 px-4 py-2 text-sm font-bold ${tab === 'history' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'}`}>
-          ギフティング履歴・効果測定
+          募集案件・送付管理
         </button>
       </div>
       {tab === 'history' ? (
-        <GiftingHistory lineAccountId={selectedAccountId} creators={items} />
+        <GiftingHistory key={selectedAccountId} lineAccountId={selectedAccountId} />
       ) : (
         <>
           <div className="mb-5 flex flex-wrap gap-3">

@@ -34,6 +34,8 @@ type AddressInput = {
 type GiftingLogInput = {
   friendId?: string
   productName?: string
+  campaignName?: string | null
+  shipmentStatus?: string
   productPageUrl?: string | null
   status?: string
   requestedAt?: string | null
@@ -207,6 +209,8 @@ function serializeGiftingLog(row: Record<string, unknown>) {
     creatorName: row.display_name,
     instagramHandle: row.instagram_handle,
     productName: row.product_name,
+    campaignName: row.campaign_name,
+    shipmentStatus: row.shipment_status,
     productPageUrl: row.product_page_url,
     status: row.status,
     requestedAt: row.requested_at,
@@ -240,12 +244,15 @@ async function giftingLogRow(db: D1Database, id: string) {
 
 function giftingLogValues(input: GiftingLogInput) {
   const status = typeof input.status === 'string' && GIFTING_STATUSES.has(input.status) ? input.status : 'requested'
+  const shipmentStatus = input.shipmentStatus ?? (cleanDate(input.shippedAt) || status === 'shipped' ? 'shipped' : 'pending')
   return {
     productName: cleanText(input.productName, 160),
+    campaignName: cleanText(input.campaignName, 160),
+    shipmentStatus,
     productPageUrl: cleanText(input.productPageUrl, 1000),
-    status,
+    status: status === 'shipped' && shipmentStatus !== 'shipped' ? 'accepted' : status,
     requestedAt: cleanDate(input.requestedAt),
-    shippedAt: cleanDate(input.shippedAt),
+    shippedAt: shipmentStatus === 'shipped' ? cleanDate(input.shippedAt) : null,
     postPublishedAt: cleanDate(input.postPublishedAt),
     postType: cleanText(input.postType, 40),
     postUrl: cleanText(input.postUrl, 1000),
@@ -464,7 +471,7 @@ influencers.get('/api/influencer-gifting', async (c) => {
     FROM influencer_gifting_logs g
     INNER JOIN friends f ON f.id = g.friend_id
     LEFT JOIN influencer_profiles p ON p.friend_id = g.friend_id
-    WHERE g.line_account_id=? ORDER BY COALESCE(g.post_published_at, g.shipped_at, g.requested_at, g.created_at) DESC LIMIT 500`
+    WHERE g.line_account_id=? ORDER BY COALESCE(g.post_published_at, g.shipped_at, g.requested_at, g.created_at) DESC, g.id DESC`
   )
     .bind(lineAccountId!)
     .all<Record<string, unknown>>()
@@ -488,16 +495,17 @@ influencers.post('/api/influencer-gifting', async (c) => {
       },
       400
     )
+  if (body.shipmentStatus !== undefined && !['unknown', 'pending', 'shipped'].includes(body.shipmentStatus)) return c.json({ success: false, error: '送付状況が不正です' }, 400)
   const values = giftingLogValues(body)
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
   await c.env.DB.prepare(
     `INSERT INTO influencer_gifting_logs (
     id, friend_id, line_account_id, product_name, product_page_url, status, requested_at, shipped_at, post_published_at,
-    post_type, post_url, reach, impressions, likes, comments, saves, effect_notes, created_at, updated_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    post_type, post_url, reach, impressions, likes, comments, saves, effect_notes, created_at, updated_at, campaign_name, shipment_status
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
-    .bind(id, body.friendId, body.lineAccountId, values.productName, values.productPageUrl, values.status, values.requestedAt, values.shippedAt, values.postPublishedAt, values.postType, values.postUrl, values.reach, values.impressions, values.likes, values.comments, values.saves, values.effectNotes, now, now)
+    .bind(id, body.friendId, body.lineAccountId, values.productName, values.productPageUrl, values.status, values.requestedAt, values.shippedAt, values.postPublishedAt, values.postType, values.postUrl, values.reach, values.impressions, values.likes, values.comments, values.saves, values.effectNotes, now, now, values.campaignName, values.shipmentStatus)
     .run()
   return c.json(
     {
@@ -514,19 +522,39 @@ influencers.patch('/api/influencer-gifting/:id', async (c) => {
   const denied = await requireLineAccountAccess(c, existing.line_account_id as string, true)
   if (denied) return denied
   const body = await c.req.json<GiftingLogInput>()
-  const values = giftingLogValues({ ...existing, ...body })
+  if (body.shipmentStatus !== undefined && !['unknown', 'pending', 'shipped'].includes(body.shipmentStatus)) return c.json({ success: false, error: '送付状況が不正です' }, 400)
+  if (body.shipmentStatus === undefined && (cleanDate(body.shippedAt) || body.status === 'shipped')) body.shipmentStatus = 'shipped'
+  const values = giftingLogValues({ ...(serializeGiftingLog(existing) as GiftingLogInput), ...body })
   if (!values.productName) return c.json({ success: false, error: '商品名は必須です' }, 400)
   await c.env.DB.prepare(
     `UPDATE influencer_gifting_logs SET
     product_name=?, product_page_url=?, status=?, requested_at=?, shipped_at=?, post_published_at=?, post_type=?, post_url=?,
-    reach=?, impressions=?, likes=?, comments=?, saves=?, effect_notes=?, updated_at=? WHERE id=?`
+    reach=?, impressions=?, likes=?, comments=?, saves=?, effect_notes=?, updated_at=?, campaign_name=?, shipment_status=? WHERE id=?`
   )
-    .bind(values.productName, values.productPageUrl, values.status, values.requestedAt, values.shippedAt, values.postPublishedAt, values.postType, values.postUrl, values.reach, values.impressions, values.likes, values.comments, values.saves, values.effectNotes, new Date().toISOString(), c.req.param('id'))
+    .bind(values.productName, values.productPageUrl, values.status, values.requestedAt, values.shippedAt, values.postPublishedAt, values.postType, values.postUrl, values.reach, values.impressions, values.likes, values.comments, values.saves, values.effectNotes, new Date().toISOString(), values.campaignName, values.shipmentStatus, c.req.param('id'))
     .run()
   return c.json({
     success: true,
     data: serializeGiftingLog((await giftingLogRow(c.env.DB, c.req.param('id')))!),
   })
+})
+
+influencers.patch('/api/influencer-gifting/:id/shipment', async (c) => {
+  const existing = await giftingLogRow(c.env.DB, c.req.param('id'))
+  if (!existing) return c.json({ success: false, error: 'ギフティング履歴が見つかりません' }, 404)
+  const denied = await requireLineAccountAccess(c, existing.line_account_id as string, true)
+  if (denied) return denied
+  const body = await c.req.json<{ shipmentStatus?: string }>()
+  if (!body.shipmentStatus || !['unknown', 'pending', 'shipped'].includes(body.shipmentStatus)) {
+    return c.json({ success: false, error: '送付状況が不正です' }, 400)
+  }
+  // 過去の送付チェックから実際の発送日を推測しない。投稿済み等の進行状況も保持する。
+  await c.env.DB.prepare(`UPDATE influencer_gifting_logs SET shipment_status=?,
+    shipped_at=CASE WHEN ?='shipped' THEN shipped_at ELSE NULL END,
+    status=CASE WHEN status='shipped' AND ?!='shipped' THEN 'accepted' ELSE status END,
+    updated_at=? WHERE id=?`)
+    .bind(body.shipmentStatus, body.shipmentStatus, body.shipmentStatus, new Date().toISOString(), c.req.param('id')).run()
+  return c.json({ success: true, data: serializeGiftingLog((await giftingLogRow(c.env.DB, c.req.param('id')))!) })
 })
 
 export { influencers }
