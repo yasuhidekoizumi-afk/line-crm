@@ -28,6 +28,9 @@ jobs:
       - name: DB typecheck
         run: pnpm --filter @line-crm/db typecheck
 
+      - name: Influencer shipping regression tests
+        run: node packages/db/node_modules/vitest/vitest.mjs run apps/worker/tests/influencers.shipping.test.mjs
+
       - name: Worker build
         run: pnpm --filter worker build
         env:
