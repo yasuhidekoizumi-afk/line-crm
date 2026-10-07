@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { checkCustomerSig } from '../utils/customer-sig.js';
+import { getPendingLoyaltyCode } from '../services/loyalty-pending-code.js';
 import {
   getLoyaltyPoint,
   getLoyaltyPointByShopifyCustomerId,
@@ -986,21 +987,16 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
       });
     }
 
-    // 最新の割引コードを reason から抽出
+    // 未使用の割引コードだけを保留として返す。
     let pendingCode: string | null = null;
     let pendingDiscount: number | null = null;
     let pendingPoints: number | null = null;
     try {
-      const latest = await c.env.DB
-        .prepare(`SELECT reason, points FROM loyalty_transactions WHERE friend_id = ? AND type = 'redeem' AND reason NOT LIKE '[取り消し済み]%' AND reason NOT LIKE '[利用済み]%' ORDER BY created_at DESC LIMIT 1`)
-        .bind(point.friend_id)
-        .first<{ reason: string; points: number }>();
-      if (latest?.reason) {
-        const m = latest.reason.match(/コード: ([A-Z0-9-]+)/);
-        if (m) pendingCode = m[1];
-        const d = latest.reason.match(/¥([0-9,]+)割引/);
-        if (d) pendingDiscount = parseInt(d[1].replace(/,/g, ''), 10);
-        if (typeof latest.points === 'number') pendingPoints = Math.abs(latest.points);
+      const pending = await getPendingLoyaltyCode(c.env.DB, point.friend_id);
+      if (pending) {
+        pendingCode = pending.code;
+        pendingDiscount = pending.discount;
+        pendingPoints = pending.points;
       }
     } catch (_) {}
 
