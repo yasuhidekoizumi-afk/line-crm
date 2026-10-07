@@ -31,6 +31,10 @@ jobs:
       - name: Influencer shipping regression tests
         run: node packages/db/node_modules/vitest/vitest.mjs run apps/worker/tests/influencers.shipping.test.mjs
 
+      - name: Loyalty pending code regression tests
+        # 注文確定済みの利用履歴を保留ポイントへ戻さないことを検証する。
+        run: node --experimental-strip-types --test apps/worker/tests/loyalty-pending-code.test.mjs
+
       - name: Worker build
         run: pnpm --filter worker build
         env:
