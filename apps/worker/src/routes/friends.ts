@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { toDisplayContent } from '../utils/message-preview.js';
 import {
   getFriends,
   getFriendById,
@@ -222,7 +223,13 @@ friends.get('/api/friends/:id/messages', async (c) => {
       .prepare(`SELECT ml.id, ml.direction, ml.message_type as messageType, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at as createdAt FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ORDER BY ml.created_at ASC LIMIT ?`)
       .bind(friendId, limit)
       .all<{ id: string; direction: string; messageType: string; content: string; createdAt: string }>();
-    return c.json({ success: true, data: result.results });
+    return c.json({
+      success: true,
+      data: (result.results ?? []).map((row) => ({
+        ...row,
+        content: toDisplayContent(row.messageType, row.content ?? ''),
+      })),
+    });
   } catch (err) {
     console.error('GET /api/friends/:id/messages error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);

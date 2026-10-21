@@ -39,6 +39,10 @@ jobs:
         # 一斉配信の送信控えが D1 の batch 上限で全滅しないことを検証する。
         run: node --experimental-strip-types --test apps/worker/tests/message-log-chunk.test.mjs
 
+      - name: Message preview regression tests
+        # チャット画面に配信本文の生JSONが出ないことを検証する。
+        run: node --experimental-strip-types --test apps/worker/tests/message-preview.test.mjs
+
       - name: Worker build
         run: pnpm --filter worker build
         env:

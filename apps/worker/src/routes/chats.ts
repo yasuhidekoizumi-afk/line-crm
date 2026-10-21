@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { extractFlexAltText } from '../utils/flex-alt-text.js';
+import { toDisplayContent } from '../utils/message-preview.js';
 import {
   getOperators, getOperatorById, createOperator, updateOperator, deleteOperator,
   getChats, getChatById, createChat, updateChat, jstNow,
@@ -100,7 +101,7 @@ chats.get('/api/chats/:id', async (c) => {
     interface UnifiedMessage { id: string; direction: string; messageType: string; content: string; createdAt: string; meta?: { subject?: string | null; from?: string | null; to?: string | null } }
     const unified: UnifiedMessage[] = [];
     for (const m of lineMessages.results as Record<string, unknown>[]) {
-      unified.push({ id: m.id as string, direction: m.direction as string, messageType: m.message_type as string, content: m.content as string, createdAt: m.created_at as string });
+      unified.push({ id: m.id as string, direction: m.direction as string, messageType: m.message_type as string, content: toDisplayContent(m.message_type as string, (m.content as string) ?? ''), createdAt: m.created_at as string });
     }
     for (const m of csMessages.results as Record<string, unknown>[]) {
       unified.push({ id: m.id as string, direction: m.direction as string, messageType: 'email', content: (m.body_text as string) ?? '', createdAt: m.created_at as string, meta: { subject: (m.subject as string | null) ?? null, from: (m.from_address as string | null) ?? null, to: (m.to_address as string | null) ?? null } });
