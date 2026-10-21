@@ -352,7 +352,7 @@ export default function HealthPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[640px]">
                     <thead>
-                      <tr className="text-left text-xs text-gray-500 bg-gray-50 border-b border-gray-200">
+                      <tr className="text-left text-xs text-gray-500 bg-canvas border-b border-line">
                         <th className="px-4 py-3 font-medium">移行元</th>
                         <th className="px-4 py-3 font-medium">移行先</th>
                         <th className="px-4 py-3 font-medium">ステータス</th>

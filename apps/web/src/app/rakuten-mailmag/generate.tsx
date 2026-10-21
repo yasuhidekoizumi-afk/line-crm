@@ -269,7 +269,7 @@ export default function Generate({ data, events }: { data: DashboardData; events
         {result && (
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             {/* Subject Candidates */}
-            <div className="p-5 bg-gray-50 border-b border-gray-200">
+            <div className="p-5 bg-canvas border-b border-line">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">件名候補（A/Bテスト用 3パターン）</p>
               <div className="space-y-2">
                 {result.subjects.map((subject, i) => {

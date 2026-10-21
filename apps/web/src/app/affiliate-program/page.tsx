@@ -246,7 +246,7 @@ export default function AffiliateProgramPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px]">
-                <thead className="bg-gray-50 border-b border-gray-200">
+                <thead className="bg-canvas border-b border-line">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">パートナー</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">コード</th>
@@ -289,7 +289,7 @@ export default function AffiliateProgramPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px]">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-canvas border-b border-line">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">注文</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500">パートナー</th>

@@ -465,7 +465,7 @@ export default function FormsPage() {
               </div>
               <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
                 <table className="w-full min-w-[800px]">
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="bg-canvas border-b border-line">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">名前</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">メール</th>

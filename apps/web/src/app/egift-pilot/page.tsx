@@ -481,7 +481,7 @@ export default function EgiftPilotPage() {
         <div className="mt-8">
           <h2 className="text-lg font-semibold mb-3">キャンペーン一覧</h2>
           <table className="text-sm w-full border">
-            <thead className="bg-gray-50">
+            <thead className="bg-canvas">
               <tr>
                 <th className="text-left px-3 py-2 border-b">名前</th>
                 <th className="text-left px-3 py-2 border-b">状態</th>

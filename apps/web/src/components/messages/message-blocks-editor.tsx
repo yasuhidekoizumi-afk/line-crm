@@ -205,7 +205,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
         return (
           <div key={b.id} className="border border-gray-200 rounded-lg bg-white">
             {/* ヘッダー（クリックで開閉） */}
-            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
+            <div className="flex items-center gap-2 px-3 py-2 bg-canvas border-b border-line">
               <span className="text-xs font-mono text-gray-400 w-6">#{idx + 1}</span>
               <button
                 type="button"

@@ -353,10 +353,10 @@ function TrackedLinksPageInner() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px]">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">リンク</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">クリック</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">作成日</th>
+                  <tr className="bg-canvas border-b border-line">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">リンク</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">クリック</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">作成日</th>
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>

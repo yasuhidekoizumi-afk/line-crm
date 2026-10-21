@@ -221,6 +221,11 @@ export default function ChatsPage() {
               : (chatDetail.messages ?? []).map((msg: any) => { const isOut = msg.direction === 'outgoing'; let content: React.ReactNode = <span>{msg.content}</span>; if (msg.messageType === 'email') content = <div>{msg.meta?.subject && <div className="text-xs font-bold mb-1 opacity-80">✉️ {msg.meta.subject}</div>}<div className="whitespace-pre-wrap text-sm">{msg.content}</div></div>; return (<div key={msg.id} className={`flex items-end gap-2 ${isOut ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[75%] px-3 py-2 text-sm break-words whitespace-pre-wrap ${isOut ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white' : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'}`} style={isOut ? { backgroundColor: '#06C755' } : undefined}>{content}</div></div>)})}
               <div ref={messagesEndRef} />
             </div>
+            {String(chatDetail.channel ?? 'line').startsWith('email_') ? (
+              <div className="border-t border-line bg-canvas px-4 py-3 text-xs text-subtle">
+                メールの問い合わせはCS画面から返信します。 <a href="/cs" className="text-brand-600 hover:underline">CSダッシュボードを開く</a>
+              </div>
+            ) : (
             <div className="border-t border-gray-200 bg-white shrink-0">
               <div className="px-3 py-1.5 border-b border-gray-100 flex items-center gap-1">
                 {chatDetail && <AiDraftButton chatId={selectedChatId!} messages={(chatDetail.messages ?? []).map((m: any) => ({ direction: m.direction, messageType: m.messageType, content: m.content, meta: m.meta }))} onSelect={handleDraftSelect} />}
@@ -235,6 +240,7 @@ export default function ChatsPage() {
                 </button>
               </div>
             </div>
+            )}
           </>) : null}
         </div>
       </div>

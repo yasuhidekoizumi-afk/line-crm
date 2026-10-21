@@ -170,7 +170,7 @@ export default function EmailLogsPage() {
         <>
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-canvas border-b border-line">
                 <tr>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">宛先</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">件名</th>

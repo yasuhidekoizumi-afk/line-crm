@@ -318,20 +318,20 @@ export default function WebhooksPage() {
             <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <tr className="bg-canvas border-b border-line">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     名前
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     ソースタイプ
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     エンドポイントURL
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     ステータス
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     作成日
                   </th>
                   <th className="px-4 py-3" />
@@ -388,20 +388,20 @@ export default function WebhooksPage() {
             <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <tr className="bg-canvas border-b border-line">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     名前
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     URL
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     イベントタイプ
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     ステータス
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                     作成日
                   </th>
                   <th className="px-4 py-3" />

@@ -291,7 +291,7 @@ export default function CardMessageEditor({ value, onChange, altText = '', onAlt
         const isLast = idx === cards.length - 1
         return (
           <div key={idx} className="border border-gray-200 rounded-lg bg-white">
-            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
+            <div className="flex items-center gap-2 px-3 py-2 bg-canvas border-b border-line">
               <span className="text-xs font-bold text-gray-600">カード {idx + 1}</span>
               <div className="flex items-center gap-1 ml-auto">
                 <button

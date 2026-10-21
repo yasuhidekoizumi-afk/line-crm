@@ -896,7 +896,7 @@ function BroadcastsPageInner() {
               ) : (
                 <div className="overflow-hidden rounded-md border border-gray-200">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-xs text-gray-500">
+                    <thead className="bg-canvas text-xs text-subtle">
                       <tr>
                         <th className="px-3 py-2 text-left font-semibold">CTAの場所 / 最終遷移先</th>
                         <th className="px-3 py-2 text-right font-semibold">クリック人数</th>
@@ -1002,23 +1002,23 @@ function BroadcastsPageInner() {
           <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              <tr className="bg-canvas border-b border-line">
+                <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                   配信タイトル
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                   ステータス
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                   配信対象
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                   予約日時
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                   送信完了日時
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-subtle uppercase tracking-wider">
                   実績
                 </th>
                 <th className="px-4 py-3" />

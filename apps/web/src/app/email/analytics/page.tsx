@@ -109,7 +109,7 @@ export default function AnalyticsPage() {
             {cohorts.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="bg-canvas border-b border-line">
                     <tr>
                       <th className="text-left px-4 py-2 font-medium text-gray-600">月</th>
                       <th className="text-right px-4 py-2 font-medium text-gray-600">新規</th>
@@ -144,7 +144,7 @@ export default function AnalyticsPage() {
             {campaigns.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="bg-canvas border-b border-line">
                     <tr>
                       <th className="text-left px-4 py-2 font-medium text-gray-600">キャンペーン</th>
                       <th className="text-right px-4 py-2 font-medium text-gray-600">送信</th>
