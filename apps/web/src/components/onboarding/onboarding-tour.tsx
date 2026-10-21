@@ -111,13 +111,13 @@ export default function OnboardingTour() {
               {isLast ? (
                 <button onClick={handleComplete}
                   className="px-6 py-2 text-sm font-medium text-white rounded-lg"
-                  style={{ backgroundColor: '#06C755' }}>
+                  style={{ backgroundColor: 'var(--color-brand-500)' }}>
                   始める！
                 </button>
               ) : (
                 <button onClick={() => setStep(step + 1)}
                   className="px-6 py-2 text-sm font-medium text-white rounded-lg"
-                  style={{ backgroundColor: '#06C755' }}>
+                  style={{ backgroundColor: 'var(--color-brand-500)' }}>
                   次へ
                 </button>
               )}

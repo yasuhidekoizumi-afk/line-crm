@@ -215,7 +215,7 @@ export default function NotificationsPage() {
           <button
             onClick={() => setShowCreate(true)}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + 新規ルール
           </button>
@@ -231,7 +231,7 @@ export default function NotificationsPage() {
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">新規ルールを作成</h2>
           <div className="space-y-4 max-w-lg">
             <div>
@@ -282,7 +282,7 @@ export default function NotificationsPage() {
                 onClick={handleCreate}
                 disabled={saving}
                 className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ backgroundColor: '#06C755' }}
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
               >
                 {saving ? '作成中...' : '作成'}
               </button>
@@ -315,7 +315,7 @@ export default function NotificationsPage() {
             ))}
           </div>
         ) : rules.length === 0 && !showCreate ? (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+          <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
             <p className="text-gray-500">通知ルールがありません。「新規ルール」から作成してください。</p>
           </div>
         ) : (
@@ -323,7 +323,7 @@ export default function NotificationsPage() {
             {rules.map((rule) => (
               <div
                 key={rule.id}
-                className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 flex flex-col gap-3"
+                className="bg-surface rounded-card shadow-card border border-line p-5 flex flex-col gap-3"
               >
                 {/* Header */}
                 <div className="flex items-start justify-between">
@@ -389,7 +389,7 @@ export default function NotificationsPage() {
         </div>
 
         {loading ? (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="px-4 py-4 border-b border-gray-100 flex items-center gap-4 animate-pulse">
                 <div className="flex-1 space-y-2">
@@ -402,11 +402,11 @@ export default function NotificationsPage() {
             ))}
           </div>
         ) : notifications.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+          <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
             <p className="text-gray-500">通知履歴がありません。</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
               <thead>

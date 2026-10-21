@@ -259,7 +259,7 @@ function CampaignModal({
           <div className="flex gap-2 pt-2">
             <button type="submit" disabled={saving}
               className="flex-1 py-2.5 text-sm font-medium text-white rounded-lg disabled:opacity-50"
-              style={{ backgroundColor: '#06C755' }}>
+              style={{ backgroundColor: 'var(--color-brand-500)' }}>
               {saving ? '保存中...' : '保存する'}
             </button>
             <button type="button" onClick={onClose}
@@ -314,7 +314,7 @@ export default function CampaignsTab() {
         <p className="text-sm text-gray-500">条件に合わせてポイントを追加付与します。複数一致した場合は順番に全て適用されます。</p>
         <button onClick={() => { setEditing(undefined); setShowModal(true) }}
           className="px-4 py-2 text-sm font-medium text-white rounded-lg whitespace-nowrap"
-          style={{ backgroundColor: '#06C755' }}>
+          style={{ backgroundColor: 'var(--color-brand-500)' }}>
           新規作成
         </button>
       </div>

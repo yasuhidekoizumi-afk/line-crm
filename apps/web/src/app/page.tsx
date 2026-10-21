@@ -33,7 +33,7 @@ interface OverviewNow { sendableF1: number | null; blockRate30dPct: number | nul
 
 function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }: { title: string; value: number | null; loading: boolean; icon: React.ReactNode; href: string; accentColor?: string }) {
   return (
-    <Link prefetch={false} href={href} className="block bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow group">
+    <Link prefetch={false} href={href} className="block bg-surface rounded-card shadow-card border border-line p-6 hover:shadow-md transition-shadow group">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm font-medium text-gray-500 mb-2">{title}</p>
@@ -250,7 +250,7 @@ export default function DashboardPage() {
 
       <CollapsibleSection title={<><span>💎</span><span>ロイヤルティ会員</span></>} subtitle="今月実績" detailHref="/loyalty" detailLabel="詳細管理">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">総会員数</p><p className="text-2xl font-bold text-gray-900 mt-1">{loyalty.totalMembers?.toLocaleString() ?? '—'}</p><p className="text-xs text-gray-400 mt-1">名</p></div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">総会員数</p><p className="text-xl sm:text-2xl font-bold text-ink mt-1">{loyalty.totalMembers?.toLocaleString() ?? '—'}</p><p className="text-xs text-gray-400 mt-1">名</p></div>
           <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">付与ポイント (今月)</p><p className="text-2xl font-bold text-green-600 mt-1">{loyalty.thisMonthAwarded?.toLocaleString() ?? '—'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p><p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthAwarded?.toLocaleString() ?? '—'} pt</p></div>
           <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">利用ポイント (今月)</p><p className="text-2xl font-bold text-red-600 mt-1">{loyalty.thisMonthRedeemed?.toLocaleString() ?? '—'}<span className="text-sm font-normal text-gray-400 ml-1">pt</span></p><p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthRedeemed?.toLocaleString() ?? '—'} pt</p></div>
           <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">新規会員 (今月)</p><p className="text-2xl font-bold text-blue-600 mt-1">{loyalty.thisMonthNewMembers?.toLocaleString() ?? '—'}<span className="text-sm font-normal text-gray-400 ml-1">名</span></p><p className="text-xs text-gray-400 mt-1">先月: {loyalty.lastMonthNewMembers?.toLocaleString() ?? '—'} 名</p></div>
@@ -272,8 +272,8 @@ export default function DashboardPage() {
 
       <CollapsibleSection title={<><span>🌾</span><span>FERMENT メール</span></>} subtitle="過去30日" detailHref="/email/analytics" detailLabel="分析詳細">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">統合顧客数</p><p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalCustomers?.toLocaleString() ?? '—'}</p><p className="text-xs text-gray-400 mt-1">メール購読: {ferment.emailSubscribers?.toLocaleString() ?? '—'}人</p></div>
-          <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">送信数 (30日)</p><p className="text-2xl font-bold text-gray-900 mt-1">{ferment.totalSent30d?.toLocaleString() ?? '—'}</p><p className="text-xs text-gray-400 mt-1">開封率: {ferment.totalSent30d && ferment.totalSent30d > 0 ? ((ferment.totalOpened30d ?? 0) / ferment.totalSent30d * 100).toFixed(1) + '%' : '—'}</p></div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">統合顧客数</p><p className="text-xl sm:text-2xl font-bold text-ink mt-1">{ferment.totalCustomers?.toLocaleString() ?? '—'}</p><p className="text-xs text-gray-400 mt-1">メール購読: {ferment.emailSubscribers?.toLocaleString() ?? '—'}人</p></div>
+          <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">送信数 (30日)</p><p className="text-xl sm:text-2xl font-bold text-ink mt-1">{ferment.totalSent30d?.toLocaleString() ?? '—'}</p><p className="text-xs text-gray-400 mt-1">開封率: {ferment.totalSent30d && ferment.totalSent30d > 0 ? ((ferment.totalOpened30d ?? 0) / ferment.totalSent30d * 100).toFixed(1) + '%' : '—'}</p></div>
           <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">帰属売上 (30日)</p><p className="text-2xl font-bold text-green-600 mt-1">¥{(ferment.attributedRevenue30d ?? 0).toLocaleString()}</p><p className="text-xs text-gray-400 mt-1">メール経由</p></div>
           <div className="bg-white rounded-lg border border-gray-200 p-4"><p className="text-xs text-gray-500">高購入意欲</p><p className="text-2xl font-bold text-purple-600 mt-1">{ferment.highIntent?.toLocaleString() ?? '—'}</p><p className="text-xs text-gray-400 mt-1">30日内 50%以上</p></div>
         </div>
@@ -310,7 +310,7 @@ export default function DashboardPage() {
 
       {/* クイックアクション（非表示: 河原さん要望でUIから外す。コードは残し、false を true に戻せば復活） */}
       {false && (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-surface rounded-card shadow-card border border-line p-6">
         <h2 className="text-sm font-semibold text-gray-800 mb-4">クイックアクション</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {[{ href: '/customers', label: 'LINE顧客', desc: '顧客プロフィール・購入履歴・タグ', color: '#06C755' }, { href: '/scenarios', label: 'シナリオ配信', desc: '自動配信シナリオの作成・編集', color: '#3B82F6' }, { href: '/broadcasts', label: '一斉配信', desc: 'メッセージの一斉送信・予約', color: '#8B5CF6' }, { href: '/chats', label: 'チャット', desc: 'オペレーターチャット管理', color: '#06C755' }, { href: '/health', label: 'BAN検知', desc: 'アカウント健康度ダッシュボード', color: '#EF4444' }].map((item) => (

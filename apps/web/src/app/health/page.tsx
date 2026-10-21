@@ -201,7 +201,7 @@ export default function HealthPage() {
                       <div className="flex items-center gap-3">
                         <div
                           className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-sm"
-                          style={{ backgroundColor: '#06C755' }}
+                          style={{ backgroundColor: 'var(--color-brand-500)' }}
                         >
                           L
                         </div>
@@ -321,7 +321,7 @@ export default function HealthPage() {
                     type="submit"
                     disabled={migrating || !migrateToId}
                     className="px-4 py-2 rounded-lg text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    style={{ backgroundColor: '#06C755' }}
+                    style={{ backgroundColor: 'var(--color-brand-500)' }}
                   >
                     {migrating ? '移行中...' : '移行を開始'}
                   </button>

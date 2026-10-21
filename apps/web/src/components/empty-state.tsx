@@ -34,7 +34,7 @@ export default function EmptyState({
       <a
         href={actionHref}
         className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white shadow-sm transition-colors"
-        style={{ backgroundColor: '#06C755' }}
+        style={{ backgroundColor: 'var(--color-brand-500)' }}
       >
         {children}
       </a>
@@ -42,7 +42,7 @@ export default function EmptyState({
       <button
         onClick={onAction}
         className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white shadow-sm transition-colors"
-        style={{ backgroundColor: '#06C755' }}
+        style={{ backgroundColor: 'var(--color-brand-500)' }}
       >
         {children}
       </button>

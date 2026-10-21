@@ -469,7 +469,7 @@ export default function ShopifyBiTopPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">📊 売上分析（Shopify BI）</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-ink">📊 売上分析（Shopify BI）</h1>
             <p className="text-sm text-gray-500 mt-1">CRM活動 × Shopify購入 のアトリビューション。月次の経営判断起点。</p>
           </div>
           <div className="flex items-center gap-2">

@@ -340,7 +340,7 @@ function KpiCard({
   return (
     <div className={`p-4 rounded-lg border ${accentClass}`}>
       <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className="text-2xl font-bold text-gray-900">
+      <p className="text-xl sm:text-2xl font-bold text-ink">
         {value}
         {suffix && <span className="text-sm font-normal text-gray-500 ml-1">{suffix}</span>}
       </p>
@@ -350,7 +350,7 @@ function KpiCard({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 mb-4">
+    <div className="bg-surface rounded-card shadow-card border border-line p-5 mb-4">
       <h2 className="text-base font-bold text-gray-900 mb-3">{title}</h2>
       {children}
     </div>

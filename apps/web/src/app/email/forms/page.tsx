@@ -248,7 +248,7 @@ export default function FormsPage() {
         <>
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">フォーム</h1>
+              <h1 className="text-xl sm:text-2xl font-bold text-ink">フォーム</h1>
               <p className="text-sm text-gray-500 mt-1">サイト訪問者をメールリストに取り込むポップアップ・埋め込みフォーム</p>
             </div>
             <button
@@ -425,7 +425,7 @@ export default function FormsPage() {
       {tab === 'submissions' && (
         <>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-gray-900">回答一覧</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-ink">回答一覧</h1>
             <p className="text-sm text-gray-500 mt-1">LINE CRM フォームの回答データ</p>
           </div>
 

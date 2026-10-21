@@ -65,14 +65,14 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
 
   if (friends.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+      <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
         <p className="text-gray-500">友だちが見つかりません</p>
       </div>
     )
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
       {error && (
         <div className="px-4 py-3 bg-red-50 border-b border-red-100 text-red-700 text-sm">
           {error}
@@ -219,7 +219,7 @@ export default function FriendTable({ friends, allTags, onRefresh }: FriendTable
                                 onClick={() => handleAddTag(friend.id)}
                                 disabled={!selectedTagId || loading}
                                 className="px-3 py-1 text-xs font-medium rounded-md text-white disabled:opacity-50 transition-opacity"
-                                style={{ backgroundColor: '#06C755' }}
+                                style={{ backgroundColor: 'var(--color-brand-500)' }}
                               >
                                 追加
                               </button>

@@ -168,7 +168,7 @@ export default function AffiliateProgramPage() {
         </div>
         <div className="bg-white rounded-xl p-5 border border-gray-100">
           <p className="text-sm text-gray-500">売上</p>
-          <p className="text-2xl font-bold text-gray-900 mt-2">{fmtYen(totals.revenue)}</p>
+          <p className="text-xl sm:text-2xl font-bold text-ink mt-2">{fmtYen(totals.revenue)}</p>
         </div>
         <div className="bg-white rounded-xl p-5 border border-gray-100">
           <p className="text-sm text-gray-500">未承認報酬</p>

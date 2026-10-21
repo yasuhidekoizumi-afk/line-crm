@@ -231,7 +231,7 @@ export default function EmergencyPage() {
       </div>
 
       {/* Current status section */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-surface rounded-card shadow-card border border-line p-6">
         <h2 className="text-sm font-semibold text-gray-800 mb-3">現在のステータス</h2>
         <div className="space-y-2">
           {actions.map((action) => (

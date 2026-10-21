@@ -107,11 +107,11 @@ export default function Analytics() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs font-semibold text-gray-500 mb-2">総配信数</p>
-          <p className="text-2xl font-bold text-gray-900">{campaigns.length}</p>
+          <p className="text-xl sm:text-2xl font-bold text-ink">{campaigns.length}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs font-semibold text-gray-500 mb-2">測定済み</p>
-          <p className="text-2xl font-bold text-gray-900">{campaigns.filter((c) => c.measured_at).length}</p>
+          <p className="text-xl sm:text-2xl font-bold text-ink">{campaigns.filter((c) => c.measured_at).length}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs font-semibold text-gray-500 mb-2">平均リフト率</p>

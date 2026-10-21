@@ -166,7 +166,7 @@ export default function WebhooksPage() {
           <button
             onClick={() => setShowCreate(!showCreate)}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             {showCreate ? 'キャンセル' : '+ 新規Webhook'}
           </button>
@@ -232,7 +232,7 @@ export default function WebhooksPage() {
           <button
             type="submit"
             className="mt-4 px-4 py-2 rounded-lg text-white text-sm font-medium"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             作成
           </button>
@@ -285,7 +285,7 @@ export default function WebhooksPage() {
           <button
             type="submit"
             className="mt-4 px-4 py-2 rounded-lg text-white text-sm font-medium"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             作成
           </button>
@@ -294,7 +294,7 @@ export default function WebhooksPage() {
 
       {/* Loading */}
       {loading ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="px-4 py-4 border-b border-gray-100 flex items-center gap-4 animate-pulse">
               <div className="flex-1 space-y-2">
@@ -309,11 +309,11 @@ export default function WebhooksPage() {
       ) : tab === 'incoming' ? (
         /* Incoming table */
         incoming.length === 0 && !showCreate ? (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+          <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
             <p className="text-gray-500">受信Webhookがありません。「新規Webhook」から作成してください。</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
               <thead>
@@ -379,11 +379,11 @@ export default function WebhooksPage() {
       ) : (
         /* Outgoing table */
         outgoing.length === 0 && !showCreate ? (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+          <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
             <p className="text-gray-500">送信Webhookがありません。「新規Webhook」から作成してください。</p>
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
               <thead>

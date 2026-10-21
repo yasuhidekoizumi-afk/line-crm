@@ -139,7 +139,7 @@ export default function ScoringPage() {
           <button
             onClick={() => setShowCreate(true)}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + 新規ルール
           </button>
@@ -151,7 +151,7 @@ export default function ScoringPage() {
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">ルール総数</p>
-            <p className="text-2xl font-bold text-gray-900">{totalRules}</p>
+            <p className="text-xl sm:text-2xl font-bold text-ink">{totalRules}</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500">有効なルール</p>
@@ -169,7 +169,7 @@ export default function ScoringPage() {
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">新規スコアリングルールを作成</h2>
           <div className="space-y-4 max-w-lg">
             <div>
@@ -210,7 +210,7 @@ export default function ScoringPage() {
                 onClick={handleCreate}
                 disabled={saving}
                 className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ backgroundColor: '#06C755' }}
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
               >
                 {saving ? '作成中...' : '作成'}
               </button>

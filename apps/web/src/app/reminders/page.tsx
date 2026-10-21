@@ -265,7 +265,7 @@ export default function RemindersPage() {
           <button
             onClick={() => setShowCreate(true)}
             className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + 新規リマインダー
           </button>
@@ -281,7 +281,7 @@ export default function RemindersPage() {
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">新規リマインダーを作成</h2>
           <div className="space-y-4 max-w-lg">
             <div>
@@ -312,7 +312,7 @@ export default function RemindersPage() {
                 onClick={handleCreate}
                 disabled={saving}
                 className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ backgroundColor: '#06C755' }}
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
               >
                 {saving ? '作成中...' : '作成'}
               </button>
@@ -342,7 +342,7 @@ export default function RemindersPage() {
           ))}
         </div>
       ) : reminders.length === 0 && !showCreate ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+        <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
           <p className="text-gray-500">リマインダーがありません。「新規リマインダー」から作成してください。</p>
         </div>
       ) : (
@@ -353,7 +353,7 @@ export default function RemindersPage() {
             return (
               <div
                 key={reminder.id}
-                className={`bg-white rounded-lg shadow-sm border border-gray-200 transition-all ${isExpanded ? 'md:col-span-2 xl:col-span-3' : ''}`}
+                className={`bg-surface rounded-card shadow-card border border-line transition-all ${isExpanded ? 'md:col-span-2 xl:col-span-3' : ''}`}
               >
                 {/* Card header */}
                 <div
@@ -452,7 +452,7 @@ export default function RemindersPage() {
                           <button
                             onClick={() => { setShowStepForm(true); setStepFormError('') }}
                             className="px-3 py-1 min-h-[44px] text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90"
-                            style={{ backgroundColor: '#06C755' }}
+                            style={{ backgroundColor: 'var(--color-brand-500)' }}
                           >
                             + ステップ追加
                           </button>
@@ -542,7 +542,7 @@ export default function RemindersPage() {
                                   onClick={handleAddStep}
                                   disabled={stepSaving}
                                   className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                                  style={{ backgroundColor: '#06C755' }}
+                                  style={{ backgroundColor: 'var(--color-brand-500)' }}
                                 >
                                   {stepSaving ? '追加中...' : '追加'}
                                 </button>

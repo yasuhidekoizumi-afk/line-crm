@@ -261,7 +261,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
       )}
 
       {/* Scenario Info */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+      <div className="bg-surface rounded-card shadow-card border border-line p-6 mb-6">
         {editing ? (
           <div className="space-y-4 max-w-lg">
             <div>
@@ -309,7 +309,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                 onClick={handleSaveScenario}
                 disabled={saving}
                 className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ backgroundColor: '#06C755' }}
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
               >
                 {saving ? '保存中...' : '保存'}
               </button>
@@ -362,13 +362,13 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
       </div>
 
       {/* Steps */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-surface rounded-card shadow-card border border-line p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-gray-800">ステップ一覧</h3>
           <button
             onClick={openAddStep}
             className="px-3 py-1.5 min-h-[44px] text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + ステップ追加
           </button>
@@ -486,7 +486,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                   onClick={handleSaveStep}
                   disabled={stepSaving}
                   className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                  style={{ backgroundColor: '#06C755' }}
+                  style={{ backgroundColor: 'var(--color-brand-500)' }}
                 >
                   {stepSaving ? '保存中...' : editingStepId ? '更新' : '追加'}
                 </button>
@@ -520,7 +520,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
                       <div className="flex items-center gap-3 mb-2">
                         <span
                           className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold text-white shrink-0"
-                          style={{ backgroundColor: '#06C755' }}
+                          style={{ backgroundColor: 'var(--color-brand-500)' }}
                         >
                           {step.stepOrder}
                         </span>

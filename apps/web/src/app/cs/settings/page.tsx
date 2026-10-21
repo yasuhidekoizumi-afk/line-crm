@@ -97,7 +97,7 @@ export default function CsSettingsPage() {
       )}
 
       {status && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-4">
+        <div className="bg-surface rounded-card shadow-card border border-line p-6 mb-4">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
             <h2 className="text-lg font-bold text-gray-900">🛍️ 楽天 RMS WEB SERVICE 連携</h2>
             {statusInfo && (

@@ -75,7 +75,7 @@ export default function ReviewsPage() {
     <div className="max-w-6xl mx-auto py-8 px-4">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">レビュー管理</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-ink">レビュー管理</h1>
           <p className="text-sm text-gray-500 mt-1">お客様から寄せられたレビューの確認・公開設定</p>
         </div>
         <button

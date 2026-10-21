@@ -97,7 +97,7 @@ export default function AccountsPage() {
           <button
             onClick={() => setShowCreate(!showCreate)}
             className="px-4 py-2 rounded-lg text-white text-sm font-medium"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             {showCreate ? 'キャンセル' : '+ アカウント追加'}
           </button>
@@ -157,7 +157,7 @@ export default function AccountsPage() {
           <button
             type="submit"
             className="mt-4 px-4 py-2 rounded-lg text-white text-sm font-medium"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             登録
           </button>

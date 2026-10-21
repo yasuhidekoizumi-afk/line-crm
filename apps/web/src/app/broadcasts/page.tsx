@@ -990,7 +990,7 @@ function BroadcastsPageInner() {
           ))}
         </div>
       ) : displayedBroadcasts.length === 0 && !showCreate ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+        <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
           <p className="text-gray-500">
             {broadcasts.length === 0
               ? '配信がありません。「新規配信」から作成してください。'
@@ -1141,7 +1141,7 @@ function BroadcastsPageInner() {
                             onClick={() => handleSend(broadcast.id)}
                             disabled={isSending}
                             className="px-3 py-1 min-h-[44px] text-xs font-medium text-white rounded-md disabled:opacity-50 transition-opacity"
-                            style={{ backgroundColor: '#06C755' }}
+                            style={{ backgroundColor: 'var(--color-brand-500)' }}
                           >
                             {isSending ? '送信中...' : '今すぐ送信'}
                           </button>

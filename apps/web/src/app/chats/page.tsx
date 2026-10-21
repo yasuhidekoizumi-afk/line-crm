@@ -145,7 +145,7 @@ export default function ChatsPage() {
   return (<div>
     {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
     <div className="flex gap-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-180px)]">
-      <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
+      <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-surface rounded-card shadow-card border border-line flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
         {/* 検索・並び替え（LINE公式アカウントの一覧に近づける） */}
         <div className="px-3 py-2 border-b border-gray-200 bg-white flex items-center gap-2">
           <TextInput type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="名前・タグ・メールで検索" aria-label="チャットを検索" className="flex-1 min-w-0 text-xs py-1.5" />
@@ -189,7 +189,7 @@ export default function ChatsPage() {
         </div></div>
 
       <div className={`flex-1 flex overflow-hidden ${selectedChatId ? 'flex' : 'hidden lg:flex'}`}>
-        <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden flex">
+        <div className="flex-1 bg-surface rounded-card shadow-card border border-line flex-col overflow-hidden flex">
           {!selectedChatId ? (<div className="flex-1 flex items-center justify-center"><EmptyState title="チャットを選択してください" description="左の一覧から会話を選ぶと、やりとりが表示されます。" /></div>)
           : detailLoading ? (<div className="flex-1 flex items-center justify-center"><p className="text-gray-400 text-sm">読み込み中...</p></div>)
           : chatDetail ? (<>
@@ -230,7 +230,7 @@ export default function ChatsPage() {
               </div>
               <div className="px-3 py-2 flex items-end gap-2">
                 <textarea ref={textareaRef} value={messageContent} onChange={handleTextareaChange} onKeyDown={handleKeyDown} placeholder="メッセージを入力... (Shift+Enterで改行)" rows={1} className="flex-1 text-sm border border-gray-300 rounded-2xl px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500 focus:bg-white resize-none min-h-[42px] max-h-[160px] leading-relaxed" />
-                <button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity mb-0.5" style={{ backgroundColor: '#06C755' }}>
+                <button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity mb-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
                   <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
               </div>

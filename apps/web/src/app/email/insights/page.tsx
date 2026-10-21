@@ -35,7 +35,7 @@ export default function InsightsPage() {
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">顧客インサイト</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-ink">顧客インサイト</h1>
         <p className="text-sm text-gray-500 mt-1">予測 CLV・購入確率・最適配信時刻（毎日0時に自動再計算）</p>
       </div>
 

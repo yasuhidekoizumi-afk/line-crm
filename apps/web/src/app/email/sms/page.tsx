@@ -86,7 +86,7 @@ export default function SMSPage() {
     <div className="max-w-5xl mx-auto py-8 px-4">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">SMS 配信</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-ink">SMS 配信</h1>
           <p className="text-sm text-gray-500 mt-1">セグメントへの一斉SMS送信（Twilio経由、約¥10/通）</p>
         </div>
         <button

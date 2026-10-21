@@ -241,7 +241,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+    <div className="bg-surface rounded-card shadow-card border border-line p-6 mb-6">
       <h2 className="text-sm font-semibold text-gray-800 mb-5">{editId ? '配信を編集' : '新規配信を作成'}</h2>
 
       {/* プレビュー枠を右に並べる関係で、メッセージ編集部だけは広めに。他のフィールドは max-w-lg。 */}
@@ -544,7 +544,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             onClick={handleSave}
             disabled={saving}
             className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             {saving ? '処理中...' : editId
             ? (form.sendMode === 'now' ? '送信する' : '変更を保存')

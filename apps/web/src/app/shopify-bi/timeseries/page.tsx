@@ -131,7 +131,7 @@ export default function TimeseriesPage() {
           <Link href="/shopify-bi" className="text-sm text-indigo-600 hover:text-indigo-800">
             ← 売上分析 TOP
           </Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">📅 時系列分析</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-ink mt-1">📅 時系列分析</h1>
           <p className="text-sm text-gray-500">
             日次 / 週次 / 月次 の売上推移と前期間比較
           </p>

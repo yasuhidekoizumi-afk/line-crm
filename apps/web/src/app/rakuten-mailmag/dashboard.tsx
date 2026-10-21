@@ -53,17 +53,17 @@ export default function Dashboard({ data, events }: { data: DashboardData; event
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs font-semibold text-gray-500 mb-2">過去30日 売上</p>
-          <p className="text-2xl font-bold text-gray-900">{fmtYen(kpi.totalRevenue)}</p>
+          <p className="text-xl sm:text-2xl font-bold text-ink">{fmtYen(kpi.totalRevenue)}</p>
           <p className="text-xs text-gray-400 mt-1">{kpi.period.start} 〜 {kpi.period.end}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs font-semibold text-gray-500 mb-2">過去30日 受注数</p>
-          <p className="text-2xl font-bold text-gray-900">{kpi.totalOrders.toLocaleString()}</p>
+          <p className="text-xl sm:text-2xl font-bold text-ink">{kpi.totalOrders.toLocaleString()}</p>
           <p className="text-xs text-gray-400 mt-1">1日平均 {(kpi.totalOrders / 30).toFixed(0)}件</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs font-semibold text-gray-500 mb-2">平均単価</p>
-          <p className="text-2xl font-bold text-gray-900">¥{kpi.avgOrderValue.toLocaleString()}</p>
+          <p className="text-xl sm:text-2xl font-bold text-ink">¥{kpi.avgOrderValue.toLocaleString()}</p>
           <p className="text-xs text-gray-400 mt-1">平常日平均 {fmtYen(baseline.avgDailyRevenue)}/日</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">

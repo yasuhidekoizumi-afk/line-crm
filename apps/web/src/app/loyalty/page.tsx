@@ -214,7 +214,7 @@ function DetailModal({ point, onClose, onAdjusted }: {
             </div>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-2xl font-bold text-gray-900">{total.toLocaleString('ja-JP')}</p>
+            <p className="text-xl sm:text-2xl font-bold text-ink">{total.toLocaleString('ja-JP')}</p>
             <p className="text-xs text-gray-400">pt</p>
             {point.limited_balance > 0 && (
               <p className="text-[11px] text-gray-400 mt-0.5">
@@ -250,7 +250,7 @@ function DetailModal({ point, onClose, onAdjusted }: {
               {adjustSuccess && <p className="text-xs text-green-700">{adjustSuccess}</p>}
               <button type="submit" disabled={adjustLoading}
                 className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity hover:opacity-90"
-                style={{ backgroundColor: '#06C755' }}>
+                style={{ backgroundColor: 'var(--color-brand-500)' }}>
                 {adjustLoading ? '調整中...' : '調整する'}
               </button>
             </form>
@@ -343,7 +343,7 @@ function ActivityTab() {
         <span className="text-sm text-gray-500">{loading ? '読み込み中...' : `${total.toLocaleString('ja-JP')} 件`}</span>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
@@ -465,7 +465,7 @@ function MembersTab({ onOpenDetail }: { onOpenDetail: (p: LoyaltyPoint) => void 
             placeholder="名前で検索..."
             className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
           <button type="submit" className="px-3 py-2 text-sm font-medium text-white rounded-lg hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}>検索</button>
+            style={{ backgroundColor: 'var(--color-brand-500)' }}>検索</button>
           {search && (
             <button type="button" onClick={() => { setSearch(''); setSearchInput('') }}
               className="px-3 py-2 text-sm text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50">
@@ -486,7 +486,7 @@ function MembersTab({ onOpenDetail }: { onOpenDetail: (p: LoyaltyPoint) => void 
       {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
 
       {loading ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="px-4 py-4 border-b border-gray-100 flex items-center gap-4 animate-pulse">
               <div className="w-9 h-9 rounded-full bg-gray-200 shrink-0" />
@@ -500,11 +500,11 @@ function MembersTab({ onOpenDetail }: { onOpenDetail: (p: LoyaltyPoint) => void 
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+        <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
           <p className="text-gray-400 text-sm">該当する会員がいません</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -739,7 +739,7 @@ function SettingsPanel() {
                       onClick={() => handleSave(s.key)}
                       disabled={saving[s.key]}
                       className="px-3 py-1.5 text-xs font-medium text-white rounded-lg disabled:opacity-50"
-                      style={{ backgroundColor: '#06C755' }}
+                      style={{ backgroundColor: 'var(--color-brand-500)' }}
                     >
                       {saving[s.key] ? '保存中...' : '保存'}
                     </button>
@@ -890,7 +890,7 @@ export default function LoyaltyPage() {
           {stats && (
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <p className="text-xs text-gray-500 mb-2">会員数・ランク内訳</p>
-              <p className="text-2xl font-bold text-gray-900 mb-2">{stats.total.toLocaleString('ja-JP')} 名</p>
+              <p className="text-xl sm:text-2xl font-bold text-ink mb-2">{stats.total.toLocaleString('ja-JP')} 名</p>
               <div className="space-y-1">
                 {RANKS.slice().reverse().map((rank) => (
                   <div key={rank} className="flex items-center justify-between">

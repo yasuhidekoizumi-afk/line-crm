@@ -19,7 +19,7 @@ interface ScenarioListProps {
 export default function ScenarioList({ scenarios, onToggleActive, onDelete, loading }: ScenarioListProps) {
   if (scenarios.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+      <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
         <p className="text-gray-500">シナリオがありません。新しいシナリオを作成してください。</p>
       </div>
     )
@@ -28,7 +28,7 @@ export default function ScenarioList({ scenarios, onToggleActive, onDelete, load
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       {scenarios.map((scenario) => (
-        <div key={scenario.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 flex flex-col gap-3 hover:shadow-md transition-shadow">
+        <div key={scenario.id} className="bg-surface rounded-card shadow-card border border-line p-5 flex flex-col gap-3 hover:shadow-md transition-shadow">
           {/* Header */}
           <div className="flex items-start justify-between gap-2">
             <Link

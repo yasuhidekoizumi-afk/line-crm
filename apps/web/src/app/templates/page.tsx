@@ -214,7 +214,7 @@ export default function TemplatesPage() {
           <button
             onClick={() => { setEditingId(null); setForm({ name: '', category: '', messageType: 'text', messageContent: '', blocks: [emptyTextBlock()] }); setFormError(''); setShowCreate(true) }}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + 新規テンプレート
           </button>
@@ -261,7 +261,7 @@ export default function TemplatesPage() {
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">
             {editingId ? 'テンプレートを編集' : '新規テンプレートを作成'}
           </h2>
@@ -310,7 +310,7 @@ export default function TemplatesPage() {
                 onClick={handleSave}
                 disabled={saving}
                 className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ backgroundColor: '#06C755' }}
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
               >
                 {saving ? '保存中...' : editingId ? '保存' : '作成'}
               </button>
@@ -327,7 +327,7 @@ export default function TemplatesPage() {
 
       {/* Loading skeleton */}
       {loading ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="px-4 py-4 border-b border-gray-100 flex items-center gap-4 animate-pulse">
               <div className="flex-1 space-y-2">
@@ -340,11 +340,11 @@ export default function TemplatesPage() {
           ))}
         </div>
       ) : templates.length === 0 && !showCreate ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+        <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
           <p className="text-gray-500">テンプレートがありません。「新規テンプレート」から作成してください。</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
             <thead>

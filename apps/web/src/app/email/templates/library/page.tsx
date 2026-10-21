@@ -59,7 +59,7 @@ export default function TemplateLibraryPage() {
           <button onClick={() => router.push('/email/templates')} className="text-sm text-gray-500 hover:text-gray-700">
             ← テンプレ一覧に戻る
           </button>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">テンプレートライブラリ</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-ink mt-1">テンプレートライブラリ</h1>
           <p className="text-sm text-gray-500 mt-1">用意済みのテンプレから選んで、すぐに編集開始</p>
         </div>
       </div>

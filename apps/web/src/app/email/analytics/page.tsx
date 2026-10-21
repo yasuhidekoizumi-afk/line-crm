@@ -60,7 +60,7 @@ export default function AnalyticsPage() {
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">分析ダッシュボード</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-ink">分析ダッシュボード</h1>
         <p className="text-sm text-gray-500 mt-1">コホート分析・ファネル分析・収益貢献</p>
       </div>
 

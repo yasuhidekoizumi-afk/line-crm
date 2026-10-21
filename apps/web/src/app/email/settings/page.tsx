@@ -77,7 +77,7 @@ export default function SettingsPage() {
   return (
     <div className="max-w-5xl mx-auto py-8 px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">FERMENT 設定</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-ink">FERMENT 設定</h1>
         <p className="text-sm text-gray-500 mt-1">ブランドキット・データ保持期間・エクスポート</p>
       </div>
 

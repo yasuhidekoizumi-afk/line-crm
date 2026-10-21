@@ -1115,7 +1115,7 @@ export default function RichMenusPage() {
           <button
             onClick={openCreate}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + 新規作成
           </button>
@@ -1171,7 +1171,7 @@ export default function RichMenusPage() {
                 setShowAliasForm(true)
               }}
               className="shrink-0 px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90"
-              style={{ backgroundColor: '#06C755' }}
+              style={{ backgroundColor: 'var(--color-brand-500)' }}
             >
               + 切替先を追加
             </button>
@@ -1218,7 +1218,7 @@ export default function RichMenusPage() {
                   onClick={handleCreateAlias}
                   disabled={aliasSaving}
                   className="px-3 py-1.5 text-xs font-medium text-white rounded-md disabled:opacity-50"
-                  style={{ backgroundColor: '#06C755' }}
+                  style={{ backgroundColor: 'var(--color-brand-500)' }}
                 >
                   {aliasSaving ? '作成中...' : '作成'}
                 </button>
@@ -1320,7 +1320,7 @@ export default function RichMenusPage() {
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-800">リッチメニュー新規作成</h2>
             <button
@@ -1497,7 +1497,7 @@ export default function RichMenusPage() {
                     onClick={handleCreate}
                     disabled={saving}
                     className="flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                    style={{ backgroundColor: '#06C755' }}
+                    style={{ backgroundColor: 'var(--color-brand-500)' }}
                   >
                     {saving
                       ? (editingId ? '保存中...' : '作成中...')
@@ -1532,7 +1532,7 @@ export default function RichMenusPage() {
           ))}
         </div>
       ) : menus.length === 0 ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+        <div className="bg-surface rounded-card shadow-card border border-line p-12 text-center">
           <p className="text-gray-500">リッチメニューがまだありません。「新規作成」から追加してください。</p>
         </div>
       ) : (() => {
@@ -1573,7 +1573,7 @@ export default function RichMenusPage() {
                       onClick={() => handleSetDefault(id)}
                       disabled={isBusy || isDuplicating}
                       className="flex-1 min-w-[120px] px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
-                      style={{ backgroundColor: '#06C755' }}
+                      style={{ backgroundColor: 'var(--color-brand-500)' }}
                     >
                       デフォルトに設定
                     </button>
@@ -1582,7 +1582,7 @@ export default function RichMenusPage() {
                     onClick={() => handleEdit(menu)}
                     disabled={isBusy || isDuplicating}
                     className="px-3 py-1.5 text-xs font-medium text-white rounded-md transition-opacity hover:opacity-90 disabled:opacity-50"
-                    style={{ backgroundColor: '#06C755' }}
+                    style={{ backgroundColor: 'var(--color-brand-500)' }}
                   >
                     {isDuplicating ? '読み込み中...' : '編集'}
                   </button>

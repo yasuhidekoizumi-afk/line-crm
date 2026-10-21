@@ -29,7 +29,7 @@ export default function GlobalErrorFallback({
       <button
         onClick={reset}
         className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-colors"
-        style={{ backgroundColor: '#06C755' }}
+        style={{ backgroundColor: 'var(--color-brand-500)' }}
       >
         再試行する
       </button>

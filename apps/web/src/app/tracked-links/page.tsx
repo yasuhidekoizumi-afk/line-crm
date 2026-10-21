@@ -281,7 +281,7 @@ function TrackedLinksPageInner() {
             type="button"
             onClick={() => setShowCreate(true)}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + 新規リンク
           </button>
@@ -298,7 +298,7 @@ function TrackedLinksPageInner() {
       </div>
 
       {showCreate && (
-        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">新規計測リンク</h2>
           {createError && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{createError}</div>}
           <div className="grid gap-4 md:grid-cols-2">
@@ -327,7 +327,7 @@ function TrackedLinksPageInner() {
               onClick={handleCreate}
               disabled={creating}
               className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
-              style={{ backgroundColor: '#06C755' }}
+              style={{ backgroundColor: 'var(--color-brand-500)' }}
             >
               {creating ? '作成中...' : '作成'}
             </button>
@@ -343,7 +343,7 @@ function TrackedLinksPageInner() {
       )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           {loading ? (
             <div className="p-8 text-sm text-gray-500">読み込み中...</div>
           ) : links.length === 0 ? (
@@ -413,7 +413,7 @@ function TrackedLinksPageInner() {
           )}
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 h-fit">
+        <div className="bg-surface rounded-card shadow-card border border-line p-5 h-fit">
           {!selectedLink && !detailLoading ? (
             <div className="text-sm text-gray-500">左の一覧からリンクを選択してください。</div>
           ) : detailLoading ? (
@@ -507,7 +507,7 @@ function TrackedLinksPageInner() {
                     onClick={handleExtractNonBuyers}
                     disabled={nonBuyerLoading}
                     className="w-full px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
-                    style={{ backgroundColor: '#06C755' }}
+                    style={{ backgroundColor: 'var(--color-brand-500)' }}
                   >
                     {nonBuyerLoading ? '抽出中...' : '未購入者を抽出'}
                   </button>
@@ -533,14 +533,14 @@ function TrackedLinksPageInner() {
                       onClick={handleTagNonBuyers}
                       disabled={tagging || !selectedTagId}
                       className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
-                      style={{ backgroundColor: '#06C755' }}
+                      style={{ backgroundColor: 'var(--color-brand-500)' }}
                     >
                       {tagging ? 'タグ付け中...' : 'タグ付け'}
                     </button>
                   </div>
 
                   {taggedTagId && (
-                    <Link href={broadcastHref} className="block w-full px-4 py-2 text-center text-sm font-medium text-white rounded-lg" style={{ backgroundColor: '#06C755' }}>
+                    <Link href={broadcastHref} className="block w-full px-4 py-2 text-center text-sm font-medium text-white rounded-lg" style={{ backgroundColor: 'var(--color-brand-500)' }}>
                       「{taggedTagName}」宛の再配信を作成
                     </Link>
                   )}

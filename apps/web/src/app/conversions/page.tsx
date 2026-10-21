@@ -97,7 +97,7 @@ export default function ConversionsPage() {
           <button
             onClick={() => setShowCreate(!showCreate)}
             className="px-4 py-2 min-h-[44px] rounded-lg text-white text-sm font-medium"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             {showCreate ? 'キャンセル' : '+ CVポイント作成'}
           </button>
@@ -145,7 +145,7 @@ export default function ConversionsPage() {
           <button
             type="submit"
             className="mt-4 px-4 py-2 min-h-[44px] rounded-lg text-white text-sm font-medium"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             作成
           </button>
@@ -163,7 +163,7 @@ export default function ConversionsPage() {
               </div>
               <div className="flex items-end gap-4">
                 <div>
-                  <p className="text-2xl font-bold text-gray-900">{r.totalCount}</p>
+                  <p className="text-xl sm:text-2xl font-bold text-ink">{r.totalCount}</p>
                   <p className="text-xs text-gray-400">CV数</p>
                 </div>
                 {r.totalValue > 0 && (

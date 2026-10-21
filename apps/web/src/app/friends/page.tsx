@@ -249,7 +249,7 @@ export default function FriendsPage() {
 
       {/* Loading skeleton */}
       {loading ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="px-4 py-4 border-b border-gray-100 flex items-center gap-4 animate-pulse">
               <div className="w-9 h-9 rounded-full bg-gray-200" />

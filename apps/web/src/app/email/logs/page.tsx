@@ -83,7 +83,7 @@ export default function EmailLogsPage() {
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">配信ログ</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-ink">配信ログ</h1>
         <p className="text-sm text-gray-500 mt-1">メール送信履歴と開封・クリックトラッキング</p>
       </div>
 
@@ -99,19 +99,19 @@ export default function EmailLogsPage() {
           <div className="grid grid-cols-3 gap-4">
             <div>
               <p className="text-xs text-gray-500">開封率</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{openRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
+              <p className="text-xl sm:text-2xl font-bold text-ink mt-1">{openRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
               <p className="text-xs text-gray-400 mt-1">業界平均 {ORYZAE_BENCHMARK.open_rate}%</p>
               <p className={`text-xs mt-1 font-medium ${openCmp.status === 'good' ? 'text-green-600' : openCmp.status === 'bad' ? 'text-red-600' : 'text-gray-500'}`}>{openCmp.label}</p>
             </div>
             <div>
               <p className="text-xs text-gray-500">クリック率</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{clickRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
+              <p className="text-xl sm:text-2xl font-bold text-ink mt-1">{clickRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
               <p className="text-xs text-gray-400 mt-1">業界平均 {ORYZAE_BENCHMARK.click_rate}%</p>
               <p className={`text-xs mt-1 font-medium ${clickCmp.status === 'good' ? 'text-green-600' : clickCmp.status === 'bad' ? 'text-red-600' : 'text-gray-500'}`}>{clickCmp.label}</p>
             </div>
             <div>
               <p className="text-xs text-gray-500">バウンス率</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{bounceRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
+              <p className="text-xl sm:text-2xl font-bold text-ink mt-1">{bounceRate.toFixed(1)}<span className="text-sm font-normal text-gray-400">%</span></p>
               <p className="text-xs text-gray-400 mt-1">業界平均 {ORYZAE_BENCHMARK.bounce_rate}%</p>
             </div>
           </div>

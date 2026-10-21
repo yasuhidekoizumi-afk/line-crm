@@ -127,7 +127,7 @@ export default function TagsPage() {
           <button
             onClick={openCreate}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
+            style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
             + 新規タグ
           </button>
@@ -147,7 +147,7 @@ export default function TagsPage() {
 
       {/* 作成・編集フォーム */}
       {showForm && (
-        <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">
             {editingId ? 'タグを編集' : '新規タグを作成'}
           </h2>
@@ -214,7 +214,7 @@ export default function TagsPage() {
                 onClick={handleSave}
                 disabled={saving}
                 className="flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
-                style={{ backgroundColor: '#06C755' }}
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
               >
                 {saving
                   ? (editingId ? '更新中...' : '作成中...')
@@ -239,7 +239,7 @@ export default function TagsPage() {
           まだタグがありません。「＋ 新規タグ」から作成してください。
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
