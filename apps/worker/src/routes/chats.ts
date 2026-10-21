@@ -66,7 +66,9 @@ chats.get('/api/chats', async (c) => {
     if (channel === 'email') { conditions.push("c.channel LIKE 'email_%'"); } else if (channel) { conditions.push('c.channel = ?'); bindings.push(channel); }
 
     if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
-    sql += ' ORDER BY c.last_message_at DESC LIMIT 100';
+    // 一覧は最新順。LIMIT 100 だと101件目以降の会話が画面から消えるため、
+    // 現実的な件数（500）まで返す。それ以上は検索・絞り込みで対応する。
+    sql += ' ORDER BY c.last_message_at DESC LIMIT 500';
 
     const stmt = bindings.length > 0 ? c.env.DB.prepare(sql).bind(...bindings) : c.env.DB.prepare(sql);
     const result = await stmt.all();
@@ -93,8 +95,9 @@ chats.get('/api/chats/:id', async (c) => {
       c.env.DB.prepare(`SELECT display_name, picture_url, line_user_id FROM friends WHERE id = ?`).bind(item.friend_id).first(),
       // 一斉配信の控えは本文を複製せず保存している（D1の容量・リクエスト上限対策）ため、
       // 配信本体から本文を補完する。個別送信・シナリオ配信は従来どおり content を持つ。
-      c.env.DB.prepare(`SELECT ml.id, ml.direction, ml.message_type, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ORDER BY ml.created_at ASC LIMIT 30`).bind(item.friend_id).all(),
-      c.env.DB.prepare(`SELECT id, direction, subject, body_text, from_address, to_address, created_at FROM cs_messages WHERE chat_id = ? ORDER BY created_at ASC LIMIT 30`).bind(item.id).all(),
+      // 直近30件を取る（ASC+LIMITだと「古い30件」になり、最新の返信が見えなくなる）。
+      c.env.DB.prepare(`SELECT ml.id, ml.direction, ml.message_type, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ORDER BY ml.created_at DESC LIMIT 30`).bind(item.friend_id).all(),
+      c.env.DB.prepare(`SELECT id, direction, subject, body_text, from_address, to_address, created_at FROM cs_messages WHERE chat_id = ? ORDER BY created_at DESC LIMIT 30`).bind(item.id).all(),
       c.env.DB.prepare(`SELECT channel, customer_email, ai_status, ai_category, ai_confidence, ai_money_flag FROM chats WHERE id = ?`).bind(item.id).first(),
     ]);
 
@@ -148,17 +151,26 @@ chats.post('/api/chats/:id/send', async (c) => {
     if (!body.content) return c.json({ success: false, error: 'content is required' }, 400);
     // 複数公式LINEでは、会話相手が登録した公式LINEのチャネルアクセストークンで送信する。
     // 環境変数の共通トークンを使うと、別アカウントとして送信されて失敗する。
+    // ただしアカウント未設定の友だち（旧データ）でも返信できるよう、LEFT JOINにして
+    // 既定トークンへフォールバックする。
     const friend = await c.env.DB.prepare(`SELECT f.*, la.channel_access_token
-      FROM friends f INNER JOIN line_accounts la ON la.id = f.line_account_id
+      FROM friends f LEFT JOIN line_accounts la ON la.id = f.line_account_id
       WHERE f.id = ?`).bind(chat.friend_id).first();
     if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
-    const token = (friend as { channel_access_token?: string | null }).channel_access_token;
+    const token = (friend as { channel_access_token?: string | null }).channel_access_token
+      || c.env.LINE_CHANNEL_ACCESS_TOKEN;
     if (!token) return c.json({ success: false, error: 'LINE送信設定が見つかりません' }, 400);
     const { LineClient } = await import('@line-crm/line-sdk');
     const lineClient = new LineClient(token);
     const messageType = body.messageType ?? 'text';
-    if (messageType === 'text') { await lineClient.pushTextMessage((friend as any).line_user_id, body.content); }
-    else if (messageType === 'flex') { const contents = JSON.parse(body.content); await lineClient.pushFlexMessage((friend as any).line_user_id, extractFlexAltText(contents), contents); }
+    try {
+      if (messageType === 'text') { await lineClient.pushTextMessage((friend as any).line_user_id, body.content); }
+      else if (messageType === 'flex') { const contents = JSON.parse(body.content); await lineClient.pushFlexMessage((friend as any).line_user_id, extractFlexAltText(contents), contents); }
+      else { return c.json({ success: false, error: `未対応のメッセージ種別です: ${messageType}` }, 400); }
+    } catch (sendErr) {
+      console.error('POST /api/chats/:id/send LINE error:', sendErr);
+      return c.json({ success: false, error: 'LINE側で送信できませんでした。時間をおいて再度お試しください。' }, 502);
+    }
     const logId = crypto.randomUUID();
     await c.env.DB.prepare(`INSERT INTO messages_log (id, friend_id, direction, message_type, content, created_at) VALUES (?, ?, 'outgoing', ?, ?, ?)`).bind(logId, (friend as any).id, messageType, body.content, jstNow()).run();
     await updateChat(c.env.DB, chatId, { status: 'in_progress', lastMessageAt: jstNow() });

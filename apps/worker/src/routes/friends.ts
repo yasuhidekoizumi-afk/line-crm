@@ -220,12 +220,13 @@ friends.get('/api/friends/:id/messages', async (c) => {
     const friendId = c.req.param('id');
     const limit = Math.min(Number(c.req.query('limit') ?? '50'), 200);
     const result = await c.env.DB
-      .prepare(`SELECT ml.id, ml.direction, ml.message_type as messageType, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at as createdAt FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ORDER BY ml.created_at ASC LIMIT ?`)
+      // 直近N件を新しい順に取り、表示用に古い順へ反転する（ASC+LIMITだと古いN件になる）。
+      .prepare(`SELECT ml.id, ml.direction, ml.message_type as messageType, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at as createdAt FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ORDER BY ml.created_at DESC LIMIT ?`)
       .bind(friendId, limit)
       .all<{ id: string; direction: string; messageType: string; content: string; createdAt: string }>();
     return c.json({
       success: true,
-      data: (result.results ?? []).map((row) => ({
+      data: (result.results ?? []).reverse().map((row) => ({
         ...row,
         content: toDisplayContent(row.messageType, row.content ?? ''),
       })),

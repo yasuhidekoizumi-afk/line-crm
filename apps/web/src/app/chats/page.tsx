@@ -19,6 +19,7 @@ export default function ChatsPage() {
   const [loading, setLoading] = useState(true); const [detailLoading, setDetailLoading] = useState(false); const [error, setError] = useState(''); const [messageContent, setMessageContent] = useState(''); const [sending, setSending] = useState(false)
   const [notes, setNotes] = useState(''); const [savingNotes, setSavingNotes] = useState(false); const [showCustomerInfo, setShowCustomerInfo] = useState(false); const [showNotes, setShowNotes] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const loadChats = useCallback(async () => {
     setLoading(true); setError('')
@@ -33,6 +34,8 @@ export default function ChatsPage() {
   useEffect(() => { loadChats() }, [loadChats])
   useEffect(() => { if (selectedAccountId && channelFilter === 'email') setChannelFilter('all') }, [selectedAccountId, channelFilter])
   useEffect(() => { if (selectedChatId) { loadChatDetail(selectedChatId) } else { setChatDetail(null); setShowCustomerInfo(false) } }, [selectedChatId, loadChatDetail])
+  // 会話を開いたとき・送信後に、最新メッセージが見える位置までスクロールする。
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ block: 'end' }) }, [chatDetail])
 
   const handleSelectChat = (chatId: string) => { setSelectedChatId(chatId); setMessageContent('') }
   const handleSendMessage = async () => { if (!selectedChatId || !messageContent.trim()) return; setSending(true); try { await api.chats.send(selectedChatId, { content: messageContent.trim() }); setMessageContent(''); loadChatDetail(selectedChatId); loadChats(); if (textareaRef.current) textareaRef.current.style.height = 'auto' } catch { setError('メッセージの送信に失敗') } finally { setSending(false) } }
@@ -77,6 +80,7 @@ export default function ChatsPage() {
             <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ backgroundColor: '#7494C0' }}>
               {(!chatDetail.messages || chatDetail.messages.length === 0) ? (<p className="text-center text-white/60 text-sm py-8">メッセージはまだありません。</p>)
               : (chatDetail.messages ?? []).map((msg: any) => { const isOut = msg.direction === 'outgoing'; let content: React.ReactNode = <span>{msg.content}</span>; if (msg.messageType === 'email') content = <div>{msg.meta?.subject && <div className="text-xs font-bold mb-1 opacity-80">✉️ {msg.meta.subject}</div>}<div className="whitespace-pre-wrap text-sm">{msg.content}</div></div>; return (<div key={msg.id} className={`flex items-end gap-2 ${isOut ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[75%] px-3 py-2 text-sm break-words whitespace-pre-wrap ${isOut ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white' : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'}`} style={isOut ? { backgroundColor: '#06C755' } : undefined}>{content}</div></div>)})}
+              <div ref={messagesEndRef} />
             </div>
             <div className="border-t border-gray-200 bg-white shrink-0">
               <div className="px-3 py-1.5 border-b border-gray-100 flex items-center gap-1">
