@@ -98,8 +98,16 @@ stripe.post('/api/integrations/stripe/webhook', async (c) => {
       }
       body = JSON.parse(rawBody) as StripeWebhookBody;
     } else {
-      // シークレット未設定（開発環境向け）
-      body = await c.req.json<StripeWebhookBody>();
+      // シークレット未設定時は署名を検証できない。旧実装は本文をそのまま信頼して
+      // 処理していたため、誰でも偽の決済イベントを送れてしまう（Fail-Open）。
+      // 設定されるまでは受け付けない。
+      console.error('[stripe-webhook] STRIPE_WEBHOOK_SECRET is not configured; rejecting request');
+      return c.json({ success: false, error: 'Webhook secret not configured' }, 503);
+    }
+
+    // 署名検証を通った本文でも、必須フィールドが欠けていれば処理しない。
+    if (!body || typeof body.id !== 'string' || typeof body.type !== 'string' || !body.data?.object) {
+      return c.json({ success: false, error: 'Invalid event payload' }, 400);
     }
 
     // 冪等性チェック

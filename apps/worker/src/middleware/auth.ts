@@ -4,6 +4,7 @@ import type { Env } from '../index.js';
 
 export async function authMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
   const path = new URL(c.req.url).pathname;
+  const method = c.req.method;
   if (
     path === '/webhook' ||
     path === '/docs' ||
@@ -17,9 +18,11 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.startsWith('/auth/') ||
     path === '/api/integrations/stripe/webhook' ||
     path.startsWith('/api/shopify/webhooks/') ||
-    path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
+    (method === 'POST' && /^\/api\/webhooks\/incoming\/[^/]+\/receive$/.test(path)) ||
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
-    path.match(/^\/api\/forms\/[^/]+$/) ||
+    // フォーム定義の「閲覧」は埋め込みフォーム(client/form.ts)が無認証で使うため公開を維持。
+    // 作成・更新・削除(PUT/PATCH/DELETE)は管理APIなので Bearer 認証を必須にする。
+    method === 'GET' && path.match(/^\/api\/forms\/[^/]+$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/redeem$/) ||
     path.match(/^\/api\/loyalty\/shopify\/[^/]+\/cancel-code$/) ||
@@ -34,9 +37,6 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/api/loyalty/campaign-award' ||
     path.match(/^\/api\/pay-forward\/[^/]+$/) ||
     path === '/api/pay-forward/claim' ||
-    path === '/api/shopify/orders/backfill' ||
-    path === '/api/shopify/auto-match/stats' ||
-    path === '/api/shopify/auto-match/run' ||
     path === '/api/rewards' ||
     path === '/api/internal/scheduled-broadcasts/run' ||
     path.match(/^\/api\/rewards\/[^/]+\/exchange$/) ||
