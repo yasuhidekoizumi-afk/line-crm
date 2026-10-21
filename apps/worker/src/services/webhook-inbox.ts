@@ -30,7 +30,7 @@ export async function insertWebhookInbox(
     webhookEventId: string | null;
     payload: string;
   },
-): Promise<string | null> {
+): Promise<{ id: string | null; duplicate: boolean }> {
   const id = crypto.randomUUID();
   try {
     await db
@@ -40,13 +40,13 @@ export async function insertWebhookInbox(
       )
       .bind(id, input.lineAccountId, input.eventType, input.webhookEventId, input.payload)
       .run();
-    return id;
+    return { id, duplicate: false };
   } catch (err) {
-    // UNIQUE(event_id)違反 = LINEの再送。二重処理しないので無視して null を返す。
+    // UNIQUE(event_id)違反 = LINEの再送。呼び出し側はこのイベントを処理しない（二重実行の防止）。
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('UNIQUE') || msg.includes('constraint')) return null;
+    if (msg.includes('UNIQUE') || msg.includes('constraint')) return { id: null, duplicate: true };
     console.error('[webhook-inbox] insert failed:', err);
-    return null;
+    return { id: null, duplicate: false };
   }
 }
 

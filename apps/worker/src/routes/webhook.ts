@@ -65,21 +65,26 @@ webhook.post('/webhook', async (c) => {
 
   const lineClient = new LineClient(channelAccessToken);
 
-  // 受信イベントを即座に永続化（消失防止）。LINE再送（同一webhookEventId）はINSERT側でUNIQUE拒否。
-  // ponytail: inbox INSERT自体の失敗は配信継続を優先して握りつぶす（ログに残る）。
+  // 受信イベントを即座に永続化（消失防止）。LINE再送（同一webhookEventId）はUNIQUE拒否。
+  // 再送と判定されたイベントは処理もしない（二重の自動返信・ポイント付与を防ぐ）。
   const inboxIds = new Map<number, string>();
+  const duplicateIndexes = new Set<number>();
   try {
     for (let i = 0; i < body.events.length; i++) {
       const event = body.events[i];
       const webhookEventId =
         (event as { webhookEventId?: string }).webhookEventId ?? null;
-      const inboxId = await insertWebhookInbox(db, {
+      const inserted = await insertWebhookInbox(db, {
         lineAccountId: matchedAccountId,
         eventType: event.type,
         webhookEventId,
         payload: JSON.stringify(event),
       });
-      if (inboxId) inboxIds.set(i, inboxId);
+      if (inserted.duplicate) { duplicateIndexes.add(i); continue; }
+      if (inserted.id) inboxIds.set(i, inserted.id);
+    }
+    if (duplicateIndexes.size > 0) {
+      console.log(`[webhook] skipped ${duplicateIndexes.size} duplicate event(s) (LINE retry)`);
     }
   } catch (err) {
     console.error('[webhook-inbox] bulk insert failed:', err);
@@ -88,6 +93,7 @@ webhook.post('/webhook', async (c) => {
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
   const processingPromise = (async () => {
     for (let i = 0; i < body.events.length; i++) {
+      if (duplicateIndexes.has(i)) continue;
       const event = body.events[i];
       const inboxId = inboxIds.get(i) ?? null;
       try {
