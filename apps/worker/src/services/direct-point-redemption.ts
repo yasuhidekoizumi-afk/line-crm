@@ -1,5 +1,11 @@
 import { getLoyaltyPoint, getLoyaltySetting, mutateLoyaltyPoint } from '@line-crm/db';
 import { getShopifyAdminToken } from '../utils/shopify-token.js';
+import {
+  RESERVATION_TTL_MINUTES,
+  expireReservationRow,
+  expireStaleReservations,
+  type ReservationRow,
+} from './point-reservation-expiry.js';
 
 export interface DirectPointRedemptionEnv {
   DB: D1Database;
@@ -17,10 +23,26 @@ type Reservation = {
   points: number;
   discount_amount: number;
   status: 'active' | 'consuming' | 'consumed' | 'cancelled' | 'failed';
+  created_at: string;
 };
 
 const now = () => new Date().toISOString();
 const SHOPIFY_API_VERSION = '2026-07';
+
+export { RESERVATION_TTL_MINUTES };
+
+/** 期限切れの予約をまとめて解除する（毎分のcronから呼ぶ）。 */
+export async function expireStaleDirectPointReservations(
+  env: DirectPointRedemptionEnv,
+  options: { limit?: number; ttlMinutes?: number } = {},
+): Promise<{ expired: number; failed: number }> {
+  return expireStaleReservations(env.DB, (code) => deleteShopifyCode(env, code), options);
+}
+
+/** 予約1件の失効（作成時の期限切れ掃除にも使う） */
+function expireReservation(env: DirectPointRedemptionEnv, reservation: Reservation): Promise<boolean> {
+  return expireReservationRow(env.DB, (code) => deleteShopifyCode(env, code), reservation as ReservationRow);
+}
 
 async function deleteShopifyCode(env: DirectPointRedemptionEnv, code: string): Promise<boolean> {
   const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
@@ -56,7 +78,7 @@ export async function getActiveDirectPointReservation(
   friendId: string,
 ): Promise<Reservation | null> {
   return db.prepare(
-    `SELECT id, friend_id, shopify_customer_id, shopify_discount_code, points, discount_amount, status
+    `SELECT id, friend_id, shopify_customer_id, shopify_discount_code, points, discount_amount, status, created_at
      FROM loyalty_redemption_reservations
      WHERE friend_id = ? AND status IN ('active', 'consuming')
      ORDER BY created_at DESC LIMIT 1`,
@@ -75,7 +97,14 @@ export async function createDirectPointReservation(
   if (total < input.points) return { ok: false, error: 'ポイント残高が不足しています' };
 
   const existing = await getActiveDirectPointReservation(env.DB, input.friendId);
-  if (existing) return { ok: false, error: 'すでにポイント利用を選択しています。取り消してから変更してください' };
+  if (existing) {
+    // 期限切れの予約はその場で解除してやり直す（cronを待たずに操作できるようにする）
+    const ageMs = Date.now() - new Date(existing.created_at).getTime();
+    const isStale = Number.isFinite(ageMs) && ageMs > RESERVATION_TTL_MINUTES * 60_000;
+    if (!isStale || !(await expireReservation(env, existing))) {
+      return { ok: false, error: 'すでにポイント利用を選択しています。取り消してから変更してください' };
+    }
+  }
 
   const shopDomain = env.SHOPIFY_SHOP_DOMAIN;
   const adminToken = await getShopifyAdminToken(env);
@@ -162,17 +191,20 @@ export async function consumeDirectPointReservationForOrder(
   env: DirectPointRedemptionEnv,
   input: { friendId: string; shopifyCustomerId: string | null; orderId: string; code: string },
 ): Promise<{ consumed: boolean; error?: string }> {
+  // 失効直後に注文が確定する競合に備え、'cancelled'（自動失効）も消費対象にする。
+  // 顧客都合の取消はコード自体を削除しているため、ここで拾うことはない。
   const reservation = await env.DB.prepare(
-    `SELECT id, friend_id, shopify_customer_id, shopify_discount_code, points, discount_amount, status
+    `SELECT id, friend_id, shopify_customer_id, shopify_discount_code, points, discount_amount, status, created_at
      FROM loyalty_redemption_reservations
-     WHERE shopify_discount_code = ? AND friend_id = ? AND status = 'active' LIMIT 1`,
+     WHERE shopify_discount_code = ? AND friend_id = ? AND status IN ('active', 'cancelled') LIMIT 1`,
   ).bind(input.code, input.friendId).first<Reservation>();
   if (!reservation) return { consumed: false };
   if (input.shopifyCustomerId && reservation.shopify_customer_id !== input.shopifyCustomerId) {
     return { consumed: false, error: 'customer_mismatch' };
   }
   const locked = await env.DB.prepare(
-    `UPDATE loyalty_redemption_reservations SET status = 'consuming', updated_at = ? WHERE id = ? AND status = 'active'`,
+    `UPDATE loyalty_redemption_reservations SET status = 'consuming', updated_at = ?
+     WHERE id = ? AND status IN ('active', 'cancelled')`,
   ).bind(now(), reservation.id).run();
   if ((locked.meta?.changes ?? 0) !== 1) return { consumed: false };
 

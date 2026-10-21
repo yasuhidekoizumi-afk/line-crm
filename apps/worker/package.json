@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/check-liff-click-redirect.mjs && node --experimental-strip-types --test tests/message-log-chunk.test.mjs && node --experimental-strip-types --test tests/message-preview.test.mjs",
+    "test": "node scripts/check-liff-click-redirect.mjs && node --experimental-strip-types --test tests/message-log-chunk.test.mjs && node --experimental-strip-types --test tests/message-preview.test.mjs && node --experimental-strip-types --test tests/point-reservation-expiry.test.mjs",
     "build:help-kb": "node scripts/build-help-kb.mjs"
   },
   "dependencies": {

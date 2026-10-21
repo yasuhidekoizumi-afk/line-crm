@@ -68,6 +68,7 @@ import { rakuten } from './routes/rakuten.js';
 import { rakutenMailmag } from './routes/rakuten-mailmag.js';
 import { checkRakutenLicenseExpiry } from './services/rakuten-license-monitor.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
+import { expireStaleDirectPointReservations } from './services/direct-point-redemption.js';
 import { expireGifts } from '@line-crm/db';
 // FERMENT: メールマーケティング拡張
 import {
@@ -517,6 +518,8 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
           .then((jobs) => Promise.all(jobs).then(() => undefined)),
       ),
       runCronJob('resume-syncing-shopify-segments', resumeSyncingShopifySegments(env)),
+      // ポイント利用予約の自動失効（2時間）。放置予約が顧客をブロックし続けるのを防ぐ。
+      runCronJob('point-reservation-expiry', expireStaleDirectPointReservations(env).then(() => undefined)),
       runCronJob('webhook-inbox-reprocess', reprocessPendingWebhookEvents(env)),
     ]);
     await finishCronExecution(env.DB, executionId);
