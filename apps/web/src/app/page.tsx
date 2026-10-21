@@ -9,6 +9,7 @@ import { ORYZAE_BENCHMARK, compareToBenchmark } from '@/lib/benchmarks'
 import AiCockpit from '@/components/dashboard/AiCockpit'
 import ShopifyKpiBar from '@/components/dashboard/ShopifyKpiBar'
 import OnboardingTour from '@/components/onboarding/onboarding-tour'
+import PageHeader from '@/components/ui/page-header'
 import { useToast } from '@/lib/toast'
 import { useInterval } from '@/lib/use-interval'
 
@@ -158,24 +159,22 @@ export default function DashboardPage() {
   return (
     <div>
       <OnboardingTour />
-      <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">ダッシュボード</h1>
-            <p className="text-sm text-gray-500 mt-1">{selectedAccount ? `${selectedAccount.displayName || selectedAccount.name} の管理画面` : 'LINE公式アカウント CRM 管理画面'}</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button onClick={loadStats} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-green-600 transition-colors" aria-label="手動更新">
+      <PageHeader
+        title="ダッシュボード"
+        description={selectedAccount ? `${selectedAccount.displayName || selectedAccount.name} の管理画面` : 'LINE公式アカウント CRM 管理画面'}
+        actions={
+          <>
+            <button onClick={loadStats} className="flex items-center gap-1.5 text-xs text-subtle hover:text-brand-600 transition-colors" aria-label="手動更新">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
               更新
             </button>
-            <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
-              <input type="checkbox" checked={autoRefresh} onChange={() => setAutoRefresh(!autoRefresh)} className="w-3 h-3 rounded border-gray-300 text-green-600 focus:ring-green-500" />
+            <label className="flex items-center gap-1.5 text-xs text-subtle cursor-pointer select-none">
+              <input type="checkbox" checked={autoRefresh} onChange={() => setAutoRefresh(!autoRefresh)} className="w-3 h-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
               自動更新
             </label>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {error && <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
 
@@ -188,10 +187,10 @@ export default function DashboardPage() {
       </div>
 
       {/* 配信可能F1・直近ブロック率（F2施策の分母と配信健全性） */}
-      <div className="mb-8 bg-white rounded-xl border border-gray-200 p-5">
+      <div className="mb-8 bg-surface border border-line rounded-card shadow-card p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg" style={{ backgroundColor: '#06C755' }}>
+            <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-brand-500">
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </span>
             <p className="text-sm font-semibold text-gray-800">配信健全性</p>
@@ -221,10 +220,10 @@ export default function DashboardPage() {
 
       {/* 当月のLINEメッセージ配信数（LINE公式アカウントと同じ数字。message/quota API） */}
       {quota && (
-        <div className="mb-8 bg-white rounded-xl border border-gray-200 p-5">
+        <div className="mb-8 bg-surface border border-line rounded-card shadow-card p-5">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg" style={{ backgroundColor: '#06C755' }}>
+              <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-brand-500">
                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
               </span>
               <p className="text-sm font-semibold text-gray-800">今月のLINEメッセージ配信数</p>

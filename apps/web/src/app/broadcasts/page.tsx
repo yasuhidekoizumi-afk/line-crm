@@ -7,7 +7,10 @@ import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast, type ApiBroadcastDetail, type EmergencyStatus } from '@/lib/api'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
 import { useAccount } from '@/contexts/account-context'
-import Header from '@/components/layout/header'
+import ConfirmDialog from '@/components/confirm-dialog'
+import PageHeader from '@/components/ui/page-header'
+import Button from '@/components/ui/button'
+import Badge from '@/components/ui/badge'
 import BroadcastForm from '@/components/broadcasts/broadcast-form'
 import CcPromptButton from '@/components/cc-prompt-button'
 
@@ -69,12 +72,12 @@ const ccPrompts = [
 
 const statusConfig: Record<
   ApiBroadcast['status'],
-  { label: string; className: string }
+  { label: string; tone: 'neutral' | 'info' | 'warn' | 'success' }
 > = {
-  draft: { label: '下書き', className: 'bg-gray-100 text-gray-600' },
-  scheduled: { label: '予約済み', className: 'bg-blue-100 text-blue-700' },
-  sending: { label: '送信中', className: 'bg-yellow-100 text-yellow-700' },
-  sent: { label: '送信完了', className: 'bg-green-100 text-green-700' },
+  draft: { label: '下書き', tone: 'neutral' },
+  scheduled: { label: '予約済み', tone: 'info' },
+  sending: { label: '送信中', tone: 'warn' },
+  sent: { label: '送信完了', tone: 'success' },
 }
 
 type BroadcastListTab = 'active' | 'sent' | 'failed' | 'test' | 'archived'
@@ -97,7 +100,7 @@ function isDuplicateSkipped(broadcast: Pick<ApiBroadcast, 'status' | 'errorSumma
 
 function getStatusInfo(broadcast: Pick<ApiBroadcast, 'status' | 'errorSummary'>) {
   if (isDuplicateSkipped(broadcast)) {
-    return { label: '重複除外', className: 'bg-amber-100 text-amber-800' }
+    return { label: '重複除外', tone: 'warn' as const }
   }
   return statusConfig[broadcast.status]
 }
@@ -516,26 +519,43 @@ function BroadcastsPageInner() {
     return () => window.clearInterval(timer)
   }, [broadcasts, load])
 
-  const handleSend = async (id: string) => {
-    if (!confirm('この配信を今すぐ送信してもよいですか？')) return
-    setSendingId(id)
-    try {
-      await api.broadcasts.send(id)
-      load()
-    } catch {
-      setError('送信に失敗しました')
-    } finally {
-      setSendingId(null)
-    }
-  }
+  // 破壊的操作はブラウザconfirmではなく共通ダイアログで確認する（docs/design-system.md）
+  const [pendingAction, setPendingAction] = useState<{ kind: 'send' | 'delete' | 'reset'; id: string } | null>(null)
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('この配信を削除してもよいですか？')) return
+  const handleSend = (id: string) => setPendingAction({ kind: 'send', id })
+
+  const handleDelete = (id: string) => setPendingAction({ kind: 'delete', id })
+
+  const runPendingAction = async () => {
+    const action = pendingAction
+    setPendingAction(null)
+    if (!action) return
+    if (action.kind === 'send') {
+      setSendingId(action.id)
+      try {
+        await api.broadcasts.send(action.id)
+        load()
+      } catch {
+        setError('送信に失敗しました')
+      } finally {
+        setSendingId(null)
+      }
+      return
+    }
+    if (action.kind === 'delete') {
+      try {
+        await api.broadcasts.delete(action.id)
+        load()
+      } catch {
+        setError('削除に失敗しました')
+      }
+      return
+    }
     try {
-      await api.broadcasts.delete(id)
+      await api.broadcasts.reset(action.id)
       load()
     } catch {
-      setError('削除に失敗しました')
+      setError('リセットに失敗しました')
     }
   }
 
@@ -563,15 +583,7 @@ function BroadcastsPageInner() {
     }
   }
 
-  const handleReset = async (id: string) => {
-    if (!confirm('「送信中」で固まっている配信をドラフトに戻しますか？\n（再送信や削除ができるようになります）')) return
-    try {
-      await api.broadcasts.reset(id)
-      load()
-    } catch {
-      setError('リセットに失敗しました')
-    }
-  }
+  const handleReset = (id: string) => setPendingAction({ kind: 'reset', id })
 
   const handleNewBroadcast = () => {
     setInitialDraft(null)
@@ -689,16 +701,10 @@ function BroadcastsPageInner() {
 
   return (
     <div>
-      <Header
+      <PageHeader
         title="LINE一斉配信"
-        action={
-          <button
-            onClick={handleNewBroadcast}
-            className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-opacity hover:opacity-90"
-            style={{ backgroundColor: '#06C755' }}
-          >
-            + 新規配信
-          </button>
+        actions={
+          <Button onClick={handleNewBroadcast}>+ 新規配信</Button>
         }
       />
 
@@ -782,9 +788,9 @@ function BroadcastsPageInner() {
           <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${getStatusInfo(selectedDetail).className}`}>
+                <Badge tone={getStatusInfo(selectedDetail).tone}>
                   {getStatusInfo(selectedDetail).label}
-                </span>
+                </Badge>
                 {selectedDetail.isTest && (
                   <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
                     テスト
@@ -971,7 +977,7 @@ function BroadcastsPageInner() {
 
       {/* Loading */}
       {loading ? (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="px-4 py-4 border-b border-gray-100 flex items-center gap-4 animate-pulse">
               <div className="flex-1 space-y-2">
@@ -992,7 +998,7 @@ function BroadcastsPageInner() {
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-card shadow-card border border-line overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
             <thead>
@@ -1045,9 +1051,9 @@ function BroadcastsPageInner() {
 
                     {/* Status */}
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusInfo.className}`}>
+                      <Badge tone={statusInfo.tone}>
                         {statusInfo.label}
-                      </span>
+                      </Badge>
                     </td>
 
                     {/* Target */}
@@ -1185,6 +1191,28 @@ function BroadcastsPageInner() {
       )}
 
       <CcPromptButton prompts={ccPrompts} />
+
+      <ConfirmDialog
+        open={pendingAction !== null}
+        title={
+          pendingAction?.kind === 'delete' ? 'この配信を削除しますか？'
+          : pendingAction?.kind === 'reset' ? '「送信中」を下書きに戻しますか？'
+          : 'この配信を送信しますか？'
+        }
+        message={
+          pendingAction?.kind === 'delete' ? '削除した配信は元に戻せません。'
+          : pendingAction?.kind === 'reset' ? '再送信や削除ができるようになります。すでに送信された分は取り消されません。'
+          : '送信すると取り消せません。対象者と本文を確認してください。'
+        }
+        confirmLabel={
+          pendingAction?.kind === 'delete' ? '削除する'
+          : pendingAction?.kind === 'reset' ? '下書きに戻す'
+          : '送信する'
+        }
+        variant={pendingAction?.kind === 'delete' ? 'danger' : pendingAction?.kind === 'reset' ? 'warning' : 'primary'}
+        onConfirm={runPendingAction}
+        onCancel={() => setPendingAction(null)}
+      />
     </div>
   )
 }

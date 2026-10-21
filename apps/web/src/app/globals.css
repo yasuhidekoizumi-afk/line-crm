@@ -1,6 +1,33 @@
 @import "tailwindcss";
 
 /* ============================================================
+ * デザイントークン（docs/design-system.md と対応）
+ * 色・角丸・影はここだけで定義し、画面側はトークン名を使う。
+ * ========================================================== */
+@theme {
+  --color-brand-50: #ecfdf3;
+  --color-brand-100: #d1fadf;
+  --color-brand-500: #06c755;
+  --color-brand-600: #05a648;
+
+  --color-wine-500: #6d2e46;
+  --color-gold-500: #b5862e;
+
+  --color-ink: #111827;
+  --color-subtle: #6b7280;
+  --color-line: #e5e7eb;
+  --color-surface: #ffffff;
+  --color-canvas: #f9fafb;
+
+  --color-danger-600: #dc2626;
+  --color-warn-500: #f59e0b;
+  --color-info-500: #3b82f6;
+
+  --radius-card: 12px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+
+/* ============================================================
  * GrapesJS（メールテンプレート ビジュアルエディタ）の見やすさ調整
  * - デフォルトの暗いキャンバス背景を明るくし、プレビューが読みやすいように
  * - モバイルプレビュー時にキャンバスを中央寄せして空白の暗部を減らす

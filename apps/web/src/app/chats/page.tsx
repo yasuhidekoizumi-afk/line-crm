@@ -6,6 +6,12 @@ import { useAccount } from '@/contexts/account-context'
 import QuickReplyTemplates from '@/components/chats/quick-reply'
 import CustomerInfoPanel from '@/components/chats/customer-info'
 import AiDraftButton from '@/components/chats/ai-draft-button'
+import Badge from '@/components/ui/badge'
+import Button from '@/components/ui/button'
+import EmptyState from '@/components/empty-state'
+import { TextInput } from '@/components/ui/field'
+
+const statusTone: Record<string, 'danger' | 'warn' | 'success'> = { unread: 'danger', in_progress: 'warn', resolved: 'success' }
 
 const statusConfig: Record<string, { label: string; className: string }> = { unread: { label: '未読', className: 'bg-red-100 text-red-700' }, in_progress: { label: '要対応', className: 'bg-yellow-100 text-yellow-700' }, resolved: { label: '対応済み', className: 'bg-green-100 text-green-700' } }
 const statusFilters = [{ key: 'all' as const, label: 'すべて' }, { key: 'unread' as const, label: '未読' }, { key: 'in_progress' as const, label: '要対応' }, { key: 'resolved' as const, label: '対応済み' }]
@@ -142,7 +148,7 @@ export default function ChatsPage() {
       <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
         {/* 検索・並び替え（LINE公式アカウントの一覧に近づける） */}
         <div className="px-3 py-2 border-b border-gray-200 bg-white flex items-center gap-2">
-          <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="名前・タグ・メールで検索" className="flex-1 min-w-0 text-xs border border-gray-300 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-green-500" />
+          <TextInput type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="名前・タグ・メールで検索" aria-label="チャットを検索" className="flex-1 min-w-0 text-xs py-1.5" />
           <select value={sortMode} onChange={(e) => setSortMode(e.target.value as 'recent' | 'unread')} className="text-xs border border-gray-300 rounded-md px-1.5 py-1.5 bg-white text-gray-600" title="並び替え">
             <option value="recent">最新順</option>
             <option value="unread">未読優先</option>
@@ -174,8 +180,8 @@ export default function ChatsPage() {
                       )}
                     </div>
                     {unread > 0
-                      ? <span className="ml-1 min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">{unread > 99 ? '99+' : unread}</span>
-                      : <span className={`ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${st.className}`}>{st.label}</span>}
+                      ? <span className="ml-1 min-w-[20px] h-5 px-1.5 rounded-full bg-danger-600 text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">{unread > 99 ? '99+' : unread}</span>
+                      : <Badge tone={statusTone[chat.status] ?? 'neutral'} className="ml-1">{st.label}</Badge>}
                   </div>
                 </button>
               )
@@ -184,20 +190,20 @@ export default function ChatsPage() {
 
       <div className={`flex-1 flex overflow-hidden ${selectedChatId ? 'flex' : 'hidden lg:flex'}`}>
         <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden flex">
-          {!selectedChatId ? (<div className="flex-1 flex items-center justify-center"><p className="text-gray-400 text-sm">チャットを選択してください</p></div>)
+          {!selectedChatId ? (<div className="flex-1 flex items-center justify-center"><EmptyState title="チャットを選択してください" description="左の一覧から会話を選ぶと、やりとりが表示されます。" /></div>)
           : detailLoading ? (<div className="flex-1 flex items-center justify-center"><p className="text-gray-400 text-sm">読み込み中...</p></div>)
           : chatDetail ? (<>
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-2 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <button onClick={() => setSelectedChatId(null)} className="lg:hidden flex-shrink-0 p-1 -ml-1 text-gray-500 hover:text-gray-700"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
                 {chatDetail.friendPictureUrl && <img src={chatDetail.friendPictureUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0" />}
-                <div className="min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{chatDetail.friendName}</p><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-0.5 ${(statusConfig[chatDetail.status] || {}).className}`}>{(statusConfig[chatDetail.status] || {}).label || chatDetail.status}</span></div>
+                <div className="min-w-0"><p className="text-sm font-medium text-gray-900 truncate">{chatDetail.friendName}</p><Badge tone={statusTone[chatDetail.status] ?? 'neutral'} className="mt-0.5">{(statusConfig[chatDetail.status] || {}).label || chatDetail.status}</Badge></div>
               </div>
               <div className="flex items-center gap-1.5">
                 <button onClick={() => setShowNotes(!showNotes)} className={`px-2.5 py-1.5 text-xs font-medium rounded-md ${showNotes ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>📝 メモ</button>
                 <button onClick={() => setShowCustomerInfo(!showCustomerInfo)} className={`px-2.5 py-1.5 text-xs font-medium rounded-md ${showCustomerInfo ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>📋 顧客情報</button>
-                {chatDetail.status !== 'in_progress' && <button onClick={() => handleStatusUpdate('in_progress')} className="px-2.5 py-1.5 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-md">要対応</button>}
-                {chatDetail.status !== 'resolved' && <button onClick={() => handleStatusUpdate('resolved')} className="px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md">対応済み</button>}
+                {chatDetail.status !== 'in_progress' && <Button size="sm" variant="secondary" onClick={() => handleStatusUpdate('in_progress')}>要対応</Button>}
+                {chatDetail.status !== 'resolved' && <Button size="sm" variant="secondary" onClick={() => handleStatusUpdate('resolved')}>対応済み</Button>}
               </div>
             </div>
             {showNotes && (
