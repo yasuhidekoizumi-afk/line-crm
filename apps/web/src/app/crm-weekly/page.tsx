@@ -17,6 +17,8 @@
 import { useEffect, useCallback, useState } from 'react'
 import { fetchApi } from '@/lib/api'
 import Header from '@/components/layout/header'
+import { confirmDialog } from '@/components/ui/confirm-provider'
+import { notifyError, notifySuccess } from '@/lib/toast'
 
 // ===== 型 =====
 interface Summary {
@@ -312,7 +314,7 @@ export default function CrmWeeklyPage() {
   // 手動入力配信を保存
   const submitManualForm = async () => {
     if (!manualForm.title.trim() || !manualForm.sentAt) {
-      alert('件名と配信日時は必須です')
+      notifyError('件名と配信日時は必須です')
       return
     }
     setManualSubmitting(true)
@@ -345,31 +347,31 @@ export default function CrmWeeklyPage() {
       closeManualForm()
       await fetchAll(appliedStart, appliedEnd)
     } catch (err: any) {
-      alert('保存に失敗しました: ' + (err?.message || ''))
+      notifySuccess('保存に失敗しました: ' + (err?.message || ''))
     } finally {
       setManualSubmitting(false)
     }
   }
 
   const deleteManual = async (id: string) => {
-    if (!confirm('この配信記録を削除しますか?')) return
+    if (!(await confirmDialog({ message: 'この配信記録を削除しますか?' }))) return
     try {
       await fetchApi(`/api/crm-weekly/manual-broadcasts/${id}`, { method: 'DELETE' })
       await fetchAll(appliedStart, appliedEnd)
     } catch (err: any) {
-      alert('削除に失敗しました: ' + (err?.message || ''))
+      notifySuccess('削除に失敗しました: ' + (err?.message || ''))
     }
   }
 
   // 初回セットアップ (テーブル作成)
   const runMigration = async () => {
-    if (!confirm('crm_manual_broadcasts テーブルを作成します。よろしいですか?')) return
+    if (!(await confirmDialog({ message: 'crm_manual_broadcasts テーブルを作成します。よろしいですか?' }))) return
     try {
       await fetchApi(`/api/crm-weekly/migrate-manual-broadcasts`, { method: 'POST' })
-      alert('テーブル作成完了。再読み込みします。')
+      notifySuccess('テーブル作成完了。再読み込みします。')
       await fetchAll(appliedStart, appliedEnd)
     } catch (err: any) {
-      alert('セットアップに失敗しました: ' + (err?.message || ''))
+      notifySuccess('セットアップに失敗しました: ' + (err?.message || ''))
     }
   }
 

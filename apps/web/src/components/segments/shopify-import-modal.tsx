@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { fermentApi, type ShopifySegmentItem } from '@/lib/ferment-api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 /**
  * Shopify の顧客セグメントを一覧表示し、ON/OFF トグルでハーネスに取り込む（ミラー）モーダル。
@@ -75,7 +76,7 @@ export default function ShopifyImportModal({
 
   const handleOff = async (s: ShopifySegmentItem) => {
     if (!s.segment_id) return
-    if (!confirm(`「${s.name}」の取り込みを解除しますか？\n（配信先の一覧からも外れます）`)) return
+    if (!(await confirmDialog({ message: `「${s.name}」の取り込みを解除しますか？\n（配信先の一覧からも外れます）` }))) return
     setBusyGid(s.gid)
     setError('')
     setNotice('')

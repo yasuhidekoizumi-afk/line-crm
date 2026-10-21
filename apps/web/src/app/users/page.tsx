@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import type { User } from '@line-crm/shared'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 const ccPrompts = [
   {
@@ -60,7 +61,7 @@ export default function UsersPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このユーザーを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'このユーザーを削除しますか？' }))) return
     await api.users.delete(id)
     load()
   }

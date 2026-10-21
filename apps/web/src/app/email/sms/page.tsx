@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchApi } from '@/lib/api'
 import { fermentApi, type Segment } from '@/lib/ferment-api'
+import { notifySuccess } from '@/lib/toast'
 
 interface ApiResult<T> { success: boolean; data?: T; error?: string }
 
@@ -66,7 +67,7 @@ export default function SMSPage() {
         body: JSON.stringify({ segment_id: form.segment_id, message: form.message }),
       })
       if (res.success) {
-        alert(`${res.data?.queued ?? 0}件 キューに追加しました`)
+        notifySuccess(`${res.data?.queued ?? 0}件 キューに追加しました`)
         setShowCompose(false)
         setForm({ segment_id: '', message: '' })
         await load()

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface LineAccountListItem {
   id: string
@@ -78,7 +79,7 @@ export default function AccountsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このLINEアカウントを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'このLINEアカウントを削除しますか？' }))) return
     await api.lineAccounts.delete(id)
     load()
   }

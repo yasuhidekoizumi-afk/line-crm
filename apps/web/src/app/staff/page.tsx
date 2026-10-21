@@ -4,6 +4,7 @@ import Header from '@/components/layout/header'
 import { api, fetchApi } from '@/lib/api'
 import type { ApiResponse } from '@line-crm/shared'
 import type { StaffMember, LineAccount } from '@line-crm/shared'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 type NewApiKey = { apiKey: string; staffId: string }
 
@@ -136,7 +137,7 @@ export default function StaffPage() {
   }
 
   const handleRegenerateKey = async (member: StaffMember) => {
-    if (!confirm(`${member.name} のAPIキーを再生成しますか？\n現在のキーは無効になります。`)) return
+    if (!(await confirmDialog({ message: `${member.name} のAPIキーを再生成しますか？\n現在のキーは無効になります。` }))) return
     try {
       const res = await fetchApi<ApiResponse<{ apiKey: string }>>(`/api/staff/${member.id}/regenerate-key`, {
         method: 'POST',
@@ -152,7 +153,7 @@ export default function StaffPage() {
   }
 
   const handleDelete = async (member: StaffMember) => {
-    if (!confirm(`${member.name} を削除しますか？\nこの操作は元に戻せません。`)) return
+    if (!(await confirmDialog({ message: `${member.name} を削除しますか？\nこの操作は元に戻せません。` }))) return
     try {
       await fetchApi<ApiResponse<null>>(`/api/staff/${member.id}`, { method: 'DELETE' })
       await loadMembers()
@@ -162,7 +163,7 @@ export default function StaffPage() {
   }
 
   const handlePromoteToOwner = async (member: StaffMember) => {
-    if (!confirm(`${member.name} をオーナーに昇格しますか？\nこの操作は元に戻せます。`)) return
+    if (!(await confirmDialog({ message: `${member.name} をオーナーに昇格しますか？\nこの操作は元に戻せます。` }))) return
     try {
       await fetchApi<ApiResponse<StaffMember>>(`/api/staff/${member.id}`, {
         method: 'PATCH',
@@ -175,7 +176,7 @@ export default function StaffPage() {
   }
 
   const handleDemoteFromOwner = async (member: StaffMember) => {
-    if (!confirm(`${member.name} を管理者に降格しますか？`)) return
+    if (!(await confirmDialog({ message: `${member.name} を管理者に降格しますか？` }))) return
     try {
       const res = await fetchApi<ApiResponse<StaffMember>>(`/api/staff/${member.id}`, {
         method: 'PATCH',

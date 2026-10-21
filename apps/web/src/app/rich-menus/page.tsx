@@ -8,6 +8,7 @@ import {
   type RichMenuAlias,
 } from '@/lib/api'
 import Header from '@/components/layout/header'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 // ─── Size & layout presets ────────────────────────────────────────────────────
 
@@ -767,13 +768,15 @@ export default function RichMenusPage() {
   }
 
   const handleDeleteAlias = async (aliasId: string) => {
-    if (!confirm(
+    if (!(await confirmDialog({ message:
       `切替先「${aliasId}」を本当に削除しますか？\n\n` +
       `⚠️ 多くの場合これは不要です。\n` +
       `「飛び先を変えたいだけ」なら、削除せずプルダウンから別メニューを選んで「保存」を押してください。\n\n` +
       `削除して別IDで作り直すと、メニュー側に仕込まれた呼び名（aliasId）とズレてタブ切替が動かなくなります。\n\n` +
-      `それでも削除しますか？`
-    )) return
+      `それでも削除しますか？`,
+      variant: 'danger',
+      confirmLabel: '削除する',
+    }))) return
     try {
       const res = await api.richMenuAliases.delete(aliasId)
       if (!res.success) setError(res.error)
@@ -1046,7 +1049,7 @@ export default function RichMenusPage() {
   }
 
   const handleClearDefault = async () => {
-    if (!confirm('デフォルトのリッチメニューを解除しますか？')) return
+    if (!(await confirmDialog({ message: 'デフォルトのリッチメニューを解除しますか？' }))) return
     setBusyMenuId('__clear__')
     try {
       const res = await api.richMenus.clearDefault()
@@ -1060,7 +1063,7 @@ export default function RichMenusPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このリッチメニューを削除しますか？\n（LINE側からも削除されます）')) return
+    if (!(await confirmDialog({ message: 'このリッチメニューを削除しますか？\n（LINE側からも削除されます）' }))) return
     setBusyMenuId(id)
     try {
       const res = await api.richMenus.delete(id)

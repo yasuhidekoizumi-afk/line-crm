@@ -10,6 +10,7 @@ import MessageBlocksEditor, {
   payloadToBlocks,
 } from '@/components/messages/message-blocks-editor'
 import MessageBlocksPreview from '@/components/messages/message-blocks-preview'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface Template {
   id: string
@@ -197,7 +198,7 @@ export default function TemplatesPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このテンプレートを削除してもよいですか？')) return
+    if (!(await confirmDialog({ message: 'このテンプレートを削除してもよいですか？' }))) return
     try {
       await api.templates.delete(id)
       load()

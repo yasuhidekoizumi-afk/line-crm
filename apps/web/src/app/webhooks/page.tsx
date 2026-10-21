@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Header from '@/components/layout/header'
 import { api } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface IncomingWebhook {
   id: string
@@ -98,7 +99,7 @@ export default function WebhooksPage() {
   }
 
   const handleDeleteIncoming = async (id: string) => {
-    if (!confirm('この受信Webhookを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'この受信Webhookを削除しますか？' }))) return
     try {
       await api.webhooks.incoming.delete(id)
       load()
@@ -108,7 +109,7 @@ export default function WebhooksPage() {
   }
 
   const handleDeleteOutgoing = async (id: string) => {
-    if (!confirm('この送信Webhookを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'この送信Webhookを削除しますか？' }))) return
     try {
       await api.webhooks.outgoing.delete(id)
       load()

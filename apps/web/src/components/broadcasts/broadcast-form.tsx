@@ -11,6 +11,7 @@ import MessageBlocksEditor, {
 } from '@/components/messages/message-blocks-editor'
 import MessageBlocksPreview from '@/components/messages/message-blocks-preview'
 import { useAccount } from '@/contexts/account-context'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface BroadcastFormProps {
   tags: Tag[]
@@ -189,9 +190,11 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     if (
       form.sendMode !== 'draft'
       && form.blocks.length > 1
-      && !window.confirm(
-        `この配信は、LINE上で${form.blocks.length}通に分かれて届きます。\nこの内容で${form.sendMode === 'now' ? '今すぐ送信' : '予約'}しますか？`,
-      )
+      && !(await confirmDialog({
+        message: `この配信は、LINE上で${form.blocks.length}通に分かれて届きます。\nこの内容で${form.sendMode === 'now' ? '今すぐ送信' : '予約'}しますか？`,
+        variant: 'primary',
+        confirmLabel: form.sendMode === 'now' ? '今すぐ送信' : '予約する',
+      }))
     ) {
       return
     }

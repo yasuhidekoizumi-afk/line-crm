@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { fetchApi } from '@/lib/api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 type CampaignStatus = 'active' | 'draft'
 type ActionType = 'rate_multiply' | 'rate_add' | 'fixed_points'
@@ -291,7 +292,7 @@ export default function CampaignsTab() {
   useEffect(() => { load() }, [load])
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このキャンペーンを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'このキャンペーンを削除しますか？' }))) return
     setDeleting(id)
     try {
       await fetchApi(`/api/loyalty/campaigns/${id}`, { method: 'DELETE' })

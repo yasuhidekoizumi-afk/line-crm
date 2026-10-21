@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface NotificationRule {
   id: string
@@ -193,7 +194,7 @@ export default function NotificationsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このルールを削除してもよいですか？')) return
+    if (!(await confirmDialog({ message: 'このルールを削除してもよいですか？' }))) return
     try {
       await api.notifications.rules.delete(id)
       loadRules()

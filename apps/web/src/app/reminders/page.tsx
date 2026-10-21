@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface EnrollStat {
   status: string
@@ -205,7 +206,7 @@ export default function RemindersPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このリマインダーを削除してもよいですか？')) return
+    if (!(await confirmDialog({ message: 'このリマインダーを削除してもよいですか？' }))) return
     try {
       await api.reminders.delete(id)
       if (expandedId === id) {
@@ -248,7 +249,7 @@ export default function RemindersPage() {
 
   const handleDeleteStep = async (stepId: string) => {
     if (!expandedId) return
-    if (!confirm('このステップを削除してもよいですか？')) return
+    if (!(await confirmDialog({ message: 'このステップを削除してもよいですか？' }))) return
     try {
       await api.reminders.deleteStep(expandedId, stepId)
       loadDetail(expandedId)

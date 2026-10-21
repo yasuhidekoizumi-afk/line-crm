@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import type { ConversionPoint } from '@line-crm/shared'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface ConversionReportItem {
   conversionPointId: string
@@ -71,7 +72,7 @@ export default function ConversionsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このCVポイントを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'このCVポイントを削除しますか？' }))) return
     await api.conversions.deletePoint(id)
     load()
   }

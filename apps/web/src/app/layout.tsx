@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import AppShell from '@/components/app-shell'
 import { ToastProvider } from '@/lib/toast'
+import { ConfirmProvider } from '@/components/ui/confirm-provider'
 
 export const metadata: Metadata = {
   title: 'LINE CRM 管理画面',
@@ -17,9 +18,11 @@ export default function RootLayout({
     <html lang="ja">
       <body className="bg-gray-50 text-gray-900 antialiased" style={{ fontFamily: "'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif" }}>
         <ToastProvider>
-          <AppShell>
-            {children}
-          </AppShell>
+          <ConfirmProvider>
+            <AppShell>
+              {children}
+            </AppShell>
+          </ConfirmProvider>
         </ToastProvider>
       </body>
     </html>

@@ -7,6 +7,7 @@ import type { Scenario, ScenarioStep, ScenarioTriggerType, MessageType } from '@
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import FlexPreviewComponent from '@/components/flex-preview'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 type ScenarioWithSteps = Scenario & { steps: ScenarioStep[] }
 
@@ -204,7 +205,7 @@ export default function ScenarioDetailClient({ scenarioId }: { scenarioId: strin
   }
 
   const handleDeleteStep = async (stepId: string) => {
-    if (!confirm('このステップを削除してもよいですか？')) return
+    if (!(await confirmDialog({ message: 'このステップを削除してもよいですか？' }))) return
     try {
       await api.scenarios.deleteStep(id, stepId)
       loadScenario()

@@ -229,7 +229,7 @@ export default function ShopifyBiTopPage() {
         setStats(orderStats)
         // 売上はShopify実績を表示できても、LINE紐付け・F2はD1の注文同期が前提。
         // 同期遅延中に「0」と見せないため、これらの集計は表示しない。
-        if (orderStats.order_source === 'shopify_live' && orderStats.d1_latest_processed_at?.slice(0, 10) < range.to) {
+        if (orderStats.order_source === 'shopify_live' && (orderStats.d1_latest_processed_at?.slice(0, 10) ?? '') < (range.to ?? '')) {
           setLineOverview(null)
           setFunnel([])
           setCohort([])

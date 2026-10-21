@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { fetchApi } from '@/lib/api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface Review {
   review_id: string
@@ -51,7 +52,7 @@ export default function ReviewsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このレビューを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'このレビューを削除しますか？' }))) return
     await fetchApi<ApiResult<null>>(`/api/reviews/${id}`, { method: 'DELETE' })
     await load()
   }

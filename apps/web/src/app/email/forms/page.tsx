@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { fetchApi } from '@/lib/api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface FermentForm {
   form_id: string
@@ -160,7 +161,7 @@ export default function FormsPage() {
   }
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`「${name}」を削除しますか？`)) return
+    if (!(await confirmDialog({ message: `「${name}」を削除しますか？` }))) return
     await fetchApi<ApiResult<null>>(`/api/forms/${id}`, { method: 'DELETE' })
     await load()
   }

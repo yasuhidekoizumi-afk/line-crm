@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { fermentApi, type EmailFlow, type EmailTemplate } from '@/lib/ferment-api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 const TRIGGER_LABEL: Record<string, string> = {
   event: 'イベントトリガー',
@@ -62,7 +63,7 @@ export default function EmailFlowsPage() {
   }
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`「${name}」を削除しますか？`)) return
+    if (!(await confirmDialog({ message: `「${name}」を削除しますか？` }))) return
     await fermentApi.flows.delete(id)
     await load()
   }

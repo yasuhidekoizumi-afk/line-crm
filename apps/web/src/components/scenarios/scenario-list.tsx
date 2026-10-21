@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { Scenario } from '@line-crm/shared'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 type ScenarioWithCount = Scenario & { stepCount?: number }
 
@@ -87,8 +88,8 @@ export default function ScenarioList({ scenarios, onToggleActive, onDelete, load
               {scenario.isActive ? '無効にする' : '有効にする'}
             </button>
             <button
-              onClick={() => {
-                if (confirm(`「${scenario.name}」を削除してもよいですか？`)) {
+              onClick={async () => {
+                if (await confirmDialog({ message: `「${scenario.name}」を削除してもよいですか？` })) {
                   onDelete(scenario.id)
                 }
               }}

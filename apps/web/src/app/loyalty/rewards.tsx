@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { fetchApi } from '@/lib/api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 type ItemStatus = 'active' | 'draft'
 type ExchangeStatus = 'pending' | 'fulfilled' | 'cancelled'
@@ -282,7 +283,7 @@ export default function RewardsTab() {
   useEffect(() => { load() }, [load])
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このアイテムを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'このアイテムを削除しますか？' }))) return
     setDeleting(id)
     try {
       await fetchApi(`/api/rewards/admin/${id}`, { method: 'DELETE' })

@@ -9,6 +9,7 @@ import CcPromptButton from '@/components/cc-prompt-button'
 
 import type { AutomationEventType, AutomationAction, Tag, Scenario } from '@line-crm/shared'
 import ActionBuilder from '@/components/automations/action-builder'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface Automation {
   id: string
@@ -201,7 +202,7 @@ export default function AutomationsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このオートメーションを削除してもよいですか？')) return
+    if (!(await confirmDialog({ message: 'このオートメーションを削除してもよいですか？' }))) return
     try {
       await api.automations.delete(id)
       loadAutomations()

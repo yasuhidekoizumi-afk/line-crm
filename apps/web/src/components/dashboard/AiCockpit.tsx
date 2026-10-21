@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { fetchApi } from '@/lib/api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 // AI が返す可能性のある execute_url を実在ルートにマッピング
 const EXECUTE_URL_ALIASES: Record<string, string> = {
@@ -173,7 +174,7 @@ export default function AiCockpit() {
   }
 
   const toggleKill = async (scope: string, current: number) => {
-    if (current === 0 && !confirm(`${scope === 'all' ? '全 AI 機能' : scope} を停止しますか？`)) return
+    if (current === 0 && !(await confirmDialog({ message: `${scope === 'all' ? '全 AI 機能' : scope} を停止しますか？` }))) return
     await fetchApi<ApiResult<unknown>>(`/api/ferment/cockpit/kill-switch/${scope}`, {
       method: 'POST',
       body: JSON.stringify({ enabled: current === 0, reason: current === 0 ? '管理画面から停止' : null }),

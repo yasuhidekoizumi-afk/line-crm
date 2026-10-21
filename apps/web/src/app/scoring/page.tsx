@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Header from '@/components/layout/header'
 import { api } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface ScoringRule {
   id: string
@@ -119,7 +120,7 @@ export default function ScoringPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('このスコアリングルールを削除しますか？')) return
+    if (!(await confirmDialog({ message: 'このスコアリングルールを削除しますか？' }))) return
     try {
       await api.scoring.deleteRule(id)
       loadRules()

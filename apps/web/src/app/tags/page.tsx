@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface TagRow {
   id: string
@@ -109,7 +110,7 @@ export default function TagsPage() {
     const msg = t.friendCount > 0
       ? `タグ「${t.name}」を削除します。\n${t.friendCount}人の友だちからこのタグが外れます。よろしいですか？`
       : `タグ「${t.name}」を削除しますか？`
-    if (!confirm(msg)) return
+    if (!(await confirmDialog({ message: msg, variant: 'danger', confirmLabel: '削除する' }))) return
     try {
       const res = await api.tags.delete(t.id)
       if (res.success) load()

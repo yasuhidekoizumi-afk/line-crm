@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
+import { notifyError, notifySuccess } from '@/lib/toast'
 
 interface EgiftCampaign {
   id: string; name: string; status: string
@@ -165,7 +167,7 @@ export default function EgiftPilotPage() {
                   onClick={async () => {
                     const r = await api.egift.activateCampaign(campaign.id);
                     if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'active'} : c));
-                    else alert('失敗: ' + r.error);
+                    else notifyError('失敗: ' + r.error);
                   }}>▶ 開始</button>
               )}
               {campaign.status === 'active' && (
@@ -173,7 +175,7 @@ export default function EgiftPilotPage() {
                   onClick={async () => {
                     const r = await api.egift.pauseCampaign(campaign.id);
                     if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'paused'} : c));
-                    else alert('失敗: ' + r.error);
+                    else notifyError('失敗: ' + r.error);
                   }}>⏸ 一時停止</button>
               )}
               {campaign.status === 'paused' && (
@@ -181,16 +183,16 @@ export default function EgiftPilotPage() {
                   onClick={async () => {
                     const r = await api.egift.activateCampaign(campaign.id);
                     if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'active'} : c));
-                    else alert('失敗: ' + r.error);
+                    else notifyError('失敗: ' + r.error);
                   }}>▶ 再開</button>
               )}
               {campaign.status !== 'completed' && (
                 <button className="text-xs px-2 py-1 bg-gray-400 text-white rounded hover:bg-gray-500"
                   onClick={async () => {
-                    if (!confirm('キャンペーンを完了にしますか？')) return;
+                    if (!(await confirmDialog({ message: 'キャンペーンを完了にしますか？' }))) return;
                     const r = await api.egift.completeCampaign(campaign.id);
                     if (r.success) setCampaigns(prev => prev.map(c => c.id === campaign.id ? {...c, status: 'completed'} : c));
-                    else alert('失敗: ' + r.error);
+                    else notifyError('失敗: ' + r.error);
                   }}>✓ 完了</button>
               )}
             </div>
@@ -324,7 +326,7 @@ export default function EgiftPilotPage() {
                   onClick={() => {
                     if (!applyUrl) return;
                     copyToClipboard(applyUrl);
-                    alert('コピーしました。LINE配信でこのURLを共有してください。');
+                    notifySuccess('コピーしました。LINE配信でこのURLを共有してください。');
                   }}>📋</button>
               </div>
               <p className="text-xs text-gray-400 mt-1">LINE一斉配信でこのURLを共有すれば、友だちが応募できます</p>
@@ -362,7 +364,7 @@ export default function EgiftPilotPage() {
                   try {
                     const r = await api.egift.lotteryDryRun(selectedId, lotteryDate)
                     if (r.success) setDryRunResult(r.data)
-                    else alert('プレビュー失敗: ' + r.error)
+                    else notifyError('プレビュー失敗: ' + r.error)
                   } finally { setLotteryLoading(false) }
                 }}
               >プレビュー</button>
@@ -371,15 +373,15 @@ export default function EgiftPilotPage() {
                 disabled={lotteryLoading}
                 onClick={async () => {
                   if (!selectedId) return
-                  if (!confirm('抽選を実行します。この操作は取り消せません。よろしいですか？')) return
+                  if (!(await confirmDialog({ message: '抽選を実行します。この操作は取り消せません。よろしいですか？' }))) return
                   setLotteryLoading(true)
                   try {
                     const r = await api.egift.lotteryCommit(selectedId, lotteryDate)
                     if (r.success) {
-                      alert(`${r.data.winnersCount}名に当選ギフトを発行しました。ギフト一覧からURLを確認できます。`)
+                      notifySuccess(`${r.data.winnersCount}名に当選ギフトを発行しました。ギフト一覧からURLを確認できます。`)
                       refreshData(selectedId)
                       setDryRunResult(null)
-                    } else alert('抽選失敗: ' + r.error)
+                    } else notifyError('抽選失敗: ' + r.error)
                   } finally { setLotteryLoading(false) }
                 }}
               >
@@ -505,13 +507,13 @@ export default function EgiftPilotPage() {
                       disabled={c.status === 'active'}
                       title={c.status === 'active' ? '実行中は削除不可' : '削除'}
                       onClick={async () => {
-                        if (!confirm(`${c.name} を削除します。この操作は取り消せません。`)) return;
+                        if (!(await confirmDialog({ message: `${c.name} を削除します。この操作は取り消せません。` }))) return;
                         const r = await api.egift.deleteCampaign(c.id);
                         if (r.success) {
                           setCampaigns(prev => prev.filter(x => x.id !== c.id));
                           if (selectedId === c.id) { setSelectedId(null); setKpi(null); }
                         } else {
-                          alert('削除失敗: ' + (r.error || '不明なエラー'));
+                          notifyError('削除失敗: ' + (r.error || '不明なエラー'));
                         }
                       }}
                     >
@@ -570,7 +572,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
   const selectedProduct = productOptions.find(p => p.sku === targetSku)
 
   const handleCreate = async () => {
-    if (!name || !startsAt || !endsAt) return alert('必須項目を入力してください')
+    if (!name || !startsAt || !endsAt) return notifyError('必須項目を入力してください')
     setSaving(true)
     try {
       const r = await api.egift.createCampaign({
@@ -581,7 +583,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: (c: EgiftCampaign) => vo
         targetSku: targetSku || undefined,
       })
       if (r.success) onCreated(r.data)
-      else alert('作成失敗: ' + r.error)
+      else notifyError('作成失敗: ' + r.error)
     } finally { setSaving(false) }
   }
 
@@ -663,12 +665,12 @@ function TestApplicationForm({ campaignId, onAdded }: { campaignId: string; onAd
   const [saving, setSaving] = useState(false)
 
   const handleAdd = async () => {
-    if (!friendId) return alert('Friend IDを入力してください')
+    if (!friendId) return notifyError('Friend IDを入力してください')
     setSaving(true)
     try {
       const r = await api.egift.apply({ campaignId, giverFriendId: friendId, occasion: 'other', message: message || undefined })
-      if (r.success) { onAdded(); setFriendId(''); setMessage(''); alert('応募を追加しました') }
-      else alert('失敗: ' + (r.error || '不明'))
+      if (r.success) { onAdded(); setFriendId(''); setMessage(''); notifySuccess('応募を追加しました') }
+      else notifyError('失敗: ' + (r.error || '不明'))
     } finally { setSaving(false) }
   }
 

@@ -5,6 +5,7 @@ import { fermentApi, type Segment } from '@/lib/ferment-api'
 import SegmentRuleBuilder from '@/components/segments/rule-builder'
 import MemberModal from '@/components/segments/member-modal'
 import ShopifyImportModal from '@/components/segments/shopify-import-modal'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 const CHANNEL_LABEL: Record<string, string> = {
   all: '全チャネル',
@@ -128,7 +129,7 @@ export default function SegmentsPage() {
   }
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`「${name}」を削除しますか？`)) return
+    if (!(await confirmDialog({ message: `「${name}」を削除しますか？` }))) return
     await fermentApi.segments.delete(id)
     await load()
   }

@@ -24,6 +24,32 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null)
 
+/** プロバイダが登録する実装。フック外（イベントハンドラ等）からもトーストを出せるようにする。 */
+let activeToastHandler: ((message: string, type?: ToastType, duration?: number) => string) | null = null
+
+/**
+ * フックを使えない場所からトーストを表示する。
+ * 使い方: `notify('保存しました', 'success')`
+ * 未マウント時は window.alert にフォールバックする。
+ */
+export function notify(message: string, type: ToastType = 'info', duration?: number): void {
+  if (activeToastHandler) {
+    activeToastHandler(message, type, duration)
+    return
+  }
+  if (typeof window !== 'undefined') window.alert(message)
+}
+
+/** 失敗・エラーの通知（旧 alert() の置き換え） */
+export function notifyError(message: string): void {
+  notify(message, 'error')
+}
+
+/** 完了・成功の通知（旧 alert() の置き換え） */
+export function notifySuccess(message: string): void {
+  notify(message, 'success')
+}
+
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext)
   if (!ctx) throw new Error('useToast must be used within ToastProvider')
@@ -69,6 +95,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const dismissBusy = useCallback((id: string) => {
     removeToast(id)
   }, [removeToast])
+
+  // フック外（confirmDialog 等）からもトーストを出せるように実装を登録する
+  useEffect(() => {
+    activeToastHandler = addToast
+    return () => {
+      if (activeToastHandler === addToast) activeToastHandler = null
+    }
+  }, [addToast])
 
   // クリーンアップ
   useEffect(() => {

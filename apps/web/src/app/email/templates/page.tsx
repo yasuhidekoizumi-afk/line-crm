@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { fermentApi, type EmailTemplate } from '@/lib/ferment-api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 const CATEGORY_LABEL: Record<string, string> = {
   welcome: 'ウェルカム',
@@ -98,7 +99,7 @@ export default function EmailTemplatesPage() {
   }
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`「${name}」を削除しますか？`)) return
+    if (!(await confirmDialog({ message: `「${name}」を削除しますか？` }))) return
     await fermentApi.templates.delete(id)
     await load()
   }

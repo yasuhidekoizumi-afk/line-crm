@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { fermentApi, type EmailTemplate } from '@/lib/ferment-api'
 import { fetchApi } from '@/lib/api'
+import { notifySuccess } from '@/lib/toast'
 
 interface ApiResult<T> { success: boolean; data?: T; error?: string }
 
@@ -418,7 +419,7 @@ function EditPageInner() {
             {aiSubjects.map((s, i) => (
               <button
                 key={i}
-                onClick={() => { navigator.clipboard.writeText(s); alert('コピーしました: ' + s) }}
+                onClick={() => { navigator.clipboard.writeText(s); notifySuccess('コピーしました: ' + s) }}
                 className="block w-full text-left text-sm bg-white border border-purple-200 rounded-lg px-3 py-2 hover:bg-purple-50"
               >
                 {s}

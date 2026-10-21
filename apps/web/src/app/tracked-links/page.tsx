@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { api, type ApiClickedNonBuyer, type ApiTrackedLink } from '@/lib/api'
 import type { Tag } from '@line-crm/shared'
+import { confirmDialog } from '@/components/ui/confirm-provider'
 
 interface ProductMatcherForm {
   productId: string
@@ -200,7 +201,7 @@ function TrackedLinksPageInner() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('この計測リンクを削除してもよいですか？クリック履歴も削除されます。')) return
+    if (!(await confirmDialog({ message: 'この計測リンクを削除してもよいですか？クリック履歴も削除されます。' }))) return
     try {
       await api.trackedLinks.delete(id)
       if (selectedLinkId === id) {
@@ -253,7 +254,7 @@ function TrackedLinksPageInner() {
       setDetailError('先に未購入者を抽出してください。')
       return
     }
-    if (!confirm(`${nonBuyers.length.toLocaleString('ja-JP')}人に「${selectedTagName}」タグを付与します。よいですか？`)) return
+    if (!(await confirmDialog({ message: `${nonBuyers.length.toLocaleString('ja-JP')}人に「${selectedTagName}」タグを付与します。よいですか？` }))) return
     setTagging(true)
     setDetailError('')
     try {

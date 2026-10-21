@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { fermentApi, type EmailCampaign, type EmailTemplate, type Segment } from '@/lib/ferment-api'
+import { confirmDialog } from '@/components/ui/confirm-provider'
+import { notifySuccess } from '@/lib/toast'
 
 interface CampaignDraft {
   name?: string
@@ -307,12 +309,12 @@ function EmailCampaignsPageInner() {
   }
 
   const handleSend = async (id: string) => {
-    if (!confirm('このキャンペーンを今すぐ配信しますか？')) return
+    if (!(await confirmDialog({ message: 'このキャンペーンを今すぐ配信しますか？' }))) return
     setSendingId(id)
     try {
       const res = await fermentApi.campaigns.send(id)
       if (res.success) {
-        alert(`配信開始しました。送信数: ${res.data?.sent ?? 0}`)
+        notifySuccess(`配信開始しました。送信数: ${res.data?.sent ?? 0}`)
         await load()
       } else {
         setError(res.error ?? '配信に失敗しました')
@@ -323,7 +325,7 @@ function EmailCampaignsPageInner() {
   }
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`「${name}」を削除しますか？`)) return
+    if (!(await confirmDialog({ message: `「${name}」を削除しますか？` }))) return
     await fermentApi.campaigns.delete(id)
     await load()
   }
