@@ -7,6 +7,7 @@
  */
 
 import { Hono } from 'hono';
+import { verifyLiffIdToken } from '../utils/line-identity.js';
 import {
   getFriendByLineUserId,
   getLoyaltyPoint,
@@ -61,12 +62,13 @@ const FEATURED_VARIANTS = new Set(CATALOG.map(p => p.variantId));
 
 shop.post('/api/shop/balance', async (c) => {
   try {
-    const body = await c.req.json<{ lineUserId: string }>();
-    if (!body.lineUserId) {
-      return c.json({ success: false, error: 'lineUserId は必須です' }, 400);
-    }
+    const body = await c.req.json<{ lineUserId?: string; idToken?: string }>();
+    // 本文の lineUserId は信頼しない（他人のIDを知っていれば残高を見られてしまうため）
+    const identity = await verifyLiffIdToken(c.env, body.idToken);
+    if (!identity.ok) return c.json({ success: false, error: identity.error }, identity.status);
+    const lineUserId = identity.userId;
 
-    const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+    const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
     if (!friend) {
       return c.json({ success: false, error: 'LINE連携が見つかりません。先に友だち追加してください。' }, 404);
     }
@@ -104,8 +106,10 @@ shop.post('/api/shop/balance', async (c) => {
 /** 購入履歴からパーソナライズされた商品一覧を返す */
 shop.post('/api/shop/products', async (c) => {
   try {
-    const { lineUserId } = await c.req.json<{ lineUserId: string }>();
-    if (!lineUserId) return c.json({ success: false, error: 'lineUserId は必須です' }, 400);
+    const body = await c.req.json<{ lineUserId?: string; idToken?: string }>();
+    const identity = await verifyLiffIdToken(c.env, body.idToken);
+    if (!identity.ok) return c.json({ success: false, error: identity.error }, identity.status);
+    const lineUserId = identity.userId;
 
     const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
     if (!friend) return c.json({ success: false, error: 'LINE連携がありません' }, 404);
@@ -208,12 +212,17 @@ shop.post('/api/shop/products', async (c) => {
 shop.post('/api/shop/checkout', async (c) => {
   try {
     const body = await c.req.json<{
-      lineUserId: string;
+      lineUserId?: string;
+      idToken?: string;
       variantId: string;
       points: number;
     }>();
 
-    if (!body.lineUserId || !body.variantId || !body.points) {
+    const identity = await verifyLiffIdToken(c.env, body.idToken);
+    if (!identity.ok) return c.json({ success: false, error: identity.error }, identity.status);
+    const lineUserId = identity.userId;
+
+    if (!body.variantId || !body.points) {
       return c.json({ success: false, error: 'lineUserId, variantId, points は必須です' }, 400);
     }
 
@@ -223,7 +232,7 @@ shop.post('/api/shop/checkout', async (c) => {
     }
 
     // LINE userId → friend → ポイント残高
-    const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+    const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
     if (!friend) {
       return c.json({ success: false, error: 'LINE連携が見つかりません' }, 404);
     }

@@ -181,6 +181,10 @@ export type Env = {
     // LINE AI Chatbot。顧客向けの自動返信は明示的に有効化した場合のみ動かす。
     LINE_AI_AUTOREPLY_ENABLED?: string;
     DEEPSEEK_API_KEY?: string;
+    // キャンペーン付与API用の共有トークン（未設定ならAPIは503で閉じる）
+    CAMPAIGN_AWARD_TOKEN?: string;
+    // 受信Webhookの共通秘密（各webhookのsecretが未設定の場合に使う）
+    INCOMING_WEBHOOK_SECRET?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };

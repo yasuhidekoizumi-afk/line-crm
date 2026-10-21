@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { verifyLiffIdToken } from '../utils/line-identity.js';
 import {
   getFriendByLineUserId,
   createUser,
@@ -1157,13 +1158,16 @@ liffRoutes.post('/api/liff/email-link/verify-code', async (c) => {
 // POST /api/liff/promo-grant — プロモコードによるポイント付与（紐付け済みユーザー向け）
 liffRoutes.post('/api/liff/promo-grant', async (c) => {
   try {
-    const body = await c.req.json<{ lineUserId: string; promoCode: string }>();
-    if (!body.lineUserId || !body.promoCode) {
-      return c.json({ success: false, error: 'lineUserId と promoCode は必須です' }, 400);
+    const body = await c.req.json<{ lineUserId?: string; idToken?: string; promoCode: string }>();
+    if (!body.promoCode) {
+      return c.json({ success: false, error: 'promoCode は必須です' }, 400);
     }
+    // 本文の lineUserId は信頼せず、LIFFのidTokenで本人を確定する
+    const identity = await verifyLiffIdToken(c.env, body.idToken);
+    if (!identity.ok) return c.json({ success: false, error: identity.error }, identity.status);
 
     const code = body.promoCode.trim().toUpperCase();
-    const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+    const friend = await getFriendByLineUserId(c.env.DB, identity.userId);
     if (!friend) {
       return c.json({ success: false, error: 'LINEアカウントが見つかりません' }, 404);
     }
@@ -1222,7 +1226,7 @@ liffRoutes.post('/api/liff/promo-grant', async (c) => {
       const accessToken = accountRow?.channel_access_token ?? c.env.LINE_CHANNEL_ACCESS_TOKEN;
       if (accessToken) {
         const lineClient = new LineClient(accessToken);
-        await lineClient.pushMessage(body.lineUserId, [{
+        await lineClient.pushMessage(identity.userId, [{
           type: 'text',
           text: `🎁 ポイントを受け取りました！\n\n${promo.reason.includes('CARD') ? 'カードボーナス' : 'ボーナス'}：+${promo.points}pt\n現在の残高：${newBalance}pt\n\nポイントは次回のお買い物でご利用いただけます。`,
         }]);

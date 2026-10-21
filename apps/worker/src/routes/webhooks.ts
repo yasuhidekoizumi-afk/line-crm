@@ -145,6 +145,16 @@ webhooks.post('/api/webhooks/incoming/:id/receive', async (c) => {
     const wh = await getIncomingWebhookById(c.env.DB, id);
     if (!wh || !wh.is_active) return c.json({ success: false, error: 'Webhook not found or inactive' }, 404);
 
+    // 受信Webhookは秘密の一致を必須にする（未設定なら受け付けない）
+    const expectedSecret = (wh as { secret?: string | null }).secret || c.env.INCOMING_WEBHOOK_SECRET;
+    if (!expectedSecret) {
+      return c.json({ success: false, error: 'Webhook secret is not configured' }, 403);
+    }
+    const providedSecret = c.req.header('X-Webhook-Secret') ?? c.req.query('secret') ?? '';
+    if (providedSecret !== expectedSecret) {
+      return c.json({ success: false, error: 'Unauthorized' }, 401);
+    }
+
     const body = await c.req.json();
 
     // イベントバスに発火: source_type をイベントタイプとして使用

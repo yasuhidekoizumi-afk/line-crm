@@ -12,6 +12,7 @@
 declare const liff: {
   getProfile(): Promise<{ userId: string; displayName: string; pictureUrl?: string }>;
   getFriendship(): Promise<{ friendFlag: boolean }>;
+  getIDToken?(): string | null;
   isInClient(): boolean;
   closeWindow(): void;
 };
@@ -42,7 +43,7 @@ async function fetchProducts(lineUserId: string): Promise<Product[]> {
   const res = await fetch('/api/shop/products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lineUserId }),
+    body: JSON.stringify({ lineUserId, idToken: liff.getIDToken?.() ?? null }),
   });
   const data = await res.json() as { success: boolean; data?: Product[]; error?: string };
   if (!data.success || !data.data) throw new Error(data.error || '商品情報の取得に失敗しました');
@@ -53,7 +54,7 @@ async function fetchBalance(lineUserId: string): Promise<ShopBalance> {
   const res = await fetch('/api/shop/balance', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lineUserId }),
+    body: JSON.stringify({ lineUserId, idToken: liff.getIDToken?.() ?? null }),
   });
   const data = await res.json() as { success: boolean; data?: ShopBalance; error?: string };
   if (res.status === 404) {
@@ -69,7 +70,7 @@ async function checkout(lineUserId: string, variantId: string, points: number): 
   const res = await fetch('/api/shop/checkout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lineUserId, variantId, points }),
+    body: JSON.stringify({ lineUserId, variantId, points, idToken: liff.getIDToken?.() ?? null }),
   });
   const data = await res.json() as { success: boolean; data?: { cartUrl: string }; error?: string };
   if (!data.success || !data.data) throw new Error(data.error || 'チェックアウトに失敗しました');

@@ -2735,6 +2735,12 @@ loyalty.post('/api/pay-forward/claim', async (c) => {
 
 loyalty.post('/api/loyalty/campaign-award', async (c) => {
   try {
+    // 外部LPから呼ばれる付与API。トークン未設定なら受け付けない（Fail-Closed）。
+    const expectedToken = c.env.CAMPAIGN_AWARD_TOKEN;
+    if (!expectedToken) return c.json({ success: false, error: 'campaign award is disabled' }, 503);
+    if (c.req.header('X-Campaign-Token') !== expectedToken) {
+      return c.json({ success: false, error: 'Unauthorized' }, 401);
+    }
     const body = await c.req.json<{
       campaign_key: string;
       lineUserId?: string;
