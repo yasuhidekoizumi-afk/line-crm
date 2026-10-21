@@ -14,6 +14,7 @@ import { LineClient as LineClientImpl } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
 import { assertLineBroadcastAllowed } from './delivery-safety.js';
+import { insertMessageLogsChunked, type MessageLogRow } from './message-log.js';
 
 const MULTICAST_BATCH_SIZE = 500;
 
@@ -148,20 +149,18 @@ async function recordFriendMessageLogs(
 ): Promise<void> {
   if (friends.length === 0) return;
 
-  try {
-    await db.batch(
-      friends.map((friend) =>
-        db
-          .prepare(
-            `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-             VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
-          )
-          .bind(crypto.randomUUID(), friend.id, broadcast.message_type, broadcast.message_content, broadcast.id, createdAt),
-      ),
-    );
-  } catch (logErr) {
-    console.warn(`messages_log batch INSERT failed (LINE送信は成功済み):`, logErr);
-  }
+  // 500人×6項目を1回の batch で書くと D1 の上限を超えて全滅するため、内部で分割する。
+  const result = await insertMessageLogsChunked(
+    db,
+    friends.map((friend) => ({
+      friendId: friend.id,
+      broadcastId: broadcast.id,
+      messageType: broadcast.message_type,
+      content: broadcast.message_content,
+      createdAt,
+    })),
+  );
+  warnIfMessageLogsFailed('broadcast', broadcast.id, result);
 }
 
 async function recordSegmentMessageLogs(
@@ -172,20 +171,65 @@ async function recordSegmentMessageLogs(
 ): Promise<void> {
   if (lineUserIds.length === 0) return;
 
-  try {
-    await db.batch(
-      lineUserIds.map(() =>
-        db
-          .prepare(
-            `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-             VALUES (?, '', 'outgoing', ?, ?, ?, NULL, ?)`,
-          )
-          .bind(crypto.randomUUID(), broadcast.message_type, broadcast.message_content, broadcast.id, createdAt),
-      ),
-    );
-  } catch (logErr) {
-    console.warn(`messages_log batch INSERT failed (LINE送信は成功済み):`, logErr);
+  // セグメント配信は line_user_id しか持たないため、friend_id を引いてから記録する。
+  // （従来は friend_id='' で書いており、個別チャット履歴に紐付かなかった）
+  const friendIdByLineUserId = await resolveFriendIdsByLineUserIds(db, lineUserIds);
+  const rows: MessageLogRow[] = [];
+  for (const lineUserId of lineUserIds) {
+    const friendId = friendIdByLineUserId.get(lineUserId);
+    if (!friendId) continue;
+    rows.push({
+      friendId,
+      broadcastId: broadcast.id,
+      messageType: broadcast.message_type,
+      content: broadcast.message_content,
+      createdAt,
+    });
   }
+
+  const unresolved = lineUserIds.length - rows.length;
+  if (unresolved > 0) {
+    console.warn(`[broadcast] ${unresolved} recipients have no friends row; messages_log skipped for them (broadcast=${broadcast.id})`);
+  }
+
+  const result = await insertMessageLogsChunked(db, rows);
+  warnIfMessageLogsFailed('segment-broadcast', broadcast.id, result);
+}
+
+/** line_user_id → friends.id を小さな塊で引く（D1のバインド上限対策） */
+async function resolveFriendIdsByLineUserIds(
+  db: D1Database,
+  lineUserIds: string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const CHUNK = 50;
+  for (let i = 0; i < lineUserIds.length; i += CHUNK) {
+    const chunk = lineUserIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    try {
+      const result = await db
+        .prepare(`SELECT id, line_user_id FROM friends WHERE line_user_id IN (${placeholders})`)
+        .bind(...chunk)
+        .all<{ id: string; line_user_id: string }>();
+      for (const row of result.results ?? []) map.set(row.line_user_id, row.id);
+    } catch (error) {
+      console.warn('[broadcast] friend lookup for messages_log failed:', error);
+    }
+  }
+  return map;
+}
+
+/** 控えの書き込み失敗を、配信IDと件数付きで必ず残す（黙って捨てない） */
+function warnIfMessageLogsFailed(
+  kind: string,
+  broadcastId: string,
+  result: { inserted: number; failed: number; failedChunks: number; firstError: string | null },
+): void {
+  if (result.failed === 0) return;
+  console.error(
+    `[broadcast] messages_log insert incomplete (${kind}=${broadcastId}): ` +
+      `inserted=${result.inserted} failed=${result.failed} chunks=${result.failedChunks} firstError=${result.firstError ?? 'unknown'}`,
+  );
 }
 
 async function claimBroadcastForSending(db: D1Database, broadcastId: string): Promise<Broadcast> {
