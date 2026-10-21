@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { extractFlexAltText } from '../utils/flex-alt-text.js';
 import { toDisplayContent } from '../utils/message-preview.js';
+import { sendCsEmailReply } from '../services/cs-email-reply.js';
 import {
   getOperators, getOperatorById, createOperator, updateOperator, deleteOperator,
   getChats, getChatById, createChat, updateChat, jstNow,
@@ -259,6 +260,43 @@ chats.post('/api/chats/:id/send', async (c) => {
     if (!chat) return c.json({ success: false, error: 'Chat not found' }, 404);
     const body = await c.req.json<{ messageType?: string; content: string }>();
     if (!body.content) return c.json({ success: false, error: 'content is required' }, 400);
+
+    // メール問い合わせのチャットは Gmail 経由でメールとして返信する（LINE送信は不可）
+    const emailChat = await c.env.DB.prepare(
+      `SELECT channel, customer_email, external_thread_id FROM chats WHERE id = ?`,
+    )
+      .bind(chatId)
+      .first<{ channel: string | null; customer_email: string | null; external_thread_id: string | null }>();
+    if (emailChat?.channel?.startsWith('email_')) {
+      if (!emailChat.customer_email) {
+        return c.json({ success: false, error: '送信先メールアドレスがありません' }, 400);
+      }
+      const lastIncoming = await c.env.DB.prepare(
+        `SELECT subject, raw_metadata FROM cs_messages WHERE chat_id = ? AND direction = 'incoming' ORDER BY created_at DESC LIMIT 1`,
+      )
+        .bind(chatId)
+        .first<{ subject: string | null; raw_metadata: string | null }>();
+      let threadId = emailChat.external_thread_id;
+      if (lastIncoming?.raw_metadata) {
+        try {
+          const meta = JSON.parse(lastIncoming.raw_metadata) as { threadId?: string };
+          threadId = meta.threadId ?? threadId;
+        } catch {
+          // メタデータが壊れていてもスレッドIDなしで送信する
+        }
+      }
+      const sent = await sendCsEmailReply(c.env, {
+        chatId,
+        customerEmail: emailChat.customer_email,
+        channel: emailChat.channel,
+        subject: lastIncoming?.subject ?? null,
+        text: body.content,
+        threadId,
+      });
+      if (!sent.ok) return c.json({ success: false, error: sent.error }, 502);
+      await updateChat(c.env.DB, chatId, { status: 'in_progress', lastMessageAt: jstNow() });
+      return c.json({ success: true, data: { sent: true, messageId: sent.id, channel: 'email' } });
+    }
     // 複数公式LINEでは、会話相手が登録した公式LINEのチャネルアクセストークンで送信する。
     // 環境変数の共通トークンを使うと、別アカウントとして送信されて失敗する。
     // ただしアカウント未設定の友だち（旧データ）でも返信できるよう、LEFT JOINにして

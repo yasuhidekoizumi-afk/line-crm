@@ -222,8 +222,14 @@ export default function ChatsPage() {
               <div ref={messagesEndRef} />
             </div>
             {String(chatDetail.channel ?? 'line').startsWith('email_') ? (
-              <div className="border-t border-line bg-canvas px-4 py-3 text-xs text-subtle">
-                メールの問い合わせはCS画面から返信します。 <a href="/cs" className="text-brand-600 hover:underline">CSダッシュボードを開く</a>
+              <div className="border-t border-line bg-white shrink-0">
+                <div className="px-3 py-1.5 border-b border-line text-[11px] text-subtle">✉️ メールとして返信します（{chatDetail.customerEmail ?? '送信先未設定'}）</div>
+                <div className="px-3 py-2 flex items-end gap-2">
+                  <textarea ref={textareaRef} value={messageContent} onChange={handleTextareaChange} onKeyDown={handleKeyDown} placeholder="メールの返信を入力... (Shift+Enterで改行)" rows={3} className="flex-1 text-sm border border-line rounded-lg px-3 py-2 bg-canvas focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none min-h-[72px] max-h-[200px] leading-relaxed" />
+                  <button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity mb-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }} aria-label="メールを送信">
+                    <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
               </div>
             ) : (
             <div className="border-t border-gray-200 bg-white shrink-0">
