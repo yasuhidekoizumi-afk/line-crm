@@ -138,7 +138,7 @@ export default function CommandPalette() {
             ref={inputRef}
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActiveIndex(0) }}
-            placeholder="画面を検索（例: 配信、ポイント、請求）"
+            placeholder="画面を検索（例: 配信、ポイント、顧客）"
             aria-label="画面を検索"
             className="flex-1 bg-transparent text-sm text-ink placeholder:text-subtle focus:outline-none"
           />
