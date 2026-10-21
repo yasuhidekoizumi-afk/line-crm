@@ -90,7 +90,9 @@ chats.get('/api/chats/:id', async (c) => {
 
     const [friend, lineMessages, csMessages, chatExt] = await Promise.all([
       c.env.DB.prepare(`SELECT display_name, picture_url, line_user_id FROM friends WHERE id = ?`).bind(item.friend_id).first(),
-      c.env.DB.prepare(`SELECT id, direction, message_type, content, created_at FROM messages_log WHERE friend_id = ? ORDER BY created_at ASC LIMIT 30`).bind(item.friend_id).all(),
+      // 一斉配信の控えは本文を複製せず保存している（D1の容量・リクエスト上限対策）ため、
+      // 配信本体から本文を補完する。個別送信・シナリオ配信は従来どおり content を持つ。
+      c.env.DB.prepare(`SELECT ml.id, ml.direction, ml.message_type, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ORDER BY ml.created_at ASC LIMIT 30`).bind(item.friend_id).all(),
       c.env.DB.prepare(`SELECT id, direction, subject, body_text, from_address, to_address, created_at FROM cs_messages WHERE chat_id = ? ORDER BY created_at ASC LIMIT 30`).bind(item.id).all(),
       c.env.DB.prepare(`SELECT channel, customer_email, ai_status, ai_category, ai_confidence, ai_money_flag FROM chats WHERE id = ?`).bind(item.id).first(),
     ]);

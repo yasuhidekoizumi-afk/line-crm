@@ -15,6 +15,9 @@
 
 export const MESSAGE_LOG_CHUNK_SIZE = 100;
 
+/** 1回の batch に載せる本文の合計文字数（概算）。D1のリクエストサイズ超過を避ける。 */
+export const MESSAGE_LOG_MAX_BATCH_CHARS = 50_000;
+
 export interface MessageLogRow {
   friendId: string;
   broadcastId: string | null;
@@ -49,11 +52,14 @@ export async function insertMessageLogsChunked<S>(
   rows: MessageLogRow[],
   options: {
     chunkSize?: number;
+    /** 1回の batch に載せる本文の合計文字数の上限（D1のリクエストサイズ対策） */
+    maxBatchChars?: number;
     newId?: () => string;
     onChunkError?: (error: unknown, chunk: MessageLogRow[]) => void;
   } = {},
 ): Promise<MessageLogInsertResult> {
   const chunkSize = Math.max(1, options.chunkSize ?? MESSAGE_LOG_CHUNK_SIZE);
+  const maxBatchChars = Math.max(1, options.maxBatchChars ?? MESSAGE_LOG_MAX_BATCH_CHARS);
   const newId = options.newId ?? (() => crypto.randomUUID());
   const result: MessageLogInsertResult = {
     inserted: 0,
@@ -62,8 +68,24 @@ export async function insertMessageLogsChunked<S>(
     firstError: null,
   };
 
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
+  const chunks: MessageLogRow[][] = [];
+  let current: MessageLogRow[] = [];
+  let currentChars = 0;
+  for (const row of rows) {
+    const rowChars = row.content.length + 200; // SQL本体・IDなどの概算
+    const wouldExceed =
+      current.length >= chunkSize || (current.length > 0 && currentChars + rowChars > maxBatchChars);
+    if (wouldExceed) {
+      chunks.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(row);
+    currentChars += rowChars;
+  }
+  if (current.length > 0) chunks.push(current);
+
+  for (const chunk of chunks) {
     const statements = chunk.map((row) =>
       db
         .prepare(INSERT_SQL)

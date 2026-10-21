@@ -150,13 +150,14 @@ async function recordFriendMessageLogs(
   if (friends.length === 0) return;
 
   // 500人×6項目を1回の batch で書くと D1 の上限を超えて全滅するため、内部で分割する。
+  // 本文は全員同一なので行ごとに複製せず、broadcast_id から表示時に引く（content は空で保存）。
   const result = await insertMessageLogsChunked(
     db,
     friends.map((friend) => ({
       friendId: friend.id,
       broadcastId: broadcast.id,
       messageType: broadcast.message_type,
-      content: broadcast.message_content,
+      content: '',
       createdAt,
     })),
   );
@@ -182,7 +183,8 @@ async function recordSegmentMessageLogs(
       friendId,
       broadcastId: broadcast.id,
       messageType: broadcast.message_type,
-      content: broadcast.message_content,
+      // 本文は配信本体(broadcasts)から表示時に引く（行ごとの複製でD1の上限を超えないため）
+      content: '',
       createdAt,
     });
   }
