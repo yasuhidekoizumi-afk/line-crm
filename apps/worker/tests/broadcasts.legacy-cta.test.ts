@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractActionableLinkDescriptors, groupTrackedLinksByLogicalCta } from './broadcasts.js';
+import { extractActionableLinkDescriptors, groupTrackedLinksByLogicalCta } from '../src/routes/broadcasts.js';
 
 const destination = 'https://oryzae.shop/';
 

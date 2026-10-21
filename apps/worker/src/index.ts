@@ -494,10 +494,56 @@ async function runCronJob(name: string, job: Promise<void>): Promise<void> {
   }
 }
 
+/**
+ * 日次ジョブの1本が固まっても、cron全体の完了記録（finishCronExecution）に
+ * 到達できるようにするためのタイムアウト付き実行。
+ * 時間切れでも処理自体は止められないが、実行ログが残り、次回の実行は妨げない。
+ */
+async function runCronJobWithTimeout(name: string, job: Promise<unknown>, timeoutMs: number): Promise<void> {
+  const started = Date.now();
+  try {
+    await Promise.race([
+      job,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs),
+      ),
+    ]);
+    console.log(`[cron:${name}] ok (${Date.now() - started}ms)`);
+  } catch (error) {
+    console.error(`[cron:${name}] failed (${Date.now() - started}ms):`, error);
+  }
+}
+
+/**
+ * 前回の実行が「実行中」のまま残っていたら失敗として閉じる。
+ * Workerのisolateが落ちると finishCronExecution に到達せず running が残り、
+ * 監視（/api/system/scheduled-broadcast-health）が古い行を見続けるため。
+ */
+async function closeStaleCronRuns(db: D1Database, staleMinutes = 10): Promise<void> {
+  const jst = (msAgo: number) =>
+    new Date(Date.now() + 9 * 60 * 60 * 1000 - msAgo).toISOString().replace('Z', '+09:00');
+  try {
+    const result = await db
+      .prepare(
+        `UPDATE cron_execution_logs
+         SET status = 'failed', completed_at = ?,
+             error_message = COALESCE(error_message, 'stale: run did not finish (auto-closed)')
+         WHERE status = 'running' AND started_at < ?`,
+      )
+      .bind(jst(0), jst(staleMinutes * 60_000))
+      .run();
+    const closed = result.meta?.changes ?? 0;
+    if (closed > 0) console.warn(`[cron] closed ${closed} stale running executions`);
+  } catch (error) {
+    console.error('[cron] failed to close stale executions:', error);
+  }
+}
+
 async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: ExecutionContext): Promise<void> {
   const cronExpr = (_event as ScheduledEvent).cron;
   let executionId: string | null = null;
   try {
+    await closeStaleCronRuns(env.DB);
     executionId = await startCronExecution(env.DB, 'scheduled-broadcasts', 'cloudflare-cron', cronExpr);
 
   // 予約配信は分単位で拾う。Cloudflare の cron は数分の揺れが出るので、
@@ -604,7 +650,11 @@ async function scheduled(_event: ScheduledEvent, env: Env['Bindings'], _ctx: Exe
     jobs.push(syncFaqFromSheets(env).then(() => undefined).catch(() => undefined));
     jobs.push(checkCsDraftBacklog(env).catch(() => undefined));
   }
-  await Promise.allSettled(jobs);
+  // 日次cronは1本の重いジョブが固まると完了記録に到達しないため、全体にタイムアウトを付ける
+  const guardedJobs = cronExpr === '0 0 * * *'
+    ? jobs.map((job, index) => runCronJobWithTimeout(`daily-${index + 1}`, job, 120_000))
+    : jobs;
+  await Promise.allSettled(guardedJobs);
   await finishCronExecution(env.DB, executionId);
   } catch (error) {
     if (executionId) await finishCronExecution(env.DB, executionId, error).catch(() => undefined);

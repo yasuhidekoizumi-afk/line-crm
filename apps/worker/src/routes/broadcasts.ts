@@ -354,7 +354,7 @@ async function getTrackedLinksForBroadcast(
   // メッセージ全体からIDを拾うと、その画像用リンクもCTAとして復活してしまうため、
   // URIアクション内にある計測リンクIDだけを採用する。
   const actionableIds = extractTrackingLinkIds(Array.from(actionableUrls).join('\n'));
-  const isActionable = (link: LinkRow) =>
+  const isActionable = (link: TrackedLinkRow) =>
     actionableUrls.has(link.original_url) || actionableIds.includes(link.id);
   if (actionableIds.length === 0) return directLinks.filter(isActionable);
 
