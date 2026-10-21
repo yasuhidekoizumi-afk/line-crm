@@ -45,6 +45,83 @@ chats.delete('/api/operators/:id', async (c) => {
 
 // ========== チャット一覧（パフォーマンス改善: LIMIT追加） ==========
 
+/**
+ * 一覧用の付加情報（最終メッセージのプレビュー・未読数・タグ）をまとめて取得する。
+ * D1のバインド上限（100）に収めるため friend_id を90件ずつ区切る。
+ */
+async function enrichChatList(
+  db: D1Database,
+  friendIds: string[],
+): Promise<{ preview: Map<string, string>; unread: Map<string, number>; tags: Map<string, string[]> }> {
+  const preview = new Map<string, string>();
+  const unread = new Map<string, number>();
+  const tags = new Map<string, string[]>();
+  const CHUNK = 90;
+
+  for (let i = 0; i < friendIds.length; i += CHUNK) {
+    const chunk = friendIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const [previewRes, unreadRes, tagRes] = await Promise.all([
+      // 最終メッセージのプレビュー（配信行は本文を持たないので配信タイトルを使う）
+      db
+        .prepare(
+          `SELECT ml.friend_id,
+             CASE
+               WHEN ml.broadcast_id IS NOT NULL AND COALESCE(ml.content, '') = '' THEN '📢 ' || COALESCE(b.title, '一斉配信')
+               WHEN ml.message_type = 'text' THEN substr(ml.content, 1, 120)
+               WHEN ml.message_type = 'multi' THEN '📢 配信メッセージ'
+               WHEN ml.message_type = 'image' THEN '[画像]'
+               WHEN ml.message_type = 'flex' THEN '[カード]'
+               WHEN ml.message_type = 'imagemap' THEN '[リッチメッセージ]'
+               ELSE substr(COALESCE(ml.content, ''), 1, 120)
+             END AS preview
+           FROM messages_log ml
+           LEFT JOIN broadcasts b ON b.id = ml.broadcast_id
+           WHERE ml.friend_id IN (${placeholders})
+             AND ml.created_at = (SELECT MAX(m2.created_at) FROM messages_log m2 WHERE m2.friend_id = ml.friend_id)`,
+        )
+        .bind(...chunk)
+        .all<{ friend_id: string; preview: string }>(),
+      // 未読 = スタッフの最後の返信より後に届いた受信メッセージ（配信・シナリオは返信扱いにしない）
+      db
+        .prepare(
+          `SELECT i.friend_id, COUNT(*) AS n
+           FROM messages_log i
+           LEFT JOIN (
+             SELECT friend_id, MAX(created_at) AS last_reply
+             FROM messages_log
+             WHERE direction = 'outgoing' AND broadcast_id IS NULL AND scenario_step_id IS NULL
+               AND friend_id IN (${placeholders})
+             GROUP BY friend_id
+           ) o ON o.friend_id = i.friend_id
+           WHERE i.direction = 'incoming' AND i.friend_id IN (${placeholders})
+             AND (o.last_reply IS NULL OR i.created_at > o.last_reply)
+           GROUP BY i.friend_id`,
+        )
+        .bind(...chunk, ...chunk)
+        .all<{ friend_id: string; n: number }>(),
+      db
+        .prepare(
+          `SELECT ft.friend_id, GROUP_CONCAT(t.name, '|') AS names
+           FROM friend_tags ft JOIN tags t ON t.id = ft.tag_id
+           WHERE ft.friend_id IN (${placeholders}) GROUP BY ft.friend_id`,
+        )
+        .bind(...chunk)
+        .all<{ friend_id: string; names: string }>(),
+    ]);
+
+    for (const row of previewRes.results ?? []) {
+      if (!preview.has(row.friend_id)) preview.set(row.friend_id, row.preview ?? '');
+    }
+    for (const row of unreadRes.results ?? []) unread.set(row.friend_id, Number(row.n) || 0);
+    for (const row of tagRes.results ?? []) {
+      tags.set(row.friend_id, String(row.names ?? '').split('|').filter(Boolean));
+    }
+  }
+
+  return { preview, unread, tags };
+}
+
 chats.get('/api/chats', async (c) => {
   try {
     const status = c.req.query('status') ?? undefined;
@@ -72,13 +149,23 @@ chats.get('/api/chats', async (c) => {
 
     const stmt = bindings.length > 0 ? c.env.DB.prepare(sql).bind(...bindings) : c.env.DB.prepare(sql);
     const result = await stmt.all();
+    const rows = (result.results ?? []) as Record<string, unknown>[];
+    const friendIds = Array.from(new Set(rows.map((row) => String(row.friend_id ?? '')).filter(Boolean)));
+    const enriched = friendIds.length > 0
+      ? await enrichChatList(c.env.DB, friendIds).catch(() => ({
+          preview: new Map<string, string>(),
+          unread: new Map<string, number>(),
+          tags: new Map<string, string[]>(),
+        }))
+      : { preview: new Map<string, string>(), unread: new Map<string, number>(), tags: new Map<string, string[]>() };
 
     return c.json({
       success: true,
-      data: result.results.map((ch: Record<string, unknown>) => {
+      data: rows.map((ch: Record<string, unknown>) => {
         const isEmail = typeof ch.channel === 'string' && (ch.channel as string).startsWith('email_');
         const name = isEmail ? (ch.customer_email as string | null) || (ch.display_name as string | null) || '不明' : (ch.display_name as string | null) || '名前なし';
-        return { id: ch.id, friendId: ch.friend_id, friendName: name, friendPictureUrl: isEmail ? null : (ch.picture_url || null), operatorId: ch.operator_id, status: ch.status, notes: ch.notes, lastMessageAt: ch.last_message_at, createdAt: ch.created_at, updatedAt: ch.updated_at, channel: ch.channel ?? 'line', customerEmail: ch.customer_email ?? null, aiStatus: ch.ai_status ?? null, aiCategory: ch.ai_category ?? null, aiMoneyFlag: !!ch.ai_money_flag };
+        const friendId = String(ch.friend_id ?? '');
+        return { id: ch.id, friendId: ch.friend_id, friendName: name, friendPictureUrl: isEmail ? null : (ch.picture_url || null), operatorId: ch.operator_id, status: ch.status, notes: ch.notes, lastMessageAt: ch.last_message_at, createdAt: ch.created_at, updatedAt: ch.updated_at, channel: ch.channel ?? 'line', customerEmail: ch.customer_email ?? null, aiStatus: ch.ai_status ?? null, aiCategory: ch.ai_category ?? null, aiMoneyFlag: !!ch.ai_money_flag, preview: enriched.preview.get(friendId) ?? '', unreadCount: ch.status === 'resolved' ? 0 : (enriched.unread.get(friendId) ?? 0), tags: enriched.tags.get(friendId) ?? [] };
       }),
     });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }

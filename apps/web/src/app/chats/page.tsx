@@ -1,16 +1,17 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
 import QuickReplyTemplates from '@/components/chats/quick-reply'
 import CustomerInfoPanel from '@/components/chats/customer-info'
 import AiDraftButton from '@/components/chats/ai-draft-button'
 
-const statusConfig: Record<string, { label: string; className: string }> = { unread: { label: '未読', className: 'bg-red-100 text-red-700' }, in_progress: { label: '対応中', className: 'bg-yellow-100 text-yellow-700' }, resolved: { label: '解決済', className: 'bg-green-100 text-green-700' } }
-const statusFilters = [{ key: 'all' as const, label: '全て' }, { key: 'unread' as const, label: '未読' }, { key: 'in_progress' as const, label: '対応中' }, { key: 'resolved' as const, label: '解決済' }]
+const statusConfig: Record<string, { label: string; className: string }> = { unread: { label: '未読', className: 'bg-red-100 text-red-700' }, in_progress: { label: '要対応', className: 'bg-yellow-100 text-yellow-700' }, resolved: { label: '対応済み', className: 'bg-green-100 text-green-700' } }
+const statusFilters = [{ key: 'all' as const, label: 'すべて' }, { key: 'unread' as const, label: '未読' }, { key: 'in_progress' as const, label: '要対応' }, { key: 'resolved' as const, label: '対応済み' }]
 const channelFilters = [{ key: 'all' as const, label: '全チャネル' }, { key: 'line' as const, label: 'LINE' }, { key: 'email' as const, label: '✉️ メール' }]
 function formatDatetime(iso: string | null): string { if (!iso) return '-'; return new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+function formatListTime(iso: string | null): string { if (!iso) return ''; return new Date(iso).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 
 export default function ChatsPage() {
   const { selectedAccountId } = useAccount()
@@ -25,6 +26,8 @@ export default function ChatsPage() {
   const olderLoadedRef = useRef(false)
   const [hasMoreOlder, setHasMoreOlder] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortMode, setSortMode] = useState<'recent' | 'unread'>('recent')
 
   const loadChats = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) { setLoading(true); setError('') }
@@ -120,14 +123,64 @@ export default function ChatsPage() {
   const handleDraftSelect = (text: string) => { setMessageContent(text) }
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { setMessageContent(e.target.value); const el = e.target; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px' }
 
+  // 検索・並び替えは読み込み済みの一覧に対して行う（毎回APIを叩かない）
+  const visibleChats = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    const filtered = query
+      ? chats.filter((ch: any) => `${ch.friendName ?? ''} ${ch.customerEmail ?? ''} ${(ch.tags ?? []).join(' ')}`.toLowerCase().includes(query))
+      : chats
+    if (sortMode === 'unread') {
+      return [...filtered].sort((a: any, b: any) => (b.unreadCount ?? 0) - (a.unreadCount ?? 0) || String(b.lastMessageAt ?? '').localeCompare(String(a.lastMessageAt ?? '')))
+    }
+    return filtered
+  }, [chats, searchQuery, sortMode])
+
   const visibleChannelFilters = selectedAccountId ? channelFilters.filter((filter) => filter.key !== 'email') : channelFilters
   return (<div>
     {error && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
     <div className="flex gap-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-180px)]">
       <div className={`w-full lg:w-96 lg:flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden ${selectedChatId ? 'hidden lg:flex' : 'flex'}`}>
+        {/* 検索・並び替え（LINE公式アカウントの一覧に近づける） */}
+        <div className="px-3 py-2 border-b border-gray-200 bg-white flex items-center gap-2">
+          <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="名前・タグ・メールで検索" className="flex-1 min-w-0 text-xs border border-gray-300 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-green-500" />
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as 'recent' | 'unread')} className="text-xs border border-gray-300 rounded-md px-1.5 py-1.5 bg-white text-gray-600" title="並び替え">
+            <option value="recent">最新順</option>
+            <option value="unread">未読優先</option>
+          </select>
+        </div>
         <div className="flex border-b border-gray-200 bg-gray-50">{visibleChannelFilters.map((f) => (<button key={f.key} onClick={() => { setChannelFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2 min-h-[40px] text-xs font-medium transition-colors ${channelFilter === f.key ? 'bg-white text-gray-900 border-b-2 border-purple-600' : 'text-gray-500 hover:bg-white'}`}>{f.label}</button>))}</div>
         <div className="flex border-b border-gray-200">{statusFilters.map((f) => (<button key={f.key} onClick={() => { setStatusFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2.5 min-h-[44px] text-xs font-medium transition-colors ${statusFilter === f.key ? 'text-white' : 'text-gray-600 hover:bg-gray-50'}`} style={statusFilter === f.key ? { backgroundColor: '#06C755' } : undefined}>{f.label}</button>))}</div>
-        <div className="flex-1 overflow-y-auto">{loading ? (<div>{[...Array(5)].map((_, i) => (<div key={i} className="px-4 py-3 border-b border-gray-100 animate-pulse"><div className="h-3 bg-gray-200 rounded w-32" /><div className="h-2 bg-gray-100 rounded w-20 mt-2" /></div>))}</div>) : (<>{chats.map((chat: any) => { const st = statusConfig[chat.status] || { label: chat.status, className: 'bg-gray-100 text-gray-600' }; const isSelected = selectedChatId === chat.id; return (<button key={chat.id} onClick={() => handleSelectChat(chat.id)} className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${isSelected ? 'bg-green-50' : 'hover:bg-gray-50'}`}><div className="flex items-center gap-3">{chat.friendPictureUrl ? <img src={chat.friendPictureUrl} alt="" className="w-10 h-10 rounded-full flex-shrink-0" /> : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-gray-500 text-sm">{(chat.friendName || '?').charAt(0)}</span></div>}<div className="min-w-0 flex-1"><p className="text-sm font-medium text-gray-900 truncate">{chat.friendName}</p><p className="text-xs text-gray-400 mt-0.5">{formatDatetime(chat.lastMessageAt)}</p></div><span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${st.className}`}>{st.label}</span></div></button>)})}</>)}</div></div>
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (<div>{[...Array(5)].map((_, i) => (<div key={i} className="px-4 py-3 border-b border-gray-100 animate-pulse"><div className="h-3 bg-gray-200 rounded w-32" /><div className="h-2 bg-gray-100 rounded w-20 mt-2" /></div>))}</div>)
+          : visibleChats.length === 0 ? (<div className="py-10 text-center text-xs text-gray-400">該当するチャットがありません</div>)
+          : (<>{visibleChats.map((chat: any) => {
+              const st = statusConfig[chat.status] || { label: chat.status, className: 'bg-gray-100 text-gray-600' }
+              const isSelected = selectedChatId === chat.id
+              const unread = Number(chat.unreadCount ?? 0)
+              return (
+                <button key={chat.id} onClick={() => handleSelectChat(chat.id)} className={`w-full text-left px-4 py-3 border-b border-gray-100 transition-colors ${isSelected ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
+                  <div className="flex items-start gap-3">
+                    {chat.friendPictureUrl ? <img src={chat.friendPictureUrl} alt="" className="w-10 h-10 rounded-full flex-shrink-0" /> : <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0"><span className="text-gray-500 text-sm">{(chat.friendName || '?').charAt(0)}</span></div>}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">{chat.friendName}</p>
+                        <span className="text-[10px] text-gray-400 flex-shrink-0">{formatListTime(chat.lastMessageAt)}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 truncate mt-0.5">{chat.preview || 'メッセージはありません'}</p>
+                      {(chat.tags ?? []).length > 0 && (
+                        <div className="flex items-center gap-1 mt-1 flex-wrap">
+                          {(chat.tags ?? []).slice(0, 3).map((tag: string) => (<span key={tag} className="px-1.5 py-0.5 text-[10px] rounded bg-gray-100 text-gray-600">{tag}</span>))}
+                        </div>
+                      )}
+                    </div>
+                    {unread > 0
+                      ? <span className="ml-1 min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">{unread > 99 ? '99+' : unread}</span>
+                      : <span className={`ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${st.className}`}>{st.label}</span>}
+                  </div>
+                </button>
+              )
+            })}</>)}
+        </div></div>
 
       <div className={`flex-1 flex overflow-hidden ${selectedChatId ? 'flex' : 'hidden lg:flex'}`}>
         <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 flex-col overflow-hidden flex">
@@ -143,8 +196,8 @@ export default function ChatsPage() {
               <div className="flex items-center gap-1.5">
                 <button onClick={() => setShowNotes(!showNotes)} className={`px-2.5 py-1.5 text-xs font-medium rounded-md ${showNotes ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>📝 メモ</button>
                 <button onClick={() => setShowCustomerInfo(!showCustomerInfo)} className={`px-2.5 py-1.5 text-xs font-medium rounded-md ${showCustomerInfo ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>📋 顧客情報</button>
-                {chatDetail.status !== 'in_progress' && <button onClick={() => handleStatusUpdate('in_progress')} className="px-2.5 py-1.5 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-md">対応中</button>}
-                {chatDetail.status !== 'resolved' && <button onClick={() => handleStatusUpdate('resolved')} className="px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md">解決済</button>}
+                {chatDetail.status !== 'in_progress' && <button onClick={() => handleStatusUpdate('in_progress')} className="px-2.5 py-1.5 text-xs font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-md">要対応</button>}
+                {chatDetail.status !== 'resolved' && <button onClick={() => handleStatusUpdate('resolved')} className="px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md">対応済み</button>}
               </div>
             </div>
             {showNotes && (
