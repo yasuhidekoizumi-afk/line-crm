@@ -91,13 +91,25 @@ chats.get('/api/chats/:id', async (c) => {
     const item = await getChatById(c.env.DB, c.req.param('id'));
     if (!item) return c.json({ success: false, error: 'Chat not found' }, 404);
 
+    // ページング: before（これより古いメッセージを取る）/ limit（既定30・最大100）
+    const before = c.req.query('before') ?? null;
+    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? '30') || 30, 1), 100);
+    const lineWhere = before ? 'AND ml.created_at < ?' : '';
+    const emailWhere = before ? 'AND created_at < ?' : '';
+    const lineStmt = before
+      ? c.env.DB.prepare(`SELECT ml.id, ml.direction, ml.message_type, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ${lineWhere} ORDER BY ml.created_at DESC LIMIT ?`).bind(item.friend_id, before, limit)
+      : c.env.DB.prepare(`SELECT ml.id, ml.direction, ml.message_type, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ${lineWhere} ORDER BY ml.created_at DESC LIMIT ?`).bind(item.friend_id, limit);
+    const emailStmt = before
+      ? c.env.DB.prepare(`SELECT id, direction, subject, body_text, from_address, to_address, created_at FROM cs_messages WHERE chat_id = ? ${emailWhere} ORDER BY created_at DESC LIMIT ?`).bind(item.id, before, limit)
+      : c.env.DB.prepare(`SELECT id, direction, subject, body_text, from_address, to_address, created_at FROM cs_messages WHERE chat_id = ? ${emailWhere} ORDER BY created_at DESC LIMIT ?`).bind(item.id, limit);
+
     const [friend, lineMessages, csMessages, chatExt] = await Promise.all([
       c.env.DB.prepare(`SELECT display_name, picture_url, line_user_id FROM friends WHERE id = ?`).bind(item.friend_id).first(),
       // 一斉配信の控えは本文を複製せず保存している（D1の容量・リクエスト上限対策）ため、
       // 配信本体から本文を補完する。個別送信・シナリオ配信は従来どおり content を持つ。
-      // 直近30件を取る（ASC+LIMITだと「古い30件」になり、最新の返信が見えなくなる）。
-      c.env.DB.prepare(`SELECT ml.id, ml.direction, ml.message_type, COALESCE(NULLIF(ml.content, ''), b.message_content, '') AS content, ml.created_at FROM messages_log ml LEFT JOIN broadcasts b ON b.id = ml.broadcast_id WHERE ml.friend_id = ? ORDER BY ml.created_at DESC LIMIT 30`).bind(item.friend_id).all(),
-      c.env.DB.prepare(`SELECT id, direction, subject, body_text, from_address, to_address, created_at FROM cs_messages WHERE chat_id = ? ORDER BY created_at DESC LIMIT 30`).bind(item.id).all(),
+      // 直近N件を取る（ASC+LIMITだと「古いN件」になり、最新の返信が見えなくなる）。
+      lineStmt.all(),
+      emailStmt.all(),
       c.env.DB.prepare(`SELECT channel, customer_email, ai_status, ai_category, ai_confidence, ai_money_flag FROM chats WHERE id = ?`).bind(item.id).first(),
     ]);
 
@@ -111,12 +123,23 @@ chats.get('/api/chats/:id', async (c) => {
     }
     unified.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
+    // これより古いメッセージが残っているか（「もっと見る」の表示判定）
+    const oldestShown = unified[0]?.createdAt ?? null;
+    let hasMore = false;
+    if (oldestShown) {
+      const [olderLine, olderEmail] = await Promise.all([
+        c.env.DB.prepare(`SELECT 1 AS x FROM messages_log WHERE friend_id = ? AND created_at < ? LIMIT 1`).bind(item.friend_id, oldestShown).first(),
+        c.env.DB.prepare(`SELECT 1 AS x FROM cs_messages WHERE chat_id = ? AND created_at < ? LIMIT 1`).bind(item.id, oldestShown).first(),
+      ]);
+      hasMore = Boolean(olderLine || olderEmail);
+    }
+
     const isEmail = typeof chatExt?.channel === 'string' && (chatExt.channel as string).startsWith('email_');
     const displayName = isEmail ? (chatExt?.customer_email as string | null) ?? (friend as any)?.display_name ?? '不明' : (friend as any)?.display_name ?? '名前なし';
 
     return c.json({
       success: true,
-      data: { id: item.id, friendId: item.friend_id, friendName: displayName, friendPictureUrl: isEmail ? null : (friend as any)?.picture_url ?? null, operatorId: item.operator_id, status: item.status, notes: item.notes, lastMessageAt: item.last_message_at, createdAt: item.created_at, channel: chatExt?.channel ?? 'line', customerEmail: chatExt?.customer_email ?? null, aiStatus: chatExt?.ai_status ?? null, aiCategory: chatExt?.ai_category ?? null, aiConfidence: (chatExt as any)?.ai_confidence ?? null, aiMoneyFlag: !!(chatExt as any)?.ai_money_flag, messages: unified },
+      data: { id: item.id, friendId: item.friend_id, friendName: displayName, friendPictureUrl: isEmail ? null : (friend as any)?.picture_url ?? null, operatorId: item.operator_id, status: item.status, notes: item.notes, lastMessageAt: item.last_message_at, createdAt: item.created_at, channel: chatExt?.channel ?? 'line', customerEmail: chatExt?.customer_email ?? null, aiStatus: chatExt?.ai_status ?? null, aiCategory: chatExt?.ai_category ?? null, aiConfidence: (chatExt as any)?.ai_confidence ?? null, aiMoneyFlag: !!(chatExt as any)?.ai_money_flag, messages: unified, hasMore },
     });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });

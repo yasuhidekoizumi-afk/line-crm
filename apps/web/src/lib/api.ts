@@ -560,10 +560,15 @@ export const api = {
         '/api/chats?' + new URLSearchParams(query),
       )
     },
-    get: (id: string) =>
-      fetchApi<ApiResponse<Chat & { messages?: { id: string; content: string; senderType: string; createdAt: string }[] }>>(
-        `/api/chats/${id}`,
-      ),
+    get: (id: string, params?: { before?: string; limit?: number }) => {
+      const query: Record<string, string> = {}
+      if (params?.before) query.before = params.before
+      if (params?.limit) query.limit = String(params.limit)
+      const suffix = Object.keys(query).length > 0 ? '?' + new URLSearchParams(query) : ''
+      return fetchApi<ApiResponse<Chat & { messages?: { id: string; content: string; senderType: string; createdAt: string }[]; hasMore?: boolean }>>(
+        `/api/chats/${id}${suffix}`,
+      )
+    },
     create: (data: { friendId: string; operatorId?: string | null }) =>
       fetchApi<ApiResponse<Chat>>('/api/chats', {
         method: 'POST',

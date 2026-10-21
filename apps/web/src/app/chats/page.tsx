@@ -20,22 +20,97 @@ export default function ChatsPage() {
   const [notes, setNotes] = useState(''); const [savingNotes, setSavingNotes] = useState(false); const [showCustomerInfo, setShowCustomerInfo] = useState(false); const [showNotes, setShowNotes] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messageScrollRef = useRef<HTMLDivElement>(null)
+  const chatDetailRef = useRef<any>(null)
+  const olderLoadedRef = useRef(false)
+  const [hasMoreOlder, setHasMoreOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
-  const loadChats = useCallback(async () => {
-    setLoading(true); setError('')
-    try { const params: any = {}; if (statusFilter !== 'all') params.status = statusFilter; if (selectedAccountId) params.accountId = selectedAccountId; if (channelFilter !== 'all') params.channel = channelFilter
+  const loadChats = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) { setLoading(true); setError('') }
+    try {
+      const params: any = {}
+      if (statusFilter !== 'all') params.status = statusFilter
+      if (selectedAccountId) params.accountId = selectedAccountId
+      if (channelFilter !== 'all') params.channel = channelFilter
       const chatRes = await api.chats.list(params)
-      if (chatRes.success) setChats(chatRes.data as any[])
-    } catch { setError('チャットの読み込みに失敗しました') } finally { setLoading(false) }
+      if (chatRes.success) { const list = chatRes.data as any[]; setChats(list); return list }
+    } catch { if (!opts?.silent) setError('チャットの読み込みに失敗しました') } finally { if (!opts?.silent) setLoading(false) }
+    return null
   }, [statusFilter, channelFilter, selectedAccountId])
 
-  const loadChatDetail = useCallback(async (chatId: string) => { setDetailLoading(true); try { const res = await api.chats.get(chatId); if (res.success) { setChatDetail(res.data); setNotes(res.data.notes || '') } } catch { setError('チャット詳細の読み込みに失敗') } finally { setDetailLoading(false) } }, [])
+  const loadChatDetail = useCallback(async (chatId: string, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setDetailLoading(true)
+    try {
+      const res = await api.chats.get(chatId)
+      if (res.success) {
+        const data = res.data as any
+        // 過去分を追加読み込み済みのときは、読んでいる位置を保ったまま
+        // 「新しく増えた分」だけを末尾に足す（差し替えると遡った履歴が消える）。
+        const keepLoadedHistory = Boolean(opts?.silent) && olderLoadedRef.current && chatDetailRef.current?.id === data.id
+        setChatDetail((prev: any) => {
+          if (!keepLoadedHistory || !prev) return data
+          const known = new Set((prev.messages ?? []).map((m: any) => m.id))
+          const added = (data.messages ?? []).filter((m: any) => !known.has(m.id))
+          return { ...data, messages: added.length > 0 ? [...(prev.messages ?? []), ...added] : prev.messages }
+        })
+        if (!keepLoadedHistory) setHasMoreOlder(Boolean(data.hasMore))
+        if (!opts?.silent) { setNotes(data.notes || ''); olderLoadedRef.current = false }
+      }
+    } catch { if (!opts?.silent) setError('チャット詳細の読み込みに失敗') } finally { if (!opts?.silent) setDetailLoading(false) }
+  }, [])
+
+  // 「過去のメッセージを見る」— 表示中の最古より前を30件取得して先頭に足す
+  const loadOlderMessages = useCallback(async () => {
+    if (!selectedChatId || loadingOlder) return
+    const current = chatDetailRef.current
+    const oldest = current?.messages?.[0]?.createdAt
+    if (!oldest) return
+    setLoadingOlder(true)
+    const el = messageScrollRef.current
+    const previousHeight = el?.scrollHeight ?? 0
+    try {
+      const res = await api.chats.get(selectedChatId, { before: oldest, limit: 30 })
+      if (res.success) {
+        const data = res.data as any
+        const older = data.messages ?? []
+        setChatDetail((prev: any) => (prev ? { ...prev, messages: [...older, ...(prev.messages ?? [])] } : prev))
+        setHasMoreOlder(Boolean(data.hasMore))
+        olderLoadedRef.current = true
+        // 追加分の高さだけスクロールを戻し、読んでいた位置を維持する
+        requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - previousHeight })
+      }
+    } catch { setError('過去のメッセージの読み込みに失敗しました') } finally { setLoadingOlder(false) }
+  }, [selectedChatId, loadingOlder])
 
   useEffect(() => { loadChats() }, [loadChats])
   useEffect(() => { if (selectedAccountId && channelFilter === 'email') setChannelFilter('all') }, [selectedAccountId, channelFilter])
-  useEffect(() => { if (selectedChatId) { loadChatDetail(selectedChatId) } else { setChatDetail(null); setShowCustomerInfo(false) } }, [selectedChatId, loadChatDetail])
-  // 会話を開いたとき・送信後に、最新メッセージが見える位置までスクロールする。
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ block: 'end' }) }, [chatDetail])
+  useEffect(() => {
+    if (selectedChatId) { olderLoadedRef.current = false; loadChatDetail(selectedChatId) }
+    else { setChatDetail(null); setShowCustomerInfo(false) }
+  }, [selectedChatId, loadChatDetail])
+  // 自動更新の比較用に、最新の詳細をrefへ保持する
+  useEffect(() => { chatDetailRef.current = chatDetail }, [chatDetail])
+  // 新しいメッセージが増えたときだけ最下部へスクロール（過去分の追加読み込みでは動かさない）
+  const lastMessageId = chatDetail?.messages?.length ? chatDetail.messages[chatDetail.messages.length - 1].id : null
+  const prevLastMessageIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!selectedChatId || !lastMessageId || prevLastMessageIdRef.current === lastMessageId) return
+    prevLastMessageIdRef.current = lastMessageId
+    messagesEndRef.current?.scrollIntoView({ block: 'end' })
+  }, [selectedChatId, lastMessageId])
+  // 30秒ごとに新着を確認する（画面を開いたままでも返信に気づける）
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      const list = await loadChats({ silent: true })
+      if (!list || !selectedChatId) return
+      const row = list.find((ch: any) => ch.id === selectedChatId)
+      if (row && row.lastMessageAt !== chatDetailRef.current?.lastMessageAt) {
+        void loadChatDetail(selectedChatId, { silent: true })
+      }
+    }, 30_000)
+    return () => clearInterval(timer)
+  }, [loadChats, loadChatDetail, selectedChatId])
 
   const handleSelectChat = (chatId: string) => { setSelectedChatId(chatId); setMessageContent('') }
   const handleSendMessage = async () => { if (!selectedChatId || !messageContent.trim()) return; setSending(true); try { await api.chats.send(selectedChatId, { content: messageContent.trim() }); setMessageContent(''); loadChatDetail(selectedChatId); loadChats(); if (textareaRef.current) textareaRef.current.style.height = 'auto' } catch { setError('メッセージの送信に失敗') } finally { setSending(false) } }
@@ -77,7 +152,12 @@ export default function ChatsPage() {
                 <div className="flex items-center gap-2"><input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="メモを入力..." className="flex-1 text-xs border border-yellow-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-green-500" /><button onClick={handleSaveNotes} disabled={savingNotes} className="px-2.5 py-1.5 text-xs font-medium text-yellow-800 bg-yellow-100 hover:bg-yellow-200 rounded-md">{savingNotes ? '...' : '保存'}</button></div>
               </div>
             )}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2" style={{ backgroundColor: '#7494C0' }}>
+            <div ref={messageScrollRef} className="flex-1 overflow-y-auto p-4 space-y-2" style={{ backgroundColor: '#7494C0' }}>
+              {hasMoreOlder && (
+                <div className="flex justify-center pb-2">
+                  <button onClick={loadOlderMessages} disabled={loadingOlder} className="px-3 py-1.5 text-xs font-medium rounded-full bg-white/90 text-gray-600 shadow-sm hover:bg-white disabled:opacity-60">{loadingOlder ? '読み込み中...' : '過去のメッセージを見る'}</button>
+                </div>
+              )}
               {(!chatDetail.messages || chatDetail.messages.length === 0) ? (<p className="text-center text-white/60 text-sm py-8">メッセージはまだありません。</p>)
               : (chatDetail.messages ?? []).map((msg: any) => { const isOut = msg.direction === 'outgoing'; let content: React.ReactNode = <span>{msg.content}</span>; if (msg.messageType === 'email') content = <div>{msg.meta?.subject && <div className="text-xs font-bold mb-1 opacity-80">✉️ {msg.meta.subject}</div>}<div className="whitespace-pre-wrap text-sm">{msg.content}</div></div>; return (<div key={msg.id} className={`flex items-end gap-2 ${isOut ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[75%] px-3 py-2 text-sm break-words whitespace-pre-wrap ${isOut ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white' : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'}`} style={isOut ? { backgroundColor: '#06C755' } : undefined}>{content}</div></div>)})}
               <div ref={messagesEndRef} />
