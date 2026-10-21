@@ -204,7 +204,10 @@ chats.get('/api/chats/:id', async (c) => {
     interface UnifiedMessage { id: string; direction: string; messageType: string; content: string; createdAt: string; meta?: { subject?: string | null; from?: string | null; to?: string | null } }
     const unified: UnifiedMessage[] = [];
     for (const m of lineMessages.results as Record<string, unknown>[]) {
-      unified.push({ id: m.id as string, direction: m.direction as string, messageType: m.message_type as string, content: toDisplayContent(m.message_type as string, (m.content as string) ?? ''), createdAt: m.created_at as string });
+      const type = m.message_type as string;
+      // 画像はUI側で表示できるよう、JSON（URL）をそのまま返す
+      const content = type === 'image' ? ((m.content as string) ?? '') : toDisplayContent(type, (m.content as string) ?? '');
+      unified.push({ id: m.id as string, direction: m.direction as string, messageType: type, content, createdAt: m.created_at as string });
     }
     for (const m of csMessages.results as Record<string, unknown>[]) {
       unified.push({ id: m.id as string, direction: m.direction as string, messageType: 'email', content: (m.body_text as string) ?? '', createdAt: m.created_at as string, meta: { subject: (m.subject as string | null) ?? null, from: (m.from_address as string | null) ?? null, to: (m.to_address as string | null) ?? null } });
@@ -314,6 +317,15 @@ chats.post('/api/chats/:id/send', async (c) => {
     try {
       if (messageType === 'text') { await lineClient.pushTextMessage((friend as any).line_user_id, body.content); }
       else if (messageType === 'flex') { const contents = JSON.parse(body.content); await lineClient.pushFlexMessage((friend as any).line_user_id, extractFlexAltText(contents), contents); }
+      else if (messageType === 'image') {
+        const parsed = JSON.parse(body.content) as { originalContentUrl?: string; previewImageUrl?: string };
+        if (!parsed.originalContentUrl) return c.json({ success: false, error: '画像URLが不正です' }, 400);
+        await lineClient.pushMessage((friend as any).line_user_id, [{
+          type: 'image',
+          originalContentUrl: parsed.originalContentUrl,
+          previewImageUrl: parsed.previewImageUrl || parsed.originalContentUrl,
+        }]);
+      }
       else { return c.json({ success: false, error: `未対応のメッセージ種別です: ${messageType}` }, 400); }
     } catch (sendErr) {
       console.error('POST /api/chats/:id/send LINE error:', sendErr);

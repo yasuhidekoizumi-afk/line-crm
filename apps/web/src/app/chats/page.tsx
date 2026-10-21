@@ -127,6 +127,26 @@ export default function ChatsPage() {
   const handleSaveNotes = async () => { if (!selectedChatId) return; setSavingNotes(true); try { await api.chats.update(selectedChatId, { notes }); loadChatDetail(selectedChatId) } catch { setError('メモの保存に失敗') } finally { setSavingNotes(false) } }
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage() } }
   const handleDraftSelect = (text: string) => { setMessageContent(text) }
+  // 画像はアップロードしてからLINEに送る（R2の公開URLを使用）
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !selectedChatId) return
+    setSending(true)
+    try {
+      const uploaded = await api.images.upload(file)
+      await api.chats.send(selectedChatId, {
+        messageType: 'image',
+        content: JSON.stringify({ originalContentUrl: uploaded.url, previewImageUrl: uploaded.url }),
+      })
+      loadChatDetail(selectedChatId)
+      loadChats()
+    } catch {
+      setError('画像の送信に失敗しました')
+    } finally {
+      setSending(false)
+    }
+  }
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { setMessageContent(e.target.value); const el = e.target; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px' }
 
   // 検索・並び替えは読み込み済みの一覧に対して行う（毎回APIを叩かない）
@@ -218,7 +238,7 @@ export default function ChatsPage() {
                 </div>
               )}
               {(!chatDetail.messages || chatDetail.messages.length === 0) ? (<p className="text-center text-white/60 text-sm py-8">メッセージはまだありません。</p>)
-              : (chatDetail.messages ?? []).map((msg: any) => { const isOut = msg.direction === 'outgoing'; let content: React.ReactNode = <span>{msg.content}</span>; if (msg.messageType === 'email') content = <div>{msg.meta?.subject && <div className="text-xs font-bold mb-1 opacity-80">✉️ {msg.meta.subject}</div>}<div className="whitespace-pre-wrap text-sm">{msg.content}</div></div>; return (<div key={msg.id} className={`flex items-end gap-2 ${isOut ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[75%] px-3 py-2 text-sm break-words whitespace-pre-wrap ${isOut ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white' : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'}`} style={isOut ? { backgroundColor: '#06C755' } : undefined}>{content}</div></div>)})}
+              : (chatDetail.messages ?? []).map((msg: any) => { const isOut = msg.direction === 'outgoing'; let content: React.ReactNode = <span>{msg.content}</span>; if (msg.messageType === 'image') { try { const img = JSON.parse(msg.content) as { originalContentUrl?: string }; content = img.originalContentUrl ? <img src={img.originalContentUrl} alt="送信画像" className="max-w-full rounded-lg" /> : <span>[画像]</span> } catch { content = <span>[画像]</span> } } if (msg.messageType === 'email') content = <div>{msg.meta?.subject && <div className="text-xs font-bold mb-1 opacity-80">✉️ {msg.meta.subject}</div>}<div className="whitespace-pre-wrap text-sm">{msg.content}</div></div>; return (<div key={msg.id} className={`flex items-end gap-2 ${isOut ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[75%] px-3 py-2 text-sm break-words whitespace-pre-wrap ${isOut ? 'rounded-tl-2xl rounded-tr-md rounded-bl-2xl rounded-br-2xl text-white' : 'rounded-tl-md rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-white text-gray-900'}`} style={isOut ? { backgroundColor: '#06C755' } : undefined}>{content}</div></div>)})}
               <div ref={messagesEndRef} />
             </div>
             {String(chatDetail.channel ?? 'line').startsWith('email_') ? (
@@ -240,6 +260,10 @@ export default function ChatsPage() {
                 <QuickReplyTemplates onSelect={(text: string) => setMessageContent(text)} />
               </div>
               <div className="px-3 py-2 flex items-end gap-2">
+                <label className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 mb-0.5 text-subtle ${sending ? 'opacity-40' : 'hover:bg-canvas cursor-pointer'}`} aria-label="画像を送信">
+                  <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden" onChange={handleImageSelect} disabled={sending} />
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                </label>
                 <textarea ref={textareaRef} value={messageContent} onChange={handleTextareaChange} onKeyDown={handleKeyDown} placeholder="メッセージを入力... (Shift+Enterで改行)" rows={1} className="flex-1 text-sm border border-gray-300 rounded-2xl px-4 py-2.5 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500 focus:bg-white resize-none min-h-[42px] max-h-[160px] leading-relaxed" />
                 <button onClick={handleSendMessage} disabled={sending || !messageContent.trim()} className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity mb-0.5" style={{ backgroundColor: 'var(--color-brand-500)' }}>
                   <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
