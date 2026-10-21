@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LINE Harness デザイン定義 v1</title>
+<style>
+  :root{
+    --brand-50:#ecfdf3; --brand-100:#d1fadf; --brand-500:#06c755; --brand-600:#05a648;
+    --wine:#6d2e46; --gold:#b5862e;
+    --ink:#111827; --subtle:#6b7280; --line:#e5e7eb; --surface:#fff; --canvas:#f9fafb;
+    --danger:#dc2626; --warn:#f59e0b; --info:#3b82f6;
+    --radius-card:12px; --shadow-card:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.1);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px;background:var(--canvas);color:var(--ink);
+       font-family:'Noto Sans JP','Hiragino Sans','Yu Gothic',system-ui,sans-serif;font-size:14px;line-height:1.6}
+  h1{font-size:22px;font-weight:700;margin:0 0 4px}
+  h2{font-size:16px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .sub{color:var(--subtle);font-size:12px;margin:0 0 8px}
+  .row{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:16px}
+  .label{font-size:11px;color:var(--subtle);margin-bottom:6px}
+  .sw{width:88px}
+  .chip{height:44px;border-radius:8px;border:1px solid rgba(0,0,0,.04)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 16px;border-radius:8px;
+       font-size:14px;font-weight:500;border:1px solid transparent;cursor:default}
+  .btn.primary{background:var(--brand-500);color:#fff}
+  .btn.secondary{background:var(--surface);border-color:var(--line);color:var(--ink)}
+  .btn.ghost{background:transparent;color:var(--subtle)}
+  .btn.danger{background:var(--danger);color:#fff}
+  .btn.sm{height:32px;padding:0 12px;font-size:12px}
+  .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500}
+  .b-success{background:#f0fdf4;color:#15803d}
+  .b-warn{background:#fffbeb;color:#b45309}
+  .b-danger{background:#fef2f2;color:#b91c1c}
+  .b-info{background:#eff6ff;color:#1d4ed8}
+  .b-neutral{background:#f3f4f6;color:#4b5563}
+  .b-brand{background:var(--brand-50);color:var(--brand-600)}
+  .h1x{font-size:24px;font-weight:700;letter-spacing:-.01em}
+  .h2x{font-size:16px;font-weight:600}
+  .small{font-size:12px;color:var(--subtle)}
+  .num{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+  input{height:38px;border:1px solid var(--line);border-radius:8px;padding:0 12px;font-size:14px;width:100%;background:#fff}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{background:var(--canvas);text-align:left;font-size:12px;color:var(--subtle);font-weight:500;padding:10px 12px}
+  td{padding:10px 12px;border-top:1px solid var(--line)}
+  .right{text-align:right;font-variant-numeric:tabular-nums}
+  .chatrow{display:flex;gap:12px;padding:12px;border-bottom:1px solid var(--line)}
+  .avatar{width:40px;height:40px;border-radius:999px;background:#e5e7eb;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:13px}
+  .tag{display:inline-block;padding:1px 6px;border-radius:4px;background:#f3f4f6;color:#4b5563;font-size:10px}
+  .dot{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--danger);color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+  .muted{color:var(--subtle)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+</style>
+</head>
+<body>
+  <h1>LINE Harness デザイン定義 v1</h1>
+  <p class="sub">2026-10-21 / 適用済み: ダッシュボード・個別チャット・LINE一斉配信 / 残り50画面は順次</p>
+
+  <h2>色</h2>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:#06c755"></div><div class="label">brand-500 #06C755</div></div>
+    <div class="sw"><div class="chip" style="background:#05a648"></div><div class="label">brand-600 #05A648</div></div>
+    <div class="sw"><div class="chip" style="background:#ecfdf3"></div><div class="label">brand-50 #ECFDF3</div></div>
+    <div class="sw"><div class="chip" style="background:#6d2e46"></div><div class="label">wine #6D2E46</div></div>
+    <div class="sw"><div class="chip" style="background:#b5862e"></div><div class="label">gold #B5862E</div></div>
+    <div class="sw"><div class="chip" style="background:#111827"></div><div class="label">ink #111827</div></div>
+    <div class="sw"><div class="chip" style="background:#6b7280"></div><div class="label">subtle #6B7280</div></div>
+    <div class="sw"><div class="chip" style="background:#e5e7eb"></div><div class="label">line #E5E7EB</div></div>
+    <div class="sw"><div class="chip" style="background:#dc2626"></div><div class="label">danger #DC2626</div></div>
+    <div class="sw"><div class="chip" style="background:#f59e0b"></div><div class="label">warn #F59E0B</div></div>
+    <div class="sw"><div class="chip" style="background:#3b82f6"></div><div class="label">info #3B82F6</div></div>
+  </div>
+  <p class="small" style="margin-top:8px">ルール: ブランド緑は「主要操作」と「選択中」だけ。装飾で使わない。上記以外の色は直書きしない。</p>
+
+  <h2>文字</h2>
+  <div class="card">
+    <div class="h1x">画面タイトル（24px / 700）</div>
+    <div class="h2x" style="margin-top:8px">セクション見出し（16px / 600）</div>
+    <div style="margin-top:8px">本文（14px）— 顧客の情報や操作の説明はこのサイズ</div>
+    <div class="small" style="margin-top:4px">補足（12px）— 日時・注記・単位</div>
+    <div class="num" style="margin-top:8px">2,644 <span class="small">人</span></div>
+  </div>
+
+  <h2>ボタン</h2>
+  <div class="card row">
+    <div><div class="label">primary（画面の主操作は1つ）</div><span class="btn primary">+ 新規配信</span></div>
+    <div><div class="label">secondary（副次操作）</div><span class="btn secondary">エクスポート</span></div>
+    <div><div class="label">ghost（取り消し・戻る）</div><span class="btn ghost">キャンセル</span></div>
+    <div><div class="label">danger（削除・停止）</div><span class="btn danger">削除する</span></div>
+    <div><div class="label">small（表の中）</div><span class="btn secondary sm">要対応</span></div>
+  </div>
+
+  <h2>バッジ（状態）</h2>
+  <div class="card row" style="gap:10px">
+    <span class="badge b-success">送信完了</span>
+    <span class="badge b-warn">要対応</span>
+    <span class="badge b-danger">失敗</span>
+    <span class="badge b-info">予約済み</span>
+    <span class="badge b-neutral">下書き</span>
+    <span class="badge b-brand">選択中</span>
+  </div>
+
+  <h2>画面ヘッダー＋KPIカード（ダッシュボード）</h2>
+  <div style="margin-bottom:12px">
+    <div class="h1x">ダッシュボード</div>
+    <div class="small">オリゼ《オリゼ》 の管理画面</div>
+  </div>
+  <div class="row">
+    <div class="card" style="width:200px"><div class="label">友だち数</div><div class="num">14,181</div><div class="small">実UID・フォロー中</div></div>
+    <div class="card" style="width:200px"><div class="label">今月の配信数</div><div class="num">4</div><div class="small">送信完了のみ</div></div>
+    <div class="card" style="width:200px"><div class="label">配信可能なF1顧客</div><div class="num">1,203</div><div class="small">連携誘導の分母</div></div>
+  </div>
+
+  <h2>チャット一覧の1行（未読バッジ・プレビュー・タグ）</h2>
+  <div class="card" style="padding:0;overflow:hidden;width:420px">
+    <div class="chatrow">
+      <div class="avatar">あ</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <strong style="font-weight:500">あきこ</strong><span class="small">10/21 12:22</span>
+        </div>
+        <div class="small" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ありがとうございます！お手数おかけして申し訳…</div>
+        <div style="margin-top:4px"><span class="tag">誕生日登録済み</span></div>
+      </div>
+      <span class="dot">3</span>
+    </div>
+    <div class="chatrow" style="border-bottom:none">
+      <div class="avatar">Y</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <strong style="font-weight:500">Yuya Takegawa</strong><span class="small">10/20 09:26</span>
+        </div>
+        <div class="small">📢 新しい名前とパッケージで、米麹クランチ登場</div>
+      </div>
+      <span class="badge b-warn" style="align-self:center">要対応</span>
+    </div>
+  </div>
+
+  <h2>表（配信一覧）</h2>
+  <div class="card" style="padding:0;overflow:hidden;width:100%;max-width:720px">
+    <table>
+      <thead><tr><th>配信タイトル</th><th>ステータス</th><th>対象</th><th class="right">成功 / 対象</th></tr></thead>
+      <tbody>
+        <tr><td>新しい名前とパッケージで、米麹クランチ登場</td><td><span class="badge b-success">送信完了</span></td><td>タグ: 購入者</td><td class="right">2,644 / 2,644</td></tr>
+        <tr><td>パンプキン&amp;シナモン🎃もう試しましたか？</td><td><span class="badge b-success">送信完了</span></td><td>セグメント: 秋</td><td class="right">2,650 / 2,650</td></tr>
+        <tr><td>発酵マルシェ出店のご案内</td><td><span class="badge b-neutral">下書き</span></td><td>タグ: 栃木</td><td class="right muted">—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>入力・空状態</h2>
+  <div class="row">
+    <div class="card" style="width:280px">
+      <div class="label">配信タイトル</div>
+      <input value="新しい名前とパッケージで、米麹クランチ登場">
+      <div class="small" style="margin-top:6px">社内管理用。顧客には表示されません。</div>
+    </div>
+    <div class="card" style="width:280px;text-align:center;padding:28px 16px">
+      <div style="font-size:28px;line-height:1">🗂️</div>
+      <div style="font-weight:700;margin-top:8px">チャットを選択してください</div>
+      <div class="small" style="margin-top:4px">左の一覧から会話を選ぶと、やりとりが表示されます。</div>
+    </div>
+  </div>
+
+  <h2>確認ダイアログ（confirm()の置き換え）</h2>
+  <div class="card" style="width:340px">
+    <div style="font-weight:700">この配信を削除しますか？</div>
+    <div class="small" style="margin-top:4px">削除した配信は元に戻せません。</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <span class="btn secondary sm">キャンセル</span><span class="btn danger sm">削除する</span>
+    </div>
+  </div>
+
+  <p class="small" style="margin-top:28px">定義の全文: <span class="mono">docs/design-system.md</span> ／ 実装: <span class="mono">apps/web/src/components/ui/</span></p>
+</body>
+</html>
