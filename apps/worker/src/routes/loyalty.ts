@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { checkCustomerSig } from '../utils/customer-sig.js';
+import { guardCustomerEnumeration } from '../utils/loyalty-guard.js';
 import { getPendingLoyaltyCode } from '../services/loyalty-pending-code.js';
 import {
   getLoyaltyPoint,
@@ -52,6 +53,20 @@ import {
 import type { Env } from '../index.js';
 
 const loyalty = new Hono<Env>();
+
+// 顧客IDは連番で推測できるため、同一IPから短時間に多数のIDへアクセスされたら遮断する
+// （署名必須化までの防御。正常な顧客は自分のIDしか叩かない）
+loyalty.use('/api/loyalty/shopify/*', async (c, next) => {
+  const customerId = c.req.path.split('/')[4] ?? null;
+  const guard = guardCustomerEnumeration(c.req.raw.headers, customerId);
+  if (guard.blocked) {
+    return c.json(
+      { success: false, error: 'アクセスが集中しています。時間をおいて再度お試しください。' },
+      { status: 429, headers: { 'Retry-After': String(guard.retryAfterSec ?? 60) } },
+    );
+  }
+  await next();
+});
 const BIRTHDAY_REGISTERED_TAG_NAME = '誕生日登録済み';
 const BIRTHDAY_REGISTERED_TAG_COLOR = '#EAB308';
 const PAY_FORWARD_CLAIM_POINTS = 1000;

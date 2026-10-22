@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { checkCustomerSig } from '../utils/customer-sig.js';
+import { guardCustomerEnumeration } from '../utils/loyalty-guard.js';
 import {
   getRewardItems,
   getRewardItem,
@@ -41,6 +42,15 @@ rewards.post('/api/rewards/:id/exchange', async (c) => {
       shopifyCustomerId?: string;
       friendId?: string;
     }>();
+
+    // 同一IPから多数の顧客IDでアクセスされたら遮断（列挙対策）
+    const guard = guardCustomerEnumeration(c.req.raw.headers, body.shopifyCustomerId ?? null);
+    if (guard.blocked) {
+      return c.json(
+        { success: false, error: 'アクセスが集中しています。時間をおいて再度お試しください。' },
+        { status: 429, headers: { 'Retry-After': String(guard.retryAfterSec ?? 60) } },
+      );
+    }
 
     // 本人確認（REQUIRE_CUSTOMER_SIG=1 のときのみ必須・段階導入）。
     // フラグON時は friendId 単独指定を拒否し、署名付き shopifyCustomerId を必須にする
