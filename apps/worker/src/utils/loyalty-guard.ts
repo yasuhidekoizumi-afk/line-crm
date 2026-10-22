@@ -9,8 +9,8 @@
  */
 
 const WINDOW_MS = 60_000;
-const MAX_REQUESTS_PER_WINDOW = 60;
-const MAX_DISTINCT_CUSTOMERS_PER_WINDOW = 5;
+const MAX_REQUESTS_PER_WINDOW = 200;
+const MAX_DISTINCT_CUSTOMERS_PER_WINDOW = 20;
 
 function clientIp(headers: Headers): string {
   return (
