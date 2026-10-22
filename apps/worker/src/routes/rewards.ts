@@ -44,7 +44,7 @@ rewards.post('/api/rewards/:id/exchange', async (c) => {
     }>();
 
     // 同一IPから多数の顧客IDでアクセスされたら遮断（列挙対策）
-    const guard = guardCustomerEnumeration(c.req.raw.headers, body.shopifyCustomerId ?? null);
+    const guard = await guardCustomerEnumeration(c.env.DB, c.req.raw.headers, body.shopifyCustomerId ?? null);
     if (guard.blocked) {
       return c.json(
         { success: false, error: 'アクセスが集中しています。時間をおいて再度お試しください。' },

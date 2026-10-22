@@ -58,7 +58,7 @@ const loyalty = new Hono<Env>();
 // （署名必須化までの防御。正常な顧客は自分のIDしか叩かない）
 loyalty.use('/api/loyalty/shopify/*', async (c, next) => {
   const customerId = c.req.path.split('/')[4] ?? null;
-  const guard = guardCustomerEnumeration(c.req.raw.headers, customerId);
+  const guard = await guardCustomerEnumeration(c.env.DB, c.req.raw.headers, customerId);
   if (guard.blocked) {
     return c.json(
       { success: false, error: 'アクセスが集中しています。時間をおいて再度お試しください。' },
