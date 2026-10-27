@@ -185,6 +185,8 @@ export type Env = {
     CAMPAIGN_AWARD_TOKEN?: string;
     // 受信Webhookの共通秘密（各webhookのsecretが未設定の場合に使う）
     INCOMING_WEBHOOK_SECRET?: string;
+    // 期間限定ポイントの失効を有効化するフラグ（'1' でON。既定OFF）
+    LIMITED_POINT_EXPIRY_ENABLED?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -479,7 +481,7 @@ async function buildCommonCronJobs(
   }
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
-  jobs.push(processLoyaltyExpirations(env.DB).then(() => undefined));
+  jobs.push(processLoyaltyExpirations(env.DB, { expireLimited: env.LIMITED_POINT_EXPIRY_ENABLED === '1' }).then(() => undefined));
   jobs.push(expireGifts(env.DB).then((n) => {
     if (n > 0) console.log(`[egift] expired ${n} gifts`);
   }).catch(() => {}).then(() => {}));

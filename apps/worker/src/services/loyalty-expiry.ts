@@ -12,7 +12,13 @@ import {
  */
 export async function processLoyaltyExpirations(
   db: D1Database,
+  options: { expireLimited?: boolean } = {},
 ): Promise<{ processed: number }> {
+  // 期間限定ポイントの失効（運用判断で有効化する。既定はOFF）
+  if (options.expireLimited) {
+    await expireLimitedBalances(db);
+  }
+
   const expiredAwards = await getExpiredUnprocessedAwards(db);
   if (!expiredAwards.length) return { processed: 0 };
 
@@ -42,6 +48,10 @@ export async function processLoyaltyExpirations(
           balanceAfter: newBalance + (point?.limited_balance ?? 0),
           reason: 'ポイント有効期限切れ',
           sourceTxId: award.award_id,
+        }).catch((err) => {
+          // 一意制約（同じawardの二重失効）は正常系として無視する
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes('UNIQUE') && !msg.includes('constraint')) throw err;
         });
       } else {
         // 全て消費済み — 処理済みとしてマークするだけ（0pt expire）
@@ -49,7 +59,7 @@ export async function processLoyaltyExpirations(
         const currentBalance = point?.balance ?? 0;
         await db
           .prepare(
-            `INSERT INTO loyalty_transactions
+            `INSERT OR IGNORE INTO loyalty_transactions
                (id, friend_id, type, points, balance_after, reason, created_at, expires_at, source_tx_id)
              VALUES (?, ?, 'expire', 0, ?, '有効期限切れ（消費済み）', ?, NULL, ?)`,
           )
@@ -121,4 +131,45 @@ async function calcUnspentFromAward(
   }
 
   return awardPoints; // fallback
+}
+
+/**
+ * 期間限定ポイント（limited_balance）の失効。
+ * 既定は無効で、LIMITED_POINT_EXPIRY_ENABLED=1 のときだけ動く。
+ * 有効化すると期限切れの限定ポイントが残高から消えるため、運用判断が必要。
+ */
+async function expireLimitedBalances(db: D1Database): Promise<void> {
+  const rows = await db
+    .prepare(
+      `SELECT friend_id, limited_balance
+       FROM loyalty_points
+       WHERE limited_balance > 0
+         AND limited_expires_at IS NOT NULL
+         AND datetime(limited_expires_at) <= datetime('now')`,
+    )
+    .all<{ friend_id: string; limited_balance: number }>();
+
+  for (const row of rows.results ?? []) {
+    try {
+      const point = await getLoyaltyPoint(db, row.friend_id);
+      if (!point) continue;
+      await upsertLoyaltyPoint(db, row.friend_id, {
+        balance: point.balance,
+        limitedBalance: 0,
+        limitedExpiresAt: null,
+        totalSpent: point.total_spent ?? 0,
+        rank: determineRank(point.total_spent ?? 0),
+        shopifyCustomerId: point.shopify_customer_id ?? undefined,
+      });
+      await addLoyaltyTransaction(db, {
+        friendId: row.friend_id,
+        type: 'expire',
+        points: -row.limited_balance,
+        balanceAfter: point.balance,
+        reason: '期間限定ポイント有効期限切れ',
+      }).catch(() => undefined);
+    } catch (error) {
+      console.error(`[loyalty-expiry] limited expiry failed for ${row.friend_id}:`, error);
+    }
+  }
 }
