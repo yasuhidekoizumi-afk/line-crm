@@ -2860,6 +2860,9 @@ loyalty.post('/api/loyalty/campaign-award', async (c) => {
       balanceAfter: totalAfter,
       reason: `${rule.label}: +${rule.points}pt（${expiryDays}日期限）`,
       orderId,
+      // 実際の期限（limited_expires_at）と台帳の期限を一致させる。
+      // 既定の365日で記録すると、60日期限のポイントが失効対象にならない。
+      expiryDays,
     });
 
     return c.json({
