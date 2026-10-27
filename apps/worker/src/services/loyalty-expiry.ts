@@ -32,26 +32,32 @@ export async function processLoyaltyExpirations(
         const point = await getLoyaltyPoint(db, award.friend_id);
         const currentBalance = point?.balance ?? 0;
         const newBalance = Math.max(0, currentBalance - unspent);
-        const newRank = determineRank(point?.total_spent ?? 0);
+
+        // 先に失効の記録を取る（source_tx_idの一意制約が「処理済み」の証明になる）。
+        // ここで重複した場合は、残高を触らずにスキップする（二重引きを防ぐ）。
+        try {
+          await addLoyaltyTransaction(db, {
+            friendId: award.friend_id,
+            type: 'expire',
+            points: -unspent,
+            balanceAfter: newBalance + (point?.limited_balance ?? 0),
+            reason: 'ポイント有効期限切れ',
+            sourceTxId: award.award_id,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('UNIQUE') || msg.includes('constraint')) {
+            console.warn(`[loyalty-expiry] already expired award ${award.award_id}; skipping balance update`);
+            continue;
+          }
+          throw err;
+        }
 
         await upsertLoyaltyPoint(db, award.friend_id, {
           balance: newBalance,
           totalSpent: point?.total_spent ?? 0,
-          rank: newRank,
+          rank: determineRank(point?.total_spent ?? 0),
           shopifyCustomerId: point?.shopify_customer_id ?? undefined,
-        });
-
-        await addLoyaltyTransaction(db, {
-          friendId: award.friend_id,
-          type: 'expire',
-          points: -unspent,
-          balanceAfter: newBalance + (point?.limited_balance ?? 0),
-          reason: 'ポイント有効期限切れ',
-          sourceTxId: award.award_id,
-        }).catch((err) => {
-          // 一意制約（同じawardの二重失効）は正常系として無視する
-          const msg = err instanceof Error ? err.message : String(err);
-          if (!msg.includes('UNIQUE') && !msg.includes('constraint')) throw err;
         });
       } else {
         // 全て消費済み — 処理済みとしてマークするだけ（0pt expire）
