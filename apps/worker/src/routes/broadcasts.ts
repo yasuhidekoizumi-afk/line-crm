@@ -16,6 +16,28 @@ import { accessibleLineAccountIds, requireLineAccountAccess } from '../middlewar
 
 const broadcasts = new Hono<Env>();
 
+// 配信設定・手動送信では既定の通知文言を許可しない。下書き保存は許可する。
+export function hasUneditedNotificationText(messageType: string, content: string, altText?: string | null): boolean {
+  const unedited = (value: unknown) => typeof value !== 'string' || !value.trim()
+    || ['画像メッセージ', 'カードタイプメッセージ', 'Flexメッセージ', 'リッチメッセージ'].includes(value.trim());
+  if (messageType === 'text') return false;
+  try {
+    const parsed = JSON.parse(content);
+    if (messageType === 'multi' || Array.isArray(parsed)) {
+      return !Array.isArray(parsed) || parsed.some((block: { type: string; content: string; altText?: string }) =>
+        hasUneditedNotificationText(block.type, block.content, block.altText ?? altText));
+    }
+    if (messageType === 'image') return unedited(parsed?.altText ?? altText);
+    if (messageType === 'imagemap') return unedited(altText ?? parsed?.altText);
+    if (messageType === 'flex') return unedited(altText);
+    return false;
+  } catch {
+    return true;
+  }
+}
+const NOTIFICATION_TEXT_ERROR = '通知・トーク一覧に表示される文言を編集してください。未入力・初期値のままでは送信・予約できません。';
+
+
 async function countBroadcastTargets(
   db: D1Database,
   targetType: BroadcastTargetType,
@@ -749,6 +771,10 @@ broadcasts.post('/api/broadcasts', async (c) => {
       );
     }
 
+    if (body.scheduledAt && hasUneditedNotificationText(body.messageType, body.messageContent, body.altText)) {
+      return c.json({ success: false, error: NOTIFICATION_TEXT_ERROR }, 400);
+    }
+
     const broadcast = await createBroadcast(c.env.DB, {
       title: body.title,
       messageType: body.messageType,
@@ -811,6 +837,15 @@ broadcasts.put('/api/broadcasts/:id', async (c) => {
     let statusUpdate: 'draft' | 'scheduled' | undefined;
     if (body.scheduledAt !== undefined) {
       statusUpdate = body.scheduledAt ? 'scheduled' : 'draft';
+    }
+
+    const scheduledAt = body.scheduledAt !== undefined ? body.scheduledAt : existing.scheduled_at;
+    if (scheduledAt && hasUneditedNotificationText(
+      body.messageType ?? existing.message_type,
+      body.messageContent ?? existing.message_content,
+      body.altText !== undefined ? body.altText : (existing as unknown as { alt_text?: string | null }).alt_text,
+    )) {
+      return c.json({ success: false, error: NOTIFICATION_TEXT_ERROR }, 400);
     }
 
     const updated = await updateBroadcast(c.env.DB, id, {
@@ -988,6 +1023,10 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
 
     if (existing.status === 'sending' || existing.status === 'sent') {
       return c.json({ success: false, error: 'Broadcast is already sent or sending' }, 400);
+    }
+
+    if (hasUneditedNotificationText(existing.message_type, existing.message_content, (existing as unknown as { alt_text?: string | null }).alt_text)) {
+      return c.json({ success: false, error: NOTIFICATION_TEXT_ERROR }, 400);
     }
 
     const lineClient = await resolveBroadcastLineClient(c.env.DB, c.env.LINE_CHANNEL_ACCESS_TOKEN, existing);

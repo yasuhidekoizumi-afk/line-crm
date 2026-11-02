@@ -180,7 +180,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
   const addCardBlock = () => {
     if (value.length >= MAX_BLOCKS) return
     const initialContents = cardsToFlexContent([{ ...DEFAULT_CARD }])
-    const b: Block = { id: nextId(), type: 'flex', contents: initialContents, altText: 'カードタイプメッセージ' }
+    const b: Block = { id: nextId(), type: 'flex', contents: initialContents, altText: '' }
     onChange([...value, b])
     setOpenId(b.id)
   }
@@ -206,11 +206,6 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
 
   return (
     <div className="space-y-2">
-      {value.some(notificationTextNeedsEditing) && (
-        <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          通知・トーク一覧に表示される文言が未編集です（{value.map((b, i) => notificationTextNeedsEditing(b) ? `#${i + 1}` : null).filter(Boolean).join('、')}）。配信内容が伝わる文言に変更してください。
-        </div>
-      )}
       {/* ブロック一覧 */}
       {value.map((b, idx) => {
         const isOpen = openId === b.id
@@ -286,17 +281,20 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                 {b.type === 'image' && (
                   <div className="space-y-3">
                     <div>
-                      <label htmlFor={`notification-${b.id}`} className="block text-xs text-gray-500 mb-1">通知・トーク一覧に表示される文言</label>
+                      <label htmlFor={`notification-${b.id}`} className="block text-xs text-gray-500 mb-1">通知・トーク一覧に表示される文言 <span className="text-red-600">＊必須</span></label>
                       <input
                         id={`notification-${b.id}`}
+                        aria-required="true"
+                        aria-invalid={notificationTextNeedsEditing(b)}
+                        aria-describedby={`notification-error-${b.id}`}
                         type="text"
                         maxLength={400}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 ${notificationTextNeedsEditing(b) ? 'border-red-500 bg-red-50 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500'}`}
                         placeholder="例：新商品オートミールクランチのお知らせ"
                         value={b.altText ?? ''}
                         onChange={(event) => updateBlock(b.id, { altText: event.target.value })}
                       />
-                      <p className="mt-1 text-[11px] text-gray-400">文言を設定するとFlex形式で送信されます。空欄の場合はLINE標準の画像通知になります。</p>
+                      <p id={`notification-error-${b.id}`} className={`mt-1 text-xs ${notificationTextNeedsEditing(b) ? 'text-red-600' : 'text-gray-500'}`}>※ 配信内容が伝わる文言を入力してください。未入力・初期値のままでは送信・予約できません。</p>
                     </div>
                     <ImageUploader
                       onUploaded={(url) =>
@@ -359,7 +357,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                           onClick={() =>
                             updateBlock(b.id, {
                               contents: cardsToFlexContent([{ ...DEFAULT_CARD }]),
-                              altText: 'カードタイプメッセージ',
+                              altText: '',
                             })
                           }
                           className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
@@ -372,16 +370,22 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                       <CardMessageEditor
                         value={cardsFromFlexContent(b.contents)}
                         altText={b.altText ?? ''}
+                        notificationInvalid={notificationTextNeedsEditing(b)}
+                        notificationId={`notification-${b.id}`}
                         onAltTextChange={(next) => updateBlock(b.id, { altText: next || undefined })}
                         onChange={(cards) => updateBlock(b.id, { contents: cardsToFlexContent(cards) })}
                       />
                     )}
                     {b.contents.trim() && !isCarouselJson(b.contents) && (
                       <div className="space-y-2">
-                        <label htmlFor={`notification-${b.id}`} className="block text-xs text-gray-500">通知・トーク一覧に表示される文言</label>
-                        <input id={`notification-${b.id}`} type="text" maxLength={400} value={b.altText ?? ''}
+                        <label htmlFor={`notification-${b.id}`} className="block text-xs text-gray-500">通知・トーク一覧に表示される文言 <span className="text-red-600">＊必須</span></label>
+                        <input id={`notification-${b.id}`}
+                        aria-required="true"
+                        aria-invalid={notificationTextNeedsEditing(b)}
+                        aria-describedby={`notification-error-${b.id}`} type="text" maxLength={400} value={b.altText ?? ''}
                           onChange={(event) => updateBlock(b.id, { altText: event.target.value })}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                          className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 ${notificationTextNeedsEditing(b) ? 'border-red-500 bg-red-50 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500'}`} />
+                        <p id={`notification-error-${b.id}`} className="text-xs text-red-600">{notificationTextNeedsEditing(b) ? '※ 文言を編集するまで送信・予約できません。' : ''}</p>
                         <FlexEditor value={b.contents} onChange={(json) => updateBlock(b.id, { contents: json })} />
                       </div>
                     )}
