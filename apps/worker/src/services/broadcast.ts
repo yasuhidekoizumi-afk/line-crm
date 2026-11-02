@@ -681,17 +681,19 @@ function buildMessage(messageType: string, messageContent: string, altText?: str
         originalContentUrl: string;
         previewImageUrl: string;
         linkUrl?: string;
+        altText?: string;
       };
       // リンクURLがある場合は LINE Messaging API の仕様上、単純な image メッセージでは
       // 遷移を実現できないため、Flex メッセージ（imageコンポーネント + action.uri）に変換する。
       const linkUrl = parsed.linkUrl?.trim();
-      if (linkUrl) {
+      const notificationText = parsed.altText?.trim() || altText?.trim();
+      if (linkUrl || notificationText) {
         // Imagemap は端末ごとに幅の異なる5画像（240/300/460/700/1040px）が必要。
         // 元画像1枚を全サイズURLで返すと端末によって表示できないため、
         // リンク付き画像は全LINEクライアント対応のFlexとして送信する。
         return {
           type: 'flex',
-          altText: altText || '画像メッセージ',
+          altText: notificationText || '画像メッセージ',
           contents: {
             type: 'bubble',
             body: {
@@ -705,7 +707,7 @@ function buildMessage(messageType: string, messageContent: string, altText?: str
                   size: 'full',
                   aspectMode: 'cover',
                   aspectRatio: '1:1',
-                  action: { type: 'uri', uri: linkUrl },
+                  ...(linkUrl ? { action: { type: 'uri', uri: linkUrl } } : {}),
                 },
               ],
             },

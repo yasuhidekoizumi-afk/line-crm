@@ -28,11 +28,17 @@ import CardMessageEditor, {
 export type Block =
   | { id: string; type: 'text'; text: string }
   // image: linkUrl が入っていれば、送信時に裏でリッチメッセージまたはFlexに変換して画像タップで遷移できるようにする
-  | { id: string; type: 'image'; originalContentUrl: string; previewImageUrl: string; linkUrl?: string }
+  | { id: string; type: 'image'; originalContentUrl: string; previewImageUrl: string; linkUrl?: string; altText?: string }
   | { id: string; type: 'flex'; contents: string; altText?: string } // contents は JSON 文字列
   // imagemap: 公式LINE「リッチメッセージ」相当。
   // 編集中は構造化値を保持し、保存時に LINE API 形式 JSON 文字列へ変換する。
   | { id: string; type: 'imagemap'; value: ImageMapValue }
+
+export function notificationTextNeedsEditing(block: Block): boolean {
+  if (block.type === 'text') return false
+  const text = (block.type === 'imagemap' ? block.value.altText : block.altText)?.trim() ?? ''
+  return !text || ['画像メッセージ', 'カードタイプメッセージ', 'Flexメッセージ', 'リッチメッセージ'].includes(text)
+}
 
 const MAX_BLOCKS = 5
 
@@ -65,6 +71,7 @@ export function blocksToPayload(blocks: Block[]): {
         messageContent: JSON.stringify({
           originalContentUrl: b.originalContentUrl,
           previewImageUrl: b.previewImageUrl || b.originalContentUrl,
+          ...(b.altText?.trim() ? { altText: b.altText.trim() } : {}),
           ...(b.linkUrl?.trim() ? { linkUrl: b.linkUrl.trim() } : {}),
         }),
       }
@@ -87,6 +94,7 @@ export function blocksToPayload(blocks: Block[]): {
         content: JSON.stringify({
           originalContentUrl: b.originalContentUrl,
           previewImageUrl: b.previewImageUrl || b.originalContentUrl,
+          ...(b.altText?.trim() ? { altText: b.altText.trim() } : {}),
           ...(b.linkUrl?.trim() ? { linkUrl: b.linkUrl.trim() } : {}),
         }),
       }
@@ -124,13 +132,14 @@ function contentToBlock(type: string, content: string, altText?: string): Block 
   if (type === 'text') return { id: nextId(), type: 'text', text: content }
   if (type === 'image') {
     try {
-      const parsed = JSON.parse(content) as { originalContentUrl?: string; previewImageUrl?: string; linkUrl?: string }
+      const parsed = JSON.parse(content) as { originalContentUrl?: string; previewImageUrl?: string; linkUrl?: string; altText?: string }
       return {
         id: nextId(),
         type: 'image',
         originalContentUrl: parsed.originalContentUrl ?? '',
         previewImageUrl: parsed.previewImageUrl ?? parsed.originalContentUrl ?? '',
         ...(parsed.linkUrl ? { linkUrl: parsed.linkUrl } : {}),
+        altText: parsed.altText ?? altText,
       }
     } catch {
       return { id: nextId(), type: 'image', originalContentUrl: '', previewImageUrl: '' }
@@ -197,6 +206,11 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
 
   return (
     <div className="space-y-2">
+      {value.some(notificationTextNeedsEditing) && (
+        <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          通知・トーク一覧に表示される文言が未編集です（{value.map((b, i) => notificationTextNeedsEditing(b) ? `#${i + 1}` : null).filter(Boolean).join('、')}）。配信内容が伝わる文言に変更してください。
+        </div>
+      )}
       {/* ブロック一覧 */}
       {value.map((b, idx) => {
         const isOpen = openId === b.id
@@ -271,6 +285,19 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                 )}
                 {b.type === 'image' && (
                   <div className="space-y-3">
+                    <div>
+                      <label htmlFor={`notification-${b.id}`} className="block text-xs text-gray-500 mb-1">通知・トーク一覧に表示される文言</label>
+                      <input
+                        id={`notification-${b.id}`}
+                        type="text"
+                        maxLength={400}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                        placeholder="例：新商品オートミールクランチのお知らせ"
+                        value={b.altText ?? ''}
+                        onChange={(event) => updateBlock(b.id, { altText: event.target.value })}
+                      />
+                      <p className="mt-1 text-[11px] text-gray-400">文言を設定するとFlex形式で送信されます。空欄の場合はLINE標準の画像通知になります。</p>
+                    </div>
                     <ImageUploader
                       onUploaded={(url) =>
                         updateBlock(b.id, { originalContentUrl: url, previewImageUrl: url })
@@ -350,7 +377,13 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
                       />
                     )}
                     {b.contents.trim() && !isCarouselJson(b.contents) && (
-                      <FlexEditor value={b.contents} onChange={(json) => updateBlock(b.id, { contents: json })} />
+                      <div className="space-y-2">
+                        <label htmlFor={`notification-${b.id}`} className="block text-xs text-gray-500">通知・トーク一覧に表示される文言</label>
+                        <input id={`notification-${b.id}`} type="text" maxLength={400} value={b.altText ?? ''}
+                          onChange={(event) => updateBlock(b.id, { altText: event.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                        <FlexEditor value={b.contents} onChange={(json) => updateBlock(b.id, { contents: json })} />
+                      </div>
                     )}
                     {b.contents.trim() && (
                       <button
