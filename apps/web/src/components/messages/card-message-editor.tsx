@@ -18,7 +18,7 @@
  * カード上限は LINE 仕様で 12（バブル上限）だが、UX 上は 10 に抑える。
  */
 
-import { useMemo } from 'react'
+import { useMemo, useId } from 'react'
 import ImageUploader from '@/components/messages/image-uploader'
 
 export interface CardButton {
@@ -194,6 +194,8 @@ interface Props {
   value: Card[]
   onChange: (next: Card[]) => void
   altText?: string
+  notificationInvalid?: boolean
+  notificationId?: string
   onAltTextChange?: (next: string) => void
 }
 
@@ -219,7 +221,9 @@ function simplifyAspectRatio(width: number, height: number): string {
   return `${normalizedWidth}:${normalizedHeight}`
 }
 
-export default function CardMessageEditor({ value, onChange, altText = '', onAltTextChange }: Props) {
+export default function CardMessageEditor({ value, onChange, altText = '', onAltTextChange, notificationInvalid = false, notificationId }: Props) {
+  const generatedId = useId()
+  const inputId = notificationId ?? generatedId
   const cards = useMemo(() => (value.length === 0 ? [{ ...DEFAULT_CARD }] : value), [value])
 
   const updateCard = (idx: number, patch: Partial<Card>) => {
@@ -270,17 +274,24 @@ export default function CardMessageEditor({ value, onChange, altText = '', onAlt
       </p>
 
       <div className="space-y-1">
-        <label className="block text-xs text-gray-500">
-          📱 通知・トーク一覧に表示される文言
+        <label htmlFor={inputId} className="block text-xs text-gray-500">
+          📱 通知・トーク一覧に表示される文言 <span className="text-red-600">＊必須</span>
         </label>
         <input
           type="text"
           maxLength={400}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          placeholder="カードタイプメッセージ"
+          id={inputId}
+          aria-required="true"
+          aria-invalid={notificationInvalid}
+          aria-describedby={`${inputId}-error`}
+          className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 ${notificationInvalid ? 'border-red-500 bg-red-50 focus:ring-red-500' : 'border-gray-300 focus:ring-green-500'}`}
+          placeholder="例：新商品オートミールクランチのお知らせ"
           value={altText}
           onChange={(e) => onAltTextChange?.(e.target.value)}
         />
+        <p id={`${inputId}-error`} className={`text-xs ${notificationInvalid ? 'text-red-600' : 'text-gray-500'}`}>
+          ※ 未入力・初期値のままでは送信・予約できません。
+        </p>
         <p className="text-[11px] text-gray-400">
           ※ カードは通知やトーク一覧に本文を出せないため、代わりにこの文言が表示されます（例：新商品オートミールクランチのお知らせ🌾）
         </p>

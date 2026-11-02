@@ -156,7 +156,13 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     }
   }, [form.targetType, form.targetTagId, form.targetSegmentId, form.targetFriendIds.length, selectedAccountId])
 
+  const notificationIncomplete = form.blocks.some(notificationTextNeedsEditing)
+
   const handleSave = async () => {
+    if (form.sendMode !== 'draft' && notificationIncomplete) {
+      setError('通知・トーク一覧に表示される文言を編集してください。編集するまで送信・予約できません。')
+      return
+    }
     if (!form.title.trim()) { setError('配信タイトルを入力してください'); return }
     // 複数メッセージ：1件以上＋各ブロックの中身検証
     if (form.blocks.length === 0) { setError('メッセージブロックを1件以上追加してください'); return }
@@ -199,13 +205,6 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     ) {
       return
     }
-
-    const unedited = form.blocks.map((block, index) => notificationTextNeedsEditing(block) ? `#${index + 1}` : null).filter(Boolean)
-    if (form.sendMode !== 'draft' && unedited.length > 0 && !(await confirmDialog({
-      message: `通知・トーク一覧に表示される文言が未編集です（${unedited.join('、')}）。編集せずに${form.sendMode === 'now' ? '送信' : '予約'}しますか？`,
-      variant: 'warning',
-      confirmLabel: form.sendMode === 'now' ? 'このまま送信する' : 'このまま予約する',
-    }))) return
 
     setSaving(true)
     setError('')
@@ -524,9 +523,11 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
             ] as { mode: SendMode; label: string }[]).map(({ mode, label }) => (
               <button
                 key={mode}
+                disabled={mode !== 'draft' && notificationIncomplete}
+                title={mode !== 'draft' && notificationIncomplete ? '通知・トーク一覧に表示される文言を編集してください' : undefined}
                 type="button"
                 onClick={() => setForm({ ...form, sendMode: mode, scheduledAt: mode !== 'scheduled' ? '' : form.scheduledAt })}
-                className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors ${
+                className={`px-3 py-1.5 min-h-[44px] text-xs font-medium rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   form.sendMode === mode
                     ? 'border-green-500 text-green-700 bg-green-50'
                     : 'border-gray-300 text-gray-600 bg-white hover:border-gray-400'
@@ -553,7 +554,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
         <div className="flex gap-2 pt-1">
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || (form.sendMode !== 'draft' && notificationIncomplete)}
             className="px-4 py-2 min-h-[44px] text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
             style={{ backgroundColor: 'var(--color-brand-500)' }}
           >
