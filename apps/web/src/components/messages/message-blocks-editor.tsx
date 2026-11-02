@@ -168,7 +168,7 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
   // 編集中のブロックID（折りたたみ表示）。初期は最後に追加されたブロックを開く。
   const [openId, setOpenId] = useState<string | null>(value[0]?.id ?? null)
 
-  const addBlock = (type: 'text' | 'image' | 'flex' | 'imagemap') => {
+  const addBlock = (type: 'text' | 'image') => {
     if (value.length >= MAX_BLOCKS) return
     const b = emptyBlock(type)
     onChange([...value, b])
@@ -432,13 +432,6 @@ export default function MessageBlocksEditor({ value, onChange }: Props) {
             className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
           >
             🃏 カード型カルーセル
-          </button>
-          <button
-            type="button"
-            onClick={() => addBlock('imagemap')}
-            className="px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 bg-white rounded-md hover:border-green-500 hover:text-green-700"
-          >
-            📐 リッチメッセージ
           </button>
           <span className="text-xs text-gray-400 self-center ml-2">
             {value.length} / {MAX_BLOCKS}
