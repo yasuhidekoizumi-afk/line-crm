@@ -8,6 +8,7 @@ import MessageBlocksEditor, {
   type Block,
   blocksToPayload,
   payloadToBlocks,
+  notificationTextNeedsEditing,
 } from '@/components/messages/message-blocks-editor'
 import MessageBlocksPreview from '@/components/messages/message-blocks-preview'
 import { useAccount } from '@/contexts/account-context'
@@ -198,6 +199,13 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
     ) {
       return
     }
+
+    const unedited = form.blocks.map((block, index) => notificationTextNeedsEditing(block) ? `#${index + 1}` : null).filter(Boolean)
+    if (form.sendMode !== 'draft' && unedited.length > 0 && !(await confirmDialog({
+      message: `通知・トーク一覧に表示される文言が未編集です（${unedited.join('、')}）。編集せずに${form.sendMode === 'now' ? '送信' : '予約'}しますか？`,
+      variant: 'warning',
+      confirmLabel: form.sendMode === 'now' ? 'このまま送信する' : 'このまま予約する',
+    }))) return
 
     setSaving(true)
     setError('')
