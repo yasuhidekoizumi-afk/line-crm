@@ -362,12 +362,29 @@ export const api = {
       }),
   },
   broadcasts: {
-    list: (params?: { accountId?: string; archived?: 'true' | 'false' | 'all' }) => {
+    list: (params?: {
+      accountId?: string
+      archived?: 'true' | 'false' | 'all'
+      q?: string
+      from?: string
+      to?: string
+      targetType?: ApiBroadcast['targetType']
+      limit?: number
+      offset?: number
+    }) => {
       const query = new URLSearchParams()
       if (params?.accountId) query.set('lineAccountId', params.accountId)
       if (params?.archived) query.set('archived', params.archived)
+      if (params?.q) query.set('q', params.q)
+      if (params?.from) query.set('from', params.from)
+      if (params?.to) query.set('to', params.to)
+      if (params?.targetType) query.set('targetType', params.targetType)
+      if (params?.limit) query.set('limit', String(params.limit))
+      if (params?.offset) query.set('offset', String(params.offset))
       const suffix = query.toString() ? `?${query}` : ''
-      return fetchApi<ApiResponse<ApiBroadcast[]>>('/api/broadcasts' + suffix)
+      return fetchApi<
+        ApiResponse<ApiBroadcast[]> & { meta?: { total: number; limit: number; offset: number; hasMore: boolean } }
+      >('/api/broadcasts' + suffix)
     },
     get: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`),

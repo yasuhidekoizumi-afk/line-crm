@@ -638,30 +638,70 @@ broadcasts.get('/api/broadcasts', async (c) => {
   try {
     const lineAccountId = c.req.query('lineAccountId');
     const archived = c.req.query('archived');
-    const archivedWhere = archived === 'true'
-      ? 'archived_at IS NOT NULL'
-      : archived === 'all'
-        ? '1 = 1'
-        : 'archived_at IS NULL';
-    let items: DbBroadcast[];
+    const q = (c.req.query('q') ?? '').trim();
+    const from = c.req.query('from');
+    const to = c.req.query('to');
+    const targetType = c.req.query('targetType');
+    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 500) || 500, 1), 500);
+    const offset = Math.max(Number(c.req.query('offset') ?? 0) || 0, 0);
+
+    const conditions: string[] = [
+      archived === 'true'
+        ? 'archived_at IS NOT NULL'
+        : archived === 'all'
+          ? '1 = 1'
+          : 'archived_at IS NULL',
+    ];
+    const binds: unknown[] = [];
+
+    if (q) {
+      // LIKEのワイルドカードを打ち消す（検索語をそのまま部分一致に使う）
+      conditions.push("title LIKE ? ESCAPE '\\'");
+      binds.push(`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
+    }
+    if (targetType && ['all', 'tag', 'segment', 'individual'].includes(targetType)) {
+      conditions.push('target_type = ?');
+      binds.push(targetType);
+    }
+    if (from) {
+      conditions.push('created_at >= ?');
+      binds.push(from.slice(0, 10));
+    }
+    if (to) {
+      conditions.push('created_at <= ?');
+      binds.push(`${to.slice(0, 10)}T23:59:59.999+09:00`);
+    }
+
     if (lineAccountId) {
       const denied = await requireLineAccountAccess(c, lineAccountId);
       if (denied) return denied;
-      const result = await c.env.DB
-        .prepare(`SELECT * FROM broadcasts WHERE line_account_id = ? AND ${archivedWhere} ORDER BY created_at DESC`)
-        .bind(lineAccountId)
-        .all<DbBroadcast>();
-      items = result.results;
+      conditions.push('line_account_id = ?');
+      binds.push(lineAccountId);
     } else {
       const ids = await accessibleLineAccountIds(c);
-      if (!ids.length) return c.json({ success: true, data: [] });
-      const result = await c.env.DB
-        .prepare(`SELECT * FROM broadcasts WHERE line_account_id IN (${ids.map(() => '?').join(',')}) AND ${archivedWhere} ORDER BY created_at DESC`)
-        .bind(...ids)
-        .all<DbBroadcast>();
-      items = result.results;
+      if (!ids.length) {
+        return c.json({ success: true, data: [], meta: { total: 0, limit, offset, hasMore: false } });
+      }
+      conditions.push(`line_account_id IN (${ids.map(() => '?').join(',')})`);
+      binds.push(...ids);
     }
-    return c.json({ success: true, data: items.map(serializeBroadcast) });
+
+    const where = conditions.join(' AND ');
+    const totalRow = await c.env.DB
+      .prepare(`SELECT COUNT(*) AS total FROM broadcasts WHERE ${where}`)
+      .bind(...binds)
+      .first<{ total: number }>();
+    const result = await c.env.DB
+      .prepare(`SELECT * FROM broadcasts WHERE ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .bind(...binds, limit, offset)
+      .all<DbBroadcast>();
+    const total = totalRow?.total ?? 0;
+
+    return c.json({
+      success: true,
+      data: result.results.map(serializeBroadcast),
+      meta: { total, limit, offset, hasMore: offset + result.results.length < total },
+    });
   } catch (err) {
     console.error('GET /api/broadcasts error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
