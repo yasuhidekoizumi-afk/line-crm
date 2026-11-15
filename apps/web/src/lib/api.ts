@@ -344,6 +344,23 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    validate: (data: {
+      messageType: ApiBroadcast['messageType']
+      messageContent: string
+      altText?: string | null
+      targetType: ApiBroadcast['targetType']
+      targetTagId?: string | null
+      targetSegmentId?: string | null
+      targetFriendIds?: string[] | null
+      lineAccountId?: string | null
+    }) =>
+      fetchApi<ApiResponse<{
+        blocks: Array<{ code: string; message: string }>
+        warnings: Array<{ code: string; message: string }>
+      }>>('/api/broadcasts/validate', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
     create: (data: {
       title: string
       messageType: ApiBroadcast['messageType']
