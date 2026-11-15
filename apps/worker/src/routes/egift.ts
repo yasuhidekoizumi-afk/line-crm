@@ -279,6 +279,10 @@ egift.post('/api/egift/applications', async (c) => {
 
     // Resolve lineUserId → friendId if needed
     if (!giverFriendId && body.lineUserId) {
+      // 実在しないIDでfriends行を作らせない（公開エンドポイントのため形式を検証する）
+      if (typeof body.lineUserId !== 'string' || !/^U[0-9a-zA-Z]{20,64}$/.test(body.lineUserId)) {
+        return c.json({ success: false, error: 'lineUserId の形式が不正です' }, 400);
+      }
       const friend = await c.env.DB.prepare(
         'SELECT id FROM friends WHERE line_user_id = ?',
       ).bind(body.lineUserId).first<{ id: string }>();

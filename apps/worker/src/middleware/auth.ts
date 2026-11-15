@@ -48,6 +48,8 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.startsWith('/reviews/') ||
     path.startsWith('/g/') ||
     path.startsWith('/api/egift/gifts/') ||
+    // 贈り主の応募はLIFF（無認証）から投稿する。GET系の管理APIはBearer認証のまま。
+    (method === 'POST' && path === '/api/egift/applications') ||
     path === '/email/optin-confirm' ||
     path === '/api/ferment/phase5/double-optin/confirm' ||
     path === '/api/ferment/phase5/gdpr/request' ||
