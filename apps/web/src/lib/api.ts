@@ -633,7 +633,8 @@ export const api = {
       q?: string
       limit?: number
       offset?: number
-      sort?: 'recent' | 'unread'
+      sort?: 'recent' | 'unread' | 'stale'
+      attention?: boolean
     }) => {
       const query: Record<string, string> = {}
       if (params?.status) query.status = params.status
@@ -645,6 +646,7 @@ export const api = {
       if (params?.limit) query.limit = String(params.limit)
       if (params?.offset) query.offset = String(params.offset)
       if (params?.sort) query.sort = params.sort
+      if (params?.attention) query.attention = '1'
       return fetchApi<
         ApiResponse<Chat[]> & { meta?: { total: number; limit: number; offset: number; hasMore: boolean } }
       >('/api/chats?' + new URLSearchParams(query))

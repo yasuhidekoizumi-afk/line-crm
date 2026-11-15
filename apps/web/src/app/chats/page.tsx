@@ -50,8 +50,10 @@ export default function ChatsPage() {
   // 検索はサーバー側。入力は即時、リクエストは300msデバウンス。
   const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortMode, setSortMode] = useState<'recent' | 'unread'>('recent')
+  const [sortMode, setSortMode] = useState<'recent' | 'unread' | 'stale'>('recent')
   const [mineOnly, setMineOnly] = useState(false)
+  // 要返信候補（退会・解約・返金・未着など）だけに絞る。データは変えず、見る順番を決めるためのフィルタ。
+  const [attentionOnly, setAttentionOnly] = useState(false)
   const [total, setTotal] = useState(0)
   const [hasMoreChats, setHasMoreChats] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -71,7 +73,7 @@ export default function ChatsPage() {
     try {
       const params: {
         status?: string; accountId?: string; channel?: string; q?: string
-        limit: number; offset: number; sort: 'recent' | 'unread'; assignedStaffId?: string
+        limit: number; offset: number; sort: 'recent' | 'unread' | 'stale'; assignedStaffId?: string; attention?: boolean
       } = {
         limit: opts?.silent ? Math.max(PAGE_SIZE, chatsRef.current.length) : PAGE_SIZE,
         offset: opts?.append ? chatsRef.current.length : 0,
@@ -82,6 +84,7 @@ export default function ChatsPage() {
       if (channelFilter !== 'all') params.channel = channelFilter
       if (searchQuery) params.q = searchQuery
       if (mineOnly) params.assignedStaffId = 'me'
+      if (attentionOnly) params.attention = true
       const chatRes = await api.chats.list(params)
       if (chatRes.success) {
         const list = chatRes.data as any[]
@@ -92,7 +95,7 @@ export default function ChatsPage() {
       }
     } catch { if (!opts?.silent) setError('チャットの読み込みに失敗しました') } finally { if (!opts?.silent) { setLoading(false); setLoadingMore(false) } }
     return null
-  }, [statusFilter, channelFilter, selectedAccountId, searchQuery, sortMode, mineOnly])
+  }, [statusFilter, channelFilter, selectedAccountId, searchQuery, sortMode, mineOnly, attentionOnly])
 
   const loadChatDetail = useCallback(async (chatId: string, opts?: { silent?: boolean }) => {
     if (!opts?.silent) setDetailLoading(true)
@@ -349,9 +352,10 @@ export default function ChatsPage() {
         {/* 検索・並び替え（LINE公式アカウントの一覧に近づける） */}
         <div className="px-3 py-2 border-b border-gray-200 bg-white flex items-center gap-2">
           <TextInput type="search" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="名前・タグ・メールで検索" aria-label="チャットを検索" className="flex-1 min-w-0 text-xs py-1.5" />
-          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as 'recent' | 'unread')} className="text-xs border border-gray-300 rounded-md px-1.5 py-1.5 bg-white text-gray-600" title="並び替え">
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as 'recent' | 'unread' | 'stale')} className="text-xs border border-gray-300 rounded-md px-1.5 py-1.5 bg-white text-gray-600" title="並び替え">
             <option value="recent">最新順</option>
             <option value="unread">未読優先</option>
+            <option value="stale">放置順</option>
           </select>
         </div>
         <div className="flex border-b border-gray-200 bg-gray-50">{visibleChannelFilters.map((f) => (<button key={f.key} onClick={() => { setChannelFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2 min-h-[40px] text-xs font-medium transition-colors ${channelFilter === f.key ? 'bg-white text-gray-900 border-b-2 border-purple-600' : 'text-gray-500 hover:bg-white'}`}>{f.label}</button>))}</div>
@@ -360,6 +364,7 @@ export default function ChatsPage() {
         <div className="px-3 py-1.5 border-b border-gray-100 bg-white flex items-center justify-between gap-2">
           <span className="text-[11px] text-gray-500">全{total}件{unreadChatCount > 0 ? `・未読${unreadChatCount}件` : ''}</span>
           <div className="flex items-center gap-2">
+            <button onClick={() => setAttentionOnly((v) => !v)} className={`px-1.5 py-0.5 text-[11px] rounded ${attentionOnly ? 'bg-amber-100 text-amber-800' : 'text-gray-400 hover:text-gray-600'}`} title="退会・解約・返金・未着などの語を含む会話だけ表示（判断はしません）">要返信</button>
             <button onClick={() => setMineOnly((v) => !v)} className={`px-1.5 py-0.5 text-[11px] rounded ${mineOnly ? 'bg-green-100 text-green-700' : 'text-gray-400 hover:text-gray-600'}`}>自分の担当</button>
             <button onClick={handleReadAll} disabled={bulkReading || unreadChatCount === 0} className="px-1.5 py-0.5 text-[11px] rounded text-gray-500 hover:text-gray-700 disabled:opacity-40">一括既読</button>
           </div>
@@ -382,6 +387,9 @@ export default function ChatsPage() {
                       </div>
                       <p className="text-xs text-gray-500 truncate mt-0.5">{chat.preview || 'メッセージはありません'}</p>
                       <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        {Number(chat.waitingDays ?? -1) >= 7 && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-red-100 text-red-700 font-medium">{chat.waitingDays}日放置</span>)}
+                        {Number(chat.waitingDays ?? -1) >= 3 && Number(chat.waitingDays) < 7 && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-orange-100 text-orange-700">{chat.waitingDays}日未返信</span>)}
+                        {chat.needsAttention && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-800">要返信候補</span>)}
                         {aiStatusConfig[chat.aiStatus] && (<span className={`px-1.5 py-0.5 text-[10px] rounded ${aiStatusConfig[chat.aiStatus].className}`}>{aiStatusConfig[chat.aiStatus].label}</span>)}
                         {chat.aiMoneyFlag && <span className="px-1.5 py-0.5 text-[10px] rounded bg-orange-100 text-orange-700">💰 金銭</span>}
                         {chat.assignedStaffName && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-indigo-50 text-indigo-600">👤 {chat.assignedStaffName}</span>)}

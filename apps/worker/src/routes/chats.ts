@@ -66,7 +66,9 @@ const CHAT_LIST_SELECT = `SELECT
   c.assigned_staff_id, c.assigned_at, c.last_read_at,
   f.display_name, f.picture_url, f.line_user_id, f.line_account_id,
   sm.name AS assigned_staff_name,
-  ${UNREAD_EXPR} AS unread_count
+  ${UNREAD_EXPR} AS unread_count,
+  (SELECT MAX(i3.created_at) FROM messages_log i3
+    WHERE i3.friend_id = c.friend_id AND i3.direction = 'incoming') AS last_incoming_at
 FROM chats c
 LEFT JOIN friends f ON c.friend_id = f.id
 LEFT JOIN staff_members sm ON sm.id = c.assigned_staff_id
@@ -76,6 +78,31 @@ LEFT JOIN (
   WHERE direction = 'outgoing' AND broadcast_id IS NULL AND scenario_step_id IS NULL
   GROUP BY friend_id
 ) staff_reply ON staff_reply.friend_id = c.friend_id`;
+
+/**
+ * 「要返信候補」の絞り込み（判断ではなく、人が見る順番を決めるためのヒント）。
+ * 文面の語だけで「返信不要なお礼」と「返信が必要な依頼」は区別できないため、
+ * これで自動クローズはしない。UIのフィルタとしてだけ使う。
+ */
+const ATTENTION_KEYWORDS = [
+  '退会', '解約', '返金', '返品', '交換', '届かない', '届きません', '未着', '不良', '破損', '壊れ',
+  '賞味期限', '在庫', 'ないのでしょ', '間違', 'キャンセル', '変更', '修正', '依頼', '相談', '苦情', 'クレーム',
+];
+const ATTENTION_EXPR = (alias: string) => `EXISTS (
+  SELECT 1 FROM messages_log a
+  WHERE a.friend_id = ${alias}.friend_id AND a.direction = 'incoming'
+    AND a.created_at = (SELECT MAX(a2.created_at) FROM messages_log a2
+                        WHERE a2.friend_id = ${alias}.friend_id AND a2.direction = 'incoming')
+    AND (${ATTENTION_KEYWORDS.map(() => "a.content LIKE ?").join(' OR ')})
+)`;
+
+/** 未読がある会話の「最後の顧客メッセージからの経過日数」。未読が無ければ null。 */
+function waitingDays(lastIncomingAt: string | null, unreadCount: number): number | null {
+  if (!lastIncomingAt || unreadCount <= 0) return null;
+  const ts = Date.parse(lastIncomingAt);
+  if (Number.isNaN(ts)) return null;
+  return Math.max(0, Math.floor((Date.now() - ts) / 86_400_000));
+}
 
 /**
  * 一覧用の付加情報（最終メッセージのプレビュー・タグ）をまとめて取得する。
@@ -143,9 +170,17 @@ chats.get('/api/chats', async (c) => {
     const channel = c.req.query('channel') ?? undefined;
     const assignedStaffId = c.req.query('assignedStaffId') ?? undefined;
     const q = (c.req.query('q') ?? '').trim();
+    const attention = c.req.query('attention') === '1';
     const limit = Math.min(Math.max(Number(c.req.query('limit') ?? '100') || 100, 1), 500);
     const offset = Math.max(Number(c.req.query('offset') ?? '0') || 0, 0);
-    const sort = c.req.query('sort') === 'unread' ? 'unread' : 'recent';
+    const sortParam = c.req.query('sort');
+    const sort = sortParam === 'unread' ? 'unread' : sortParam === 'stale' ? 'stale' : 'recent';
+
+    // 要返信候補の判定は必要時だけ計算する（全件にEXISTSを回すと重い）
+    const attentionParams = attention ? ATTENTION_KEYWORDS.map((k) => `%${k}%`) : [];
+    const innerSql = attention
+      ? `SELECT x.*, ${ATTENTION_EXPR('x')} AS needs_attention FROM (${CHAT_LIST_SELECT}) x`
+      : `SELECT * FROM (${CHAT_LIST_SELECT}) x`;
 
     const conditions: string[] = [];
     const bindings: unknown[] = [];
@@ -176,17 +211,25 @@ chats.get('/api/chats', async (c) => {
       bindings.push(like, like, like);
     }
 
-    const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+    if (attention) { conditions.push('x.needs_attention = 1'); }
+
+    // 条件は外側の別名に付け替えて使う（一覧と件数で同じ条件を共有する）
+    const whereFor = (alias: string) =>
+      conditions.length > 0
+        ? ' WHERE ' + conditions.map((cd) => cd.replace(/\bx\./g, `${alias}.`)).join(' AND ')
+        : '';
     const order = sort === 'unread'
       ? ' ORDER BY x.unread_count DESC, x.last_message_at DESC'
-      : ' ORDER BY x.last_message_at DESC';
+      : sort === 'stale'
+        ? ' ORDER BY (x.unread_count > 0) DESC, x.last_incoming_at ASC'
+        : ' ORDER BY x.last_message_at DESC';
 
     const [listRes, countRes] = await Promise.all([
-      c.env.DB.prepare(`SELECT * FROM (${CHAT_LIST_SELECT}) x${where}${order} LIMIT ? OFFSET ?`)
-        .bind(...bindings, limit, offset)
+      c.env.DB.prepare(`${innerSql}${whereFor('x')}${order} LIMIT ? OFFSET ?`)
+        .bind(...attentionParams, ...bindings, limit, offset)
         .all(),
-      c.env.DB.prepare(`SELECT COUNT(*) AS n FROM (${CHAT_LIST_SELECT}) x${where}`)
-        .bind(...bindings)
+      c.env.DB.prepare(`SELECT COUNT(*) AS n FROM (${innerSql}) cnt${whereFor('cnt')}`)
+        .bind(...attentionParams, ...bindings)
         .first<{ n: number }>(),
     ]);
 
@@ -211,6 +254,9 @@ chats.get('/api/chats', async (c) => {
           aiStatus: ch.ai_status ?? null, aiCategory: ch.ai_category ?? null, aiMoneyFlag: !!ch.ai_money_flag,
           assignedStaffId: ch.assigned_staff_id ?? null, assignedStaffName: ch.assigned_staff_name ?? null,
           lastReadAt: ch.last_read_at ?? null,
+          lastIncomingAt: (ch.last_incoming_at as string | null) ?? null,
+          waitingDays: waitingDays((ch.last_incoming_at as string | null) ?? null, Number(ch.unread_count ?? 0)),
+          needsAttention: !!ch.needs_attention,
           preview: enriched.preview.get(friendId) ?? '',
           unreadCount: Number(ch.unread_count ?? 0),
           tags: enriched.tags.get(friendId) ?? [],
