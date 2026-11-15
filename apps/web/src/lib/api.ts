@@ -635,6 +635,7 @@ export const api = {
       offset?: number
       sort?: 'recent' | 'unread' | 'stale'
       attention?: boolean
+      intent?: 'needs_reply' | 'closing' | 'unclear' | 'unchecked'
     }) => {
       const query: Record<string, string> = {}
       if (params?.status) query.status = params.status
@@ -647,6 +648,7 @@ export const api = {
       if (params?.offset) query.offset = String(params.offset)
       if (params?.sort) query.sort = params.sort
       if (params?.attention) query.attention = '1'
+      if (params?.intent) query.intent = params.intent
       return fetchApi<
         ApiResponse<Chat[]> & { meta?: { total: number; limit: number; offset: number; hasMore: boolean } }
       >('/api/chats?' + new URLSearchParams(query))
@@ -668,6 +670,18 @@ export const api = {
         `/api/chats/${id}/claim`,
         { method: 'POST' },
       ),
+    /** 顧客の最終メッセージの意図をAIで判定（1回最大20件）。remaining が0になるまで繰り返す */
+    classifyIntents: (limit = 10) =>
+      fetchApi<
+        ApiResponse<{
+          processed: number
+          needs_reply: number
+          closing: number
+          unclear: number
+          skipped: number
+          remaining: number
+        }>
+      >('/api/chats/intent-classify', { method: 'POST', body: JSON.stringify({ limit }) }),
     get: (id: string, params?: { before?: string; limit?: number }) => {
       const query: Record<string, string> = {}
       if (params?.before) query.before = params.before
