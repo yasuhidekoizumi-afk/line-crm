@@ -14,9 +14,43 @@ interface EgiftCampaign {
 interface EgiftKpi {
   applications: number; winners: number; issuedGifts: number
   openedGifts: number; lineAddedGifts: number; redeemedGifts: number
-  fulfilledGifts: number; firstPurchaseRecipients: number
+  fulfilledGifts: number; shippableGifts: number; firstPurchaseRecipients: number
+  firstPurchaseRecipients30d: number; excludedPurchases: number
   friendAddRate: number; redeemRate: number; firstPurchaseRate: number
-  blockedRecipients: number
+  firstPurchaseRate30d: number; blockedRecipients: number
+}
+
+interface ShippingItem {
+  id: string; giver_display_name: string | null
+  recipient_name: string | null; recipient_zip: string | null
+  recipient_address: string | null; recipient_email: string | null
+  redeemed_at: string | null; fulfilled_at: string | null; status: string
+}
+
+function toCsv(rows: ShippingItem[]): string {
+  const header = ['引換日', 'お名前', '郵便番号', 'ご住所', 'メール', '贈り主', '状態', 'ギフトID']
+  const body = rows.map(r => [
+    r.redeemed_at?.slice(0, 10) ?? '',
+    r.recipient_name ?? '',
+    r.recipient_zip ?? '',
+    r.recipient_address ?? '',
+    r.recipient_email ?? '',
+    r.giver_display_name ?? '',
+    r.status === 'fulfilled' ? '発送済' : '未発送',
+    r.id,
+  ])
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
+  return [header, ...body].map(cols => cols.map(escape).join(',')).join('\r\n')
+}
+
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function pct(v: number) { return (v * 100).toFixed(1) + '%' }
@@ -78,11 +112,13 @@ export default function EgiftPilotPage() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
   const [lotteryDate, setLotteryDate] = useState(new Date().toISOString().slice(0, 10))
   const [applyUrl, setApplyUrl] = useState<string | null>(null)
+  const [shipping, setShipping] = useState<ShippingItem[]>([])
 
   const refreshData = useCallback((id: string) => {
     api.egift.getKpi(id).then(r => { if (r.success) setKpi(r.data) }).catch(() => {})
     api.egift.listApplications(id).then(r => { if (r.success) setApplications(r.data) }).catch(() => {})
     api.egift.listGifts(id).then(r => { if (r.success) setGifts(r.data) }).catch(() => {})
+    api.egift.listShipping(id).then(r => { if (r.success) setShipping(r.data.items) }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -126,7 +162,8 @@ export default function EgiftPilotPage() {
         <p className="mb-3">
           既存のお客さま（LINE友だち・購入者）を<strong>贈り主</strong>として抽選で選び、
           友人・家族に ORYZAE のギフト商品を無料で贈ってもらいます。
-          受贈者は LINE友だち追加 → 100%OFFクーポンで引換 → 初回購入へ、という流れです。
+          受贈者は LINE友だち追加 → お届け先を入力して引換 → 初回購入へ、という流れです。
+          （引換後に管理画面の「出荷」から住所をCSVで取得し、発送後に「発送済み」に更新します）
           （初回パイロットは <strong>米麹ミニグラノーラ 選べる3種セット</strong>、商品はキャンペーン作成時に切り替え可能）
         </p>
 
@@ -139,7 +176,7 @@ export default function EgiftPilotPage() {
           <li>贈り主が友人にリンクを共有 → 受け取った人が LINE 友だち追加 → 引換</li>
         </ol>
         <p className="text-xs text-gray-500">
-          🎯 KGI：受贈者の初回購入転換　／　必須KPI：受贈者のLINE友だち化　／　期間：2026-07-21〜08-17（4週間）
+          🎯 KGI：受贈者の初回購入転換　／　必須KPI：受贈者のLINE友だち化
         </p>
       </div>
 
@@ -228,15 +265,24 @@ export default function EgiftPilotPage() {
           </div>
 
           <h2 className="text-lg font-semibold mb-3">🎯 KGI: 初回購入</h2>
-          <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="grid grid-cols-4 gap-3 mb-2">
             <KpiCard
               label="初回購入者"
               value={kpi.firstPurchaseRecipients}
               sub={`初回購入率 ${pct(kpi.firstPurchaseRate)}`}
               highlight
             />
+            <KpiCard
+              label="30日以内の購入"
+              value={kpi.firstPurchaseRecipients30d}
+              sub={`30日率 ${pct(kpi.firstPurchaseRate30d)}`}
+            />
+            <KpiCard label="成果から除外" value={kpi.excludedPurchases} sub="アフィリエイト・既存購入者" />
             <KpiCard label="ブロック" value={kpi.blockedRecipients} warn />
           </div>
+          <p className="text-xs text-gray-400 mb-8">
+            初回購入は Shopify注文の取り込み時に自動判定します。注文にアフィリエイト成果がある場合、または受贈者に購入歴がある場合はKGIに計上せず「除外」に数えます。
+          </p>
 
           {/* GO/STOP */}
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
@@ -470,6 +516,95 @@ export default function EgiftPilotPage() {
             </div>
           ) : (
             <p className="text-sm text-gray-400 mb-8">まだギフトは発行されていません。抽選を実行するとここに表示されます。</p>
+          )}
+
+          {/* =========================================================== */}
+          {/* 出荷（引換済み → 発送済み） */}
+          {/* =========================================================== */}
+          <h2 className="text-lg font-semibold mb-3">
+            📦 出荷
+            <span className="text-sm font-normal text-gray-500 ml-2">
+              （未発送 {shipping.filter(s => s.status === 'redeemed').length}件 / 発送済 {shipping.filter(s => s.status === 'fulfilled').length}件）
+            </span>
+          </h2>
+          {shipping.length > 0 ? (
+            <>
+              <div className="flex gap-2 mb-2">
+                <button
+                  className="text-xs px-3 py-1.5 bg-gray-700 text-white rounded hover:bg-gray-800"
+                  onClick={() => {
+                    const pending = shipping.filter(s => s.status === 'redeemed')
+                    const rows = pending.length > 0 ? pending : shipping
+                    downloadCsv(
+                      `egift-shipping-${new Date().toISOString().slice(0, 10)}.csv`,
+                      toCsv(rows),
+                    )
+                    notifySuccess(`${rows.length}件をCSVで出力しました`)
+                  }}
+                >⬇ 未発送のCSVを出力</button>
+                <button
+                  className="text-xs px-3 py-1.5 bg-white border rounded hover:bg-gray-50"
+                  onClick={() => refreshData(selectedId!)}
+                >↻ 再読み込み</button>
+              </div>
+              <p className="text-xs text-gray-400 mb-2">
+                発送が終わったら「発送済み」を押してください。発送完了率とKPIに反映されます。
+              </p>
+              <div className="mb-8 max-h-80 overflow-y-auto border rounded">
+                <table className="text-sm w-full">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2 border-b">引換日</th>
+                      <th className="text-left px-3 py-2 border-b">お届け先</th>
+                      <th className="text-left px-3 py-2 border-b">贈り主</th>
+                      <th className="text-left px-3 py-2 border-b">状態</th>
+                      <th className="text-left px-3 py-2 border-b"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shipping.map((s) => (
+                      <tr key={s.id} className="border-b">
+                        <td className="px-3 py-2 text-xs text-gray-500">{s.redeemed_at?.slice(0, 10) ?? '—'}</td>
+                        <td className="px-3 py-2 text-xs">
+                          <div>{s.recipient_name || '(未入力)'}</div>
+                          <div className="text-gray-500">
+                            {s.recipient_zip ? `〒${s.recipient_zip} ` : ''}{s.recipient_address || ''}
+                          </div>
+                          {s.recipient_email && <div className="text-gray-400">{s.recipient_email}</div>}
+                        </td>
+                        <td className="px-3 py-2 text-xs">{s.giver_display_name || '(未設定)'}</td>
+                        <td className="px-3 py-2">
+                          <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[s.status] || ''}`}>
+                            {STATUS_LABELS[s.status] || s.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {s.status === 'redeemed' && (
+                            <button
+                              className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                              onClick={async () => {
+                                if (!(await confirmDialog({ message: `${s.recipient_name || '受贈者'} さんへの発送を「発送済み」にしますか？` }))) return
+                                const r = await api.egift.fulfillGift(s.id)
+                                if (r.success) {
+                                  notifySuccess('発送済みに更新しました')
+                                  refreshData(selectedId!)
+                                } else {
+                                  notifyError('更新失敗: ' + r.error)
+                                }
+                              }}
+                            >発送済みにする</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-400 mb-8">
+              まだ引換済みのギフトはありません。受贈者がお届け先を入力すると、ここに出荷対象が並びます。
+            </p>
           )}
         </>
       ) : (

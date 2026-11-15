@@ -20,6 +20,9 @@ import {
   markGiftLineAdded,
   redeemGift,
   getEgiftCampaignKpi,
+  computeEgiftLotteryWeight,
+  listShippableGifts,
+  markGiftFulfilled,
   type EgiftCampaign,
   type EgiftApplication,
   type EgiftGift,
@@ -30,6 +33,26 @@ import { getShopifyAdminToken } from '../utils/shopify-token.js';
 import type { Env } from '../index.js';
 
 const egift = new Hono<Env>();
+
+/**
+ * その日の発行可能数 = min(日次上限, 合計上限の残り, 在庫予算の残り)。
+ * dry-run と commit で同じ値を使い、プレビューと実行結果をずらさない。
+ */
+async function getRemainingGiftCapacity(
+  db: D1Database,
+  campaignId: string,
+  campaign: EgiftCampaign,
+): Promise<number> {
+  const issuedRow = await db
+    .prepare(`SELECT COUNT(*) as cnt FROM egift_gifts WHERE campaign_id = ? AND status <> 'cancelled'`)
+    .bind(campaignId)
+    .first<{ cnt: number }>();
+  const issuedCount = issuedRow?.cnt ?? 0;
+  const caps = [campaign.daily_winner_limit];
+  if (campaign.total_gift_limit != null) caps.push(campaign.total_gift_limit - issuedCount);
+  if (campaign.inventory_budget != null) caps.push(campaign.inventory_budget - issuedCount);
+  return Math.min(...caps);
+}
 
 type SavedRecipientAddress = {
   name: string;
@@ -276,12 +299,16 @@ egift.post('/api/egift/applications', async (c) => {
       return c.json({ success: false, error: 'giverFriendId or lineUserId is required' }, 400);
     }
 
+    // 抽選の重みはサーバー側の顧客状態（ランク・最終購入日）から決める。
+    // クライアントが送ってきた値は使わない（自己申告で当選確率を上げられてしまう）。
+    const lotteryWeight = await computeEgiftLotteryWeight(c.env.DB, giverFriendId);
+
     const application = await createEgiftApplication(c.env.DB, {
       campaignId: body.campaignId,
       giverFriendId,
       occasion: body.occasion ?? 'other',
       message: body.message,
-      lotteryWeight: body.lotteryWeight,
+      lotteryWeight,
     });
     return c.json({ success: true, data: application }, 201);
   } catch (e) {
@@ -321,7 +348,7 @@ egift.post('/api/egift/campaigns/:id/lottery/dry-run', async (c) => {
     const seen = new Set<string>();
     const winners: typeof weighted = [];
     const campaign = await getEgiftCampaignById(c.env.DB, campaignId);
-    const limit = campaign?.daily_winner_limit ?? 10;
+    const limit = campaign ? await getRemainingGiftCapacity(c.env.DB, campaignId, campaign) : 10;
     for (const w of weighted) {
       if (seen.has(w.giverFriendId)) continue;
       seen.add(w.giverFriendId);
@@ -364,6 +391,13 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
 
     const limit = campaign.daily_winner_limit;
 
+    // 原資上限（合計発行数・在庫予算）を超えて発行しない。
+    // 日次上限だけを見ていると、期間後半で在庫を食い潰す。
+    const remaining = await getRemainingGiftCapacity(c.env.DB, campaignId, campaign);
+    if (remaining <= 0) {
+      return c.json({ success: false, error: '原資上限（発行可能数）に達しています' }, 400);
+    }
+
     // weighted lottery
     const weighted: Array<{ applicationId: string; giverFriendId: string; weight: number }> = [];
     for (const c of candidates) {
@@ -383,7 +417,7 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
       if (seen.has(w.giverFriendId)) continue;
       seen.add(w.giverFriendId);
       winners.push(w);
-      if (winners.length >= limit) break;
+      if (winners.length >= remaining) break;
     }
 
     // Update applications + create gifts
@@ -391,7 +425,7 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const redeemExpiresAt = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
-    const created: Array<{ applicationId: string; giftToken: string }> = [];
+    const created: Array<{ applicationId: string; giverFriendId: string; giftToken: string }> = [];
 
     for (const w of winners) {
       // mark as won
@@ -408,7 +442,7 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
         expiresAt,
         redeemExpiresAt,
       });
-      created.push({ applicationId: w.applicationId, giftToken });
+      created.push({ applicationId: w.applicationId, giverFriendId: w.giverFriendId, giftToken });
     }
 
     // mark losers
@@ -418,12 +452,14 @@ egift.post('/api/egift/campaigns/:id/lottery/commit', async (c) => {
 
     // Send LINE push to winners (fire-and-forget) with gift URLs
     if (c.env.LINE_CHANNEL_ACCESS_TOKEN) {
+      const workerBase = (c.env.WORKER_URL || 'https://oryzae-line-crm.oryzae.workers.dev').replace(/\/+$/, '');
       for (const w of created) {
+        // 贈り主のfriend_idで引く（以前はapplicationIdを渡していて通知が一度も送れていなかった）
         const friend = await c.env.DB.prepare(
           'SELECT line_user_id FROM friends WHERE id = ?',
-        ).bind(w.applicationId).first<{ line_user_id: string | null }>();
+        ).bind(w.giverFriendId).first<{ line_user_id: string | null }>();
         if (friend?.line_user_id?.startsWith('U')) {
-          const giftUrl = `https://oryzae-line-crm.oryzae.workers.dev/g/${w.giftToken}`;
+          const giftUrl = `${workerBase}/g/${w.giftToken}`;
           fetch('https://api.line.me/v2/bot/message/push', {
             method: 'POST',
             headers: {
@@ -1103,11 +1139,15 @@ egift.post('/api/egift/gifts/redeem', async (c) => {
     }
 
     // Create Shopify 100% OFF discount code
+    // パイロットは「住所を受けて手動出荷」で運用するため、既定ではクーポンを発行しない。
+    // （受贈者にコードを一度も見せていないのに100%OFFコードだけがShopifyに溜まるのを防ぐ）
+    // 受贈者自身にShopifyで注文させる方式に切り替えるときは EGIFT_ISSUE_COUPON=1 を設定する。
     const domain = c.env.SHOPIFY_SHOP_DOMAIN || 'yasuhide-koizumi.myshopify.com';
     const adminToken = c.env.SHOPIFY_ADMIN_TOKEN;
-    let couponCode = `EGIFT-${gift.id.slice(0, 8).toUpperCase()}`;
+    let couponCode = '';
 
-    if (adminToken) {
+    if (adminToken && c.env.EGIFT_ISSUE_COUPON === '1') {
+      couponCode = `EGIFT-${gift.id.slice(0, 8).toUpperCase()}`;
       try {
         // Get campaign to find target product
         const campaign = gift.campaign_id
@@ -1255,6 +1295,38 @@ egift.get('/api/egift/shopify-address', async (c) => {
     } });
   } catch {
     return c.json({ success: true, data: null });
+  }
+});
+
+// =============================================================================
+// 出荷オペレーション（引換済み → 発送済み）
+// =============================================================================
+
+egift.get('/api/egift/campaigns/:id/shipping', async (c) => {
+  try {
+    const items = await listShippableGifts(c.env.DB, c.req.param('id'));
+    return c.json({
+      success: true,
+      data: {
+        items,
+        pendingCount: items.filter((i) => i.status === 'redeemed').length,
+        fulfilledCount: items.filter((i) => i.status === 'fulfilled').length,
+      },
+    });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
+  }
+});
+
+egift.post('/api/egift/gifts/:id/fulfill', async (c) => {
+  try {
+    const ok = await markGiftFulfilled(c.env.DB, c.req.param('id'));
+    if (!ok) {
+      return c.json({ success: false, error: '引換済みのギフトではありません（既に発送済みか、未引換です）' }, 409);
+    }
+    return c.json({ success: true, data: { giftId: c.req.param('id'), status: 'fulfilled' } });
+  } catch (e) {
+    return c.json({ success: false, error: String(e) }, 500);
   }
 });
 

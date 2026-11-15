@@ -860,6 +860,10 @@ export const api = {
       fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/lottery/commit`, { method: 'POST', body: JSON.stringify({ date }) }),
     getKpi: (campaignId: string) =>
       fetchApi<ApiResponse<any>>(`/api/egift/campaigns/${campaignId}/kpi`),
+    listShipping: (campaignId: string) =>
+      fetchApi<ApiResponse<{ items: any[]; pendingCount: number; fulfilledCount: number }>>(`/api/egift/campaigns/${campaignId}/shipping`),
+    fulfillGift: (giftId: string) =>
+      fetchApi<ApiResponse<any>>(`/api/egift/gifts/${giftId}/fulfill`, { method: 'POST' }),
   },
 }
 

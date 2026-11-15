@@ -11,6 +11,7 @@
 
 import { markPointCodeUsedByFriendId } from './loyalty-code-refund.js';
 import { consumeDirectPointReservationForOrder } from './direct-point-redemption.js';
+import { attributeEgiftPurchase } from './egift-attribution.js';
 
 export interface ShopifyOrderPayload {
   id: number | string;
@@ -313,6 +314,18 @@ export async function persistShopifyOrder(
       }
     }
   }
+
+  // eGift受贈者の初回購入アトリビューション（KGI B）。
+  // 失敗しても注文取り込みは止めない（attributeEgiftPurchase 内部で握りつぶす）。
+  await attributeEgiftPurchase(db, {
+    shopifyOrderId,
+    shopifyCustomerId,
+    friendId: friend_id,
+    email,
+    orderTotal: toNum(order.total_price) ?? 0,
+    purchasedAt: processedAt,
+    cancelledAt: order.cancelled_at ?? null,
+  });
 
   return {
     shopifyOrderId,

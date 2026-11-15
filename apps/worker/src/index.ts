@@ -69,7 +69,7 @@ import { rakutenMailmag } from './routes/rakuten-mailmag.js';
 import { checkRakutenLicenseExpiry } from './services/rakuten-license-monitor.js';
 import { processLoyaltyExpirations } from './services/loyalty-expiry.js';
 import { expireStaleDirectPointReservations } from './services/direct-point-redemption.js';
-import { expireGifts } from '@line-crm/db';
+import { expireGifts, completeExpiredCampaigns } from '@line-crm/db';
 // FERMENT: メールマーケティング拡張
 import {
   emailApiRouter,
@@ -187,6 +187,8 @@ export type Env = {
     INCOMING_WEBHOOK_SECRET?: string;
     // 期間限定ポイントの失効を有効化するフラグ（'1' でON。既定OFF）
     LIMITED_POINT_EXPIRY_ENABLED?: string;
+    // eGiftの引換時にShopify 100%OFFクーポンを発行するフラグ（'1' でON。既定OFF＝手動出荷）
+    EGIFT_ISSUE_COUPON?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -484,6 +486,10 @@ async function buildCommonCronJobs(
   jobs.push(processLoyaltyExpirations(env.DB, { expireLimited: env.LIMITED_POINT_EXPIRY_ENABLED === '1' }).then(() => undefined));
   jobs.push(expireGifts(env.DB).then((n) => {
     if (n > 0) console.log(`[egift] expired ${n} gifts`);
+  }).catch(() => {}).then(() => {}));
+  // 終了日を過ぎたキャンペーンを自動で completed にする（「実施中」が残り続けるのを防ぐ）
+  jobs.push(completeExpiredCampaigns(env.DB).then((n) => {
+    if (n > 0) console.log(`[egift] completed ${n} campaigns`);
   }).catch(() => {}).then(() => {}));
   return jobs;
 }
