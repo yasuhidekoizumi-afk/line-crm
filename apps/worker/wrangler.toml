@@ -65,3 +65,6 @@ CS_FAQ_SHEET_RANGE = "FAQ!A2:F1000"
 # wrangler secret put CS_FAQ_SHEET_ID
 # LINE AI Chatbot: Gemini 3.6 Flash API Key（既存のcs-triage.ts用GEMINI_API_KEYと共用）
 # wrangler secret put GEMINI_API_KEY
+# CS Phase 1: LINE受信のAIトリアージ（下書き生成のみ。送信は必ず人間承認）
+# 有効化するときは [vars] か secret に CS_LINE_TRIAGE_ENABLED = "true" を追加する。
+# webhook側の LINE_AI_AUTOREPLY_ENABLED（即返信）とは別系統で、二重返信はしない。
