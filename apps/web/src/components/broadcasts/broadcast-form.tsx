@@ -82,6 +82,62 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
   const [friendLoading, setFriendLoading] = useState(false)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // テスト送信（1名）: 本番の宛先には送らず、本文を実機で確認する
+  const [testSearchInput, setTestSearchInput] = useState('')
+  const [testSearchQuery, setTestSearchQuery] = useState('')
+  const [testCandidates, setTestCandidates] = useState<FriendWithTags[]>([])
+  const [testSearchLoading, setTestSearchLoading] = useState(false)
+  const [testSendingTo, setTestSendingTo] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setTestSearchQuery(testSearchInput.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [testSearchInput])
+
+  useEffect(() => {
+    if (!testSearchQuery) { setTestCandidates([]); return }
+    let cancelled = false
+    setTestSearchLoading(true)
+    ;(async () => {
+      try {
+        const params: Record<string, string> = { offset: '0', limit: '5', search: testSearchQuery }
+        if (selectedAccountId) params.accountId = selectedAccountId
+        const res = await api.friends.list(params)
+        if (!cancelled && res.success) setTestCandidates(res.data.items)
+      } catch { /* ignore */ } finally {
+        if (!cancelled) setTestSearchLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [testSearchQuery, selectedAccountId])
+
+  const handleTestSend = async (friend: FriendWithTags) => {
+    const payload = blocksToPayload(form.blocks)
+    if (!payload.messageContent.trim()) {
+      setTestResult({ ok: false, message: '本文が空です。メッセージを入力してください。' })
+      return
+    }
+    setTestSendingTo(friend.id)
+    setTestResult(null)
+    try {
+      const res = await api.broadcasts.testSend({
+        friendId: friend.id,
+        messageType: payload.messageType as ApiBroadcast['messageType'],
+        messageContent: payload.messageContent,
+        altText: payload.altText ?? undefined,
+        lineAccountId: selectedAccountId || undefined,
+      })
+      setTestResult(res.success
+        ? { ok: true, message: `${res.data.displayName || friend.displayName || friend.lineUserId} さんに ${res.data.messageCount}通 送信しました` }
+        : { ok: false, message: res.error })
+    } catch {
+      setTestResult({ ok: false, message: 'テスト送信に失敗しました' })
+    } finally {
+      setTestSendingTo(null)
+    }
+  }
+
   const loadFriendCandidates = useCallback(async () => {
     setFriendLoading(true)
     try {
@@ -308,6 +364,46 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
               <MessageBlocksPreview blocks={form.blocks} />
             </div>
           </div>
+        </div>
+
+        {/* テスト送信（1名）: 本番の宛先を変えずに本文だけ実機で確認する */}
+        <div className="max-w-lg rounded-lg border border-dashed border-gray-300 p-4">
+          <div className="text-xs font-medium text-gray-700">テスト送信（1名に送る）</div>
+          <p className="mt-1 text-[11px] leading-5 text-gray-500">
+            本番の宛先には送りません。保存前の本文を、選んだ1名のLINEに届けて確認できます。
+            計測リンクは付かないため、クリック数や配信実績には反映されません。
+          </p>
+          <input
+            type="text"
+            value={testSearchInput}
+            onChange={(e) => { setTestSearchInput(e.target.value); setTestResult(null) }}
+            placeholder="名前・メールで検索（例: 小泉）"
+            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          />
+          {testSearchLoading && <p className="mt-2 text-[11px] text-gray-400">検索中...</p>}
+          {testCandidates.length > 0 && (
+            <div className="mt-2 overflow-hidden rounded-md border border-gray-200">
+              {testCandidates.map((f) => (
+                <div key={f.id} className="flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 last:border-0">
+                  <span className="min-w-0 truncate text-xs text-gray-800">
+                    {f.displayName || f.lineUserId}
+                    {!f.isFollowing && <span className="ml-1 text-[10px] text-gray-400">（ブロック済）</span>}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!f.isFollowing || testSendingTo === f.id}
+                    onClick={() => handleTestSend(f)}
+                    className="shrink-0 rounded-md border border-green-200 bg-green-50 px-2.5 py-1 text-[11px] font-medium text-green-700 hover:bg-green-100 disabled:opacity-40"
+                  >
+                    {testSendingTo === f.id ? '送信中...' : 'この人に送る'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {testResult && (
+            <p className={`mt-2 text-[11px] ${testResult.ok ? 'text-green-700' : 'text-red-600'}`}>{testResult.message}</p>
+          )}
         </div>
 
         {/* Target */}

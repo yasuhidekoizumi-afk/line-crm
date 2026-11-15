@@ -333,6 +333,17 @@ export const api = {
       fetchApi<ApiResponse<ApiBroadcast>>(`/api/broadcasts/${id}`),
     detail: (id: string) =>
       fetchApi<ApiResponse<ApiBroadcastDetail>>(`/api/broadcasts/${id}/detail`),
+    testSend: (data: {
+      friendId: string
+      messageType: ApiBroadcast['messageType']
+      messageContent: string
+      altText?: string | null
+      lineAccountId?: string | null
+    }) =>
+      fetchApi<ApiResponse<{ friendId: string; displayName: string; messageCount: number }>>('/api/broadcasts/test-send', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
     create: (data: {
       title: string
       messageType: ApiBroadcast['messageType']

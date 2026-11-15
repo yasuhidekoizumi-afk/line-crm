@@ -9,7 +9,7 @@ import {
   getSegmentById,
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
-import { processBroadcastSend, resolveBroadcastLineClient } from '../services/broadcast.js';
+import { processBroadcastSend, resolveBroadcastLineClient, buildMessages, isSendableLineUserId } from '../services/broadcast.js';
 import { getBroadcastBlockStats } from '../services/broadcast-block-metrics.js';
 import { getSegmentLineUserIds, getSegmentAudienceBreakdown } from '@line-crm/db';
 import type { Env } from '../index.js';
@@ -814,6 +814,76 @@ broadcasts.post('/api/broadcasts', async (c) => {
     return c.json({ success: true, data: serializeBroadcast(broadcast) }, 201);
   } catch (err) {
     console.error('POST /api/broadcasts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/broadcasts/test-send - 保存前の本文を1名だけに送って確認する
+// 本番の宛先設定・計測リンク・配信実績には一切触らない（DB書き込みなし）。
+broadcasts.post('/api/broadcasts/test-send', async (c) => {
+  try {
+    const body = await c.req.json<{
+      friendId?: string;
+      messageType?: string;
+      messageContent?: string;
+      altText?: string | null;
+      lineAccountId?: string | null;
+    }>();
+
+    if (!body.friendId) {
+      return c.json({ success: false, error: '送信先の友だちを指定してください' }, 400);
+    }
+    if (!body.messageType || !body.messageContent?.trim()) {
+      return c.json({ success: false, error: '送信する本文がありません' }, 400);
+    }
+
+    const friend = await c.env.DB
+      .prepare('SELECT id, display_name, line_user_id, is_following, line_account_id FROM friends WHERE id = ?')
+      .bind(body.friendId)
+      .first<{ id: string; display_name: string | null; line_user_id: string | null; is_following: number | null; line_account_id: string | null }>();
+
+    if (!friend) {
+      return c.json({ success: false, error: '友だちが見つかりません' }, 400);
+    }
+    if (!isSendableLineUserId(friend.line_user_id)) {
+      return c.json({ success: false, error: 'この友だちはLINEのIDを持っていないため送信できません（メールのみの連携）' }, 400);
+    }
+    if (friend.is_following !== 1) {
+      return c.json({ success: false, error: 'この友だちはブロック中・未フォローのため送信できません' }, 400);
+    }
+
+    const messages = buildMessages(body.messageType, body.messageContent, body.altText ?? undefined);
+    if (messages.length === 0) {
+      return c.json({ success: false, error: '送信する本文がありません' }, 400);
+    }
+    if (messages.length > 5) {
+      return c.json({ success: false, error: 'LINEで一度に送れるのは5通までです' }, 400);
+    }
+
+    const lineAccountId = body.lineAccountId ?? friend.line_account_id ?? null;
+    if (lineAccountId) {
+      const denied = await requireLineAccountAccess(c, lineAccountId);
+      if (denied) return denied;
+    }
+
+    const client = await resolveBroadcastLineClient(c.env.DB, c.env.LINE_CHANNEL_ACCESS_TOKEN, {
+      id: 'test-send',
+      line_account_id: lineAccountId,
+    });
+
+    try {
+      await client.pushMessage(friend.line_user_id, messages);
+    } catch (err) {
+      console.error('POST /api/broadcasts/test-send LINE error:', err);
+      return c.json({ success: false, error: 'LINE側で送信できませんでした。本文の形式と友だちの状態を確認してください。' }, 502);
+    }
+
+    return c.json({
+      success: true,
+      data: { friendId: friend.id, displayName: friend.display_name ?? '', messageCount: messages.length },
+    });
+  } catch (err) {
+    console.error('POST /api/broadcasts/test-send error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
