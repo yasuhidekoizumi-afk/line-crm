@@ -119,8 +119,11 @@ async function handleEvent(
   lineAccountId: string | null = null,
   workerUrl?: string,
   env?: {
+    DB?: D1Database;
+    IMAGES?: R2Bucket;
     GEMINI_API_KEY?: string;
     LINE_AI_AUTOREPLY_ENABLED?: string;
+    CS_LINE_TRIAGE_ENABLED?: string;
     SLACK_BOT_TOKEN?: string;
     GIFTING_SLACK_WEBHOOK_URL?: string;
     WORKER_URL?: string;
@@ -292,8 +295,10 @@ async function handleEvent(
     const autoKeywords = ['料金', '機能', 'API', 'フォーム', 'ヘルプ', 'UUID', 'UUID連携について教えて', 'UUID連携を確認', '配信時間', '導入支援を希望します', 'アカウント連携を見る', '体験を完了する', 'BAN対策を見る', '連携確認'];
     const isAutoKeyword = autoKeywords.some(k => incomingText === k);
     const isTimeCommand = /(?:配信時間|配信|届けて|通知)[はを]?\s*\d{1,2}\s*時/.test(incomingText);
+    let chatForTriage: { id: string } | null = null;
     if (!isAutoKeyword && !isTimeCommand) {
-      await upsertChatOnMessage(db, friend.id);
+      const chatRow = await upsertChatOnMessage(db, friend.id);
+      chatForTriage = chatRow ? { id: chatRow.id } : null;
     }
 
     // 配信時間設定: 「配信時間は○時」「○時に届けて」等のパターンを検出
@@ -521,6 +526,24 @@ ORYZAEは宇都宮大学発の米麹発酵フードテック企業です。お�
       }
     }
 
+    // CS一次対応（AIトリアージ）: 下書き生成までを自動化し、送信は人間承認に回す。
+    // 上の LINE_AI_AUTOREPLY_ENABLED の自動返信とは別系統で、二重返信を避けるため
+    // ここでは絶対に自動送信しない（runLineTriage は allowAutoSend=false 固定）。
+    if (chatForTriage && env?.CS_LINE_TRIAGE_ENABLED === 'true' && env.GEMINI_API_KEY) {
+      try {
+        const { runLineTriage } = await import('./cs.js');
+        await runLineTriage(env as unknown as Parameters<typeof runLineTriage>[0], {
+          chatId: chatForTriage.id,
+          friendId: friend.id,
+          messageId: logId,
+          text: incomingText,
+          customerName: friend.display_name ?? null,
+        });
+      } catch (err) {
+        console.error('[cs] LINE triage failed', err);
+      }
+    }
+
     // イベントバス発火: message_received
     // Pass replyToken only when auto_reply didn't actually consume it
     await fireEvent(db, 'message_received', {
@@ -530,6 +553,122 @@ ORYZAEは宇都宮大学発の米麹発酵フードテック企業です。お�
     }, lineAccessToken, lineAccountId);
 
     return;
+  }
+
+  // テキスト以外（画像・スタンプ・ファイル等）も会話履歴に残す。
+  // ここを落とすとCS画面に顧客の画像が出ず、未読数も実態とずれる。
+  if (event.type === 'message' && event.message.type !== 'text') {
+    const userId = event.source.type === 'user' ? event.source.userId : undefined;
+    if (!userId) return;
+    const friend = await getFriendByLineUserId(db, userId);
+    if (!friend) return;
+
+    const logged = await buildIncomingLog(event, lineAccessToken, env, workerUrl);
+    if (!logged) return;
+
+    await db
+      .prepare(
+        `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+         VALUES (?, ?, 'incoming', ?, ?, NULL, NULL, ?)`,
+      )
+      .bind(crypto.randomUUID(), friend.id, logged.messageType, logged.content, jstNow())
+      .run();
+
+    // スタンプ・画像も「返信が必要な受信」としてチャットを未読に上げる
+    await upsertChatOnMessage(db, friend.id);
+    return;
+  }
+}
+
+/**
+ * テキスト以外の受信メッセージを messages_log に残せる形へ変換する。
+ * 画像はLINEのコンテンツAPIから取得してR2へ保存する（メッセージIDは数日で失効するため、
+ * IDだけ持たせても後から見られなくなる）。
+ */
+async function buildIncomingLog(
+  event: WebhookEvent,
+  lineAccessToken: string,
+  env?: { IMAGES?: R2Bucket; WORKER_URL?: string },
+  workerUrl?: string,
+): Promise<{ messageType: string; content: string } | null> {
+  const message = (event as {
+    message?: {
+      type: string;
+      id: string;
+      packageId?: string;
+      stickerId?: string;
+      fileName?: string;
+      fileSize?: number;
+      duration?: number;
+      latitude?: number;
+      longitude?: number;
+      address?: string;
+    };
+  }).message;
+  if (!message) return null;
+
+  switch (message.type) {
+    case 'sticker':
+      return {
+        messageType: 'sticker',
+        content: JSON.stringify({ packageId: message.packageId ?? null, stickerId: message.stickerId ?? null }),
+      };
+    case 'image': {
+      const stored = await storeIncomingImage(message.id, lineAccessToken, env, workerUrl);
+      // 取得に失敗しても「画像が来た」ことは残す（本文なしで消える方が事故）
+      return { messageType: 'image', content: JSON.stringify(stored ?? { messageId: message.id }) };
+    }
+    case 'file':
+      return {
+        messageType: 'file',
+        content: JSON.stringify({ fileName: message.fileName ?? null, fileSize: message.fileSize ?? null }),
+      };
+    case 'video':
+    case 'audio':
+      return { messageType: message.type, content: JSON.stringify({ duration: message.duration ?? null }) };
+    case 'location':
+      return {
+        messageType: 'location',
+        content: JSON.stringify({
+          latitude: message.latitude ?? null,
+          longitude: message.longitude ?? null,
+          address: message.address ?? null,
+        }),
+      };
+    default:
+      return { messageType: message.type, content: '' };
+  }
+}
+
+/** LINEのコンテンツAPIから画像を取得してR2へ保存し、社内画面で表示できるURLを返す */
+async function storeIncomingImage(
+  messageId: string,
+  lineAccessToken: string,
+  env?: { IMAGES?: R2Bucket; WORKER_URL?: string },
+  workerUrl?: string,
+): Promise<{ originalContentUrl: string; previewImageUrl: string } | null> {
+  const bucket = env?.IMAGES;
+  if (!bucket) return null;
+  try {
+    const res = await fetch(
+      `https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`,
+      { headers: { Authorization: `Bearer ${lineAccessToken}` } },
+    );
+    if (!res.ok) {
+      console.error('[webhook] image content fetch failed', res.status);
+      return null;
+    }
+    const contentType = res.headers.get('content-type') ?? 'image/jpeg';
+    const ext = contentType.includes('png') ? 'png' : contentType.includes('gif') ? 'gif' : 'jpg';
+    // /images/:key はスラッシュを跨げないため、フラットなキーにする
+    const key = `incoming-${messageId}.${ext}`;
+    await bucket.put(key, await res.arrayBuffer(), { httpMetadata: { contentType } });
+    const base = (env?.WORKER_URL || workerUrl || '').replace(/\/$/, '');
+    const url = base ? `${base}/images/${key}` : `/images/${key}`;
+    return { originalContentUrl: url, previewImageUrl: url };
+  } catch (err) {
+    console.error('[webhook] storeIncomingImage failed', err);
+    return null;
   }
 }
 

@@ -263,8 +263,9 @@ async function runTriageForMessage(
   messageId: string,
   text: string,
   subject: string | null,
-  customerEmail: string,
+  customerEmail: string | null,
   channel: CsChannel,
+  opts?: { lineFriendId?: string | null; allowAutoSend?: boolean; customerName?: string | null },
 ): Promise<void> {
   if (!env.GEMINI_API_KEY) {
     console.error('[cs/triage] GEMINI_API_KEY missing');
@@ -272,12 +273,18 @@ async function runTriageForMessage(
   }
 
   // 顧客カルテ取得（LINE harness DB + Shopify Admin API）
-  const link = await findCustomerLink(env.DB, { email: customerEmail });
-  const shopifyCtx = await fetchShopifyCustomerContext(
-    env.SHOPIFY_SHOP_DOMAIN,
-    (await getShopifyAdminToken(env)) ?? undefined,
-    customerEmail,
-  );
+  // LINEは友だちID、メールはアドレスで名寄せする。メール未連携のLINE友だちは
+  // Shopify照会をスキップし、LINEの表示名だけを渡す（推測で名寄せしない）。
+  const link = await findCustomerLink(env.DB, customerEmail
+    ? { email: customerEmail }
+    : { line_friend_id: opts?.lineFriendId ?? undefined });
+  const shopifyCtx = customerEmail
+    ? await fetchShopifyCustomerContext(
+        env.SHOPIFY_SHOP_DOMAIN,
+        (await getShopifyAdminToken(env)) ?? undefined,
+        customerEmail,
+      )
+    : null;
   // Shopify顧客IDが取れたら customer_links を更新（次回以降の名寄せ高速化）
   if (shopifyCtx?.customer && (!link?.shopify_customer_id || link.display_name !== shopifyCtx.customer.name)) {
     await upsertCustomerLink(env.DB, {
@@ -293,7 +300,7 @@ async function runTriageForMessage(
   }));
 
   const customer: CsCustomerContext = {
-    name: shopifyCtx?.customer?.name ?? link?.display_name ?? null,
+    name: shopifyCtx?.customer?.name ?? link?.display_name ?? opts?.customerName ?? null,
     email: customerEmail,
     ltv: shopifyCtx?.customer?.ltv_jpy ?? null,
     recent_orders: recentOrdersForPrompt,
@@ -320,10 +327,12 @@ async function runTriageForMessage(
   });
 
   // chats.ai_status等を更新
+  // 自動送信しない設定（LINEのトリアージ等）では L1 でも「下書き待ち」として扱う
+  const allowAutoSend = opts?.allowAutoSend ?? true;
   let newAiStatus: 'l1_auto_replied' | 'l2_draft_pending' | 'l3_escalated';
-  if (result.level === 'L1' && result.draft_text) {
+  if (result.level === 'L1' && result.draft_text && allowAutoSend) {
     newAiStatus = 'l1_auto_replied';
-  } else if (result.level === 'L2') {
+  } else if (result.level === 'L2' || (result.level === 'L1' && result.draft_text)) {
     newAiStatus = 'l2_draft_pending';
   } else {
     newAiStatus = 'l3_escalated';
@@ -347,19 +356,28 @@ async function runTriageForMessage(
     prompt_tokens: result.prompt_tokens,
     completion_tokens: result.completion_tokens,
     cost_jpy: result.cost_jpy,
-    outcome: result.level === 'L1' ? 'auto_sent' : null,
-    outcome_at: result.level === 'L1' ? jstNow() : null,
+    outcome: result.level === 'L1' && allowAutoSend ? 'auto_sent' : null,
+    outcome_at: result.level === 'L1' && allowAutoSend ? jstNow() : null,
   });
 
-  if (result.level === 'L1' && result.draft_text && result.confidence >= 0.9) {
-    // L1: 即返信（confidence 0.9以上かつFAQ完全一致。村田不在時はこれが本番）
-    await sendReply(env, chatId, messageId, result.draft_text, channel, customerEmail, subject);
-  } else if ((result.level === 'L2' || (result.level === 'L1' && result.confidence < 0.9)) && result.draft_text) {
-    // L2: 下書き作成 → Slack通知
+  const shouldAutoSend = allowAutoSend && result.level === 'L1' && Boolean(result.draft_text) && result.confidence >= 0.9;
+
+  let sentByAi = false;
+  if (shouldAutoSend) {
+    // L1: 即返信（confidence 0.9以上かつFAQ完全一致）
+    const sent = await sendReply(env, chatId, messageId, result.draft_text!, channel, customerEmail, subject);
+    sentByAi = sent.ok;
+    if (!sent.ok) console.error('[cs] L1 auto-reply failed:', sent.error);
+  }
+
+  // 自動送信しなかった・失敗した場合は下書きに落とす（黙って消さない）
+  const shouldDraft = !sentByAi && Boolean(result.draft_text) && (result.level === 'L2' || result.level === 'L1');
+  if (shouldDraft) {
+    // L2: 下書き作成 → Slack通知（承認は人間）
     await createAiDraft(env.DB, {
       chat_id: chatId,
       message_id: messageId,
-      draft_text: result.draft_text,
+      draft_text: result.draft_text!,
       draft_metadata: {
         category: result.category,
         confidence: result.confidence,
@@ -375,7 +393,9 @@ async function runTriageForMessage(
       category: result.category,
       money_flag: result.money_flag,
     });
-  } else {
+    // L1自動送信に失敗して下書きへ落ちた場合に備え、状態を下書き待ちに揃える
+    await updateChatAiStatus(env.DB, chatId, { ai_status: 'l2_draft_pending' });
+  } else if (!sentByAi) {
     // L3: エスカレ通知
     await notifyL3Escalation(env, {
       chat_id: chatId,
@@ -422,19 +442,54 @@ async function sendReply(
   inReplyToMessageId: string,
   replyText: string,
   channel: CsChannel,
-  customerEmail: string,
+  customerEmail: string | null,
   origSubject: string | null,
-): Promise<void> {
+): Promise<{ ok: boolean; error?: string }> {
   if (channel === 'line') {
-    // LINE返信は別フロー（既存chats.tsのpushメッセージを利用）
-    console.warn('[cs/sendReply] LINE channel not yet wired in CS auto-reply');
-    return;
+    // LINEは pushMessage で送る（replyToken は受信から約1分で失効し、承認時には使えない）
+    const row = await env.DB.prepare(
+      `SELECT f.id AS friend_id, f.line_user_id, la.channel_access_token
+       FROM chats c JOIN friends f ON f.id = c.friend_id
+       LEFT JOIN line_accounts la ON la.id = f.line_account_id
+       WHERE c.id = ?`,
+    )
+      .bind(chatId)
+      .first<{ friend_id: string; line_user_id: string | null; channel_access_token: string | null }>();
+    if (!row?.line_user_id) {
+      console.error('[cs/sendReply] LINE friend not found', chatId);
+      return { ok: false, error: 'LINEの友だち情報が見つかりません' };
+    }
+    const token = row.channel_access_token || env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!token) {
+      console.error('[cs/sendReply] LINE token missing');
+      return { ok: false, error: 'LINE送信設定が見つかりません' };
+    }
+    const { LineClient } = await import('@line-crm/line-sdk');
+    try {
+      await new LineClient(token).pushTextMessage(row.line_user_id, replyText);
+    } catch (err) {
+      console.error('[cs/sendReply] LINE push failed', err);
+      return { ok: false, error: 'LINE側で送信できませんでした' };
+    }
+    // 会話履歴にも残す（CS画面と未読判定は messages_log を見るため）
+    await env.DB.prepare(
+      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, created_at)
+       VALUES (?, ?, 'outgoing', 'text', ?, ?)`,
+    )
+      .bind(crypto.randomUUID(), row.friend_id, replyText, jstNow())
+      .run();
+    return { ok: true };
+  }
+
+  if (!customerEmail) {
+    console.error('[cs/sendReply] customer email missing');
+    return { ok: false, error: '送信先メールアドレスがありません' };
   }
 
   const sa = getServiceAccount(env);
   if (!sa) {
     console.error('[cs/sendReply] service account not configured');
-    return;
+    return { ok: false, error: 'メール送信の認証情報が未設定です' };
   }
 
   const senderUser = getSenderEmail(env);
@@ -479,6 +534,7 @@ async function sendReply(
     body_html: null,
     raw_metadata: JSON.stringify({ threadId: sent.threadId, automated: true }),
   });
+  return { ok: true };
 }
 
 // ==================== API: 下書き管理 ====================
@@ -531,30 +587,33 @@ cs.get('/api/cs/chats/:id/draft', async (c) => {
 cs.post('/api/cs/drafts/:id/approve', async (c) => {
   try {
     const id = c.req.param('id');
-    const body = await c.req.json<{ finalText?: string; approvedBy: string }>();
+    const body = await c.req.json<{ finalText?: string; approvedBy?: string }>();
     const draft = await getAiDraftById(c.env.DB, id);
     if (!draft) return c.json({ success: false, error: 'Draft not found' }, 404);
     if (draft.status !== 'pending') return c.json({ success: false, error: 'Already processed' }, 400);
+    // ログイン中のスタッフを既定の承認者にする（画面からIDを渡させない）
+    const staff = c.get('staff') as { id: string } | undefined;
+    const approvedBy = body.approvedBy ?? staff?.id ?? 'env-owner';
 
     const finalText = body.finalText ?? draft.draft_text;
     const edited = body.finalText !== undefined && body.finalText !== draft.draft_text;
 
-    await approveAiDraft(c.env.DB, id, body.approvedBy, finalText, edited);
-
-    // 送信
+    // 送信してから承認を確定する。順序を逆にすると、送信に失敗しても
+    // 下書きが「承認済み」で消え、顧客に届かないまま処理済みになる。
     const chat = await c.env.DB.prepare(`SELECT * FROM chats WHERE id = ?`).bind(draft.chat_id).first<{
       id: string;
       channel: string;
       customer_email: string | null;
       external_thread_id: string | null;
     }>();
+    let sent: { ok: boolean; error?: string } = { ok: false, error: 'チャットが見つかりません' };
     if (chat?.channel?.startsWith('email_') && chat.customer_email) {
       const lastMsg = await c.env.DB.prepare(
         `SELECT subject FROM cs_messages WHERE chat_id = ? AND direction = 'incoming' ORDER BY created_at DESC LIMIT 1`,
       )
         .bind(chat.id)
         .first<{ subject: string | null }>();
-      await sendReply(
+      sent = await sendReply(
         c.env,
         chat.id,
         draft.message_id,
@@ -563,7 +622,16 @@ cs.post('/api/cs/drafts/:id/approve', async (c) => {
         chat.customer_email,
         lastMsg?.subject ?? null,
       );
+    } else if (chat) {
+      // LINEの承認も同じ経路で送る（pushMessage）。ここを空けると下書きが
+      // 承認済みになるのに顧客へ届かない。
+      sent = await sendReply(c.env, chat.id, draft.message_id, finalText, 'line', null, null);
     }
+    if (!sent.ok) {
+      return c.json({ success: false, error: sent.error ?? '送信に失敗しました' }, 502);
+    }
+
+    await approveAiDraft(c.env.DB, id, approvedBy, finalText, edited);
 
     await markAiDraftSent(c.env.DB, id);
     await updateChatAiStatus(c.env.DB, draft.chat_id, { ai_status: 'l2_approved' });
@@ -585,10 +653,11 @@ cs.post('/api/cs/drafts/:id/approve', async (c) => {
 cs.post('/api/cs/drafts/:id/reject', async (c) => {
   try {
     const id = c.req.param('id');
-    const body = await c.req.json<{ reason: string; rejectedBy: string }>();
+    const body = await c.req.json<{ reason: string; rejectedBy?: string }>();
     const draft = await getAiDraftById(c.env.DB, id);
     if (!draft) return c.json({ success: false, error: 'Draft not found' }, 404);
-    await rejectAiDraft(c.env.DB, id, body.rejectedBy, body.reason);
+    const staff = c.get('staff') as { id: string } | undefined;
+    await rejectAiDraft(c.env.DB, id, body.rejectedBy ?? staff?.id ?? 'env-owner', body.reason);
     await updateChatAiStatus(c.env.DB, draft.chat_id, { ai_status: 'human_handled' });
     await c.env.DB.prepare(
       `UPDATE ai_decision_log SET outcome = ?, outcome_at = ? WHERE chat_id = ? AND outcome IS NULL`,
@@ -769,3 +838,26 @@ cs.post('/api/cs/triage/:chatId', async (c) => {
     return c.json({ success: false, error: `トリアージ失敗: ${String(e).slice(0, 400)}` }, 500);
   }
 });
+
+// ==================== LINE受信からのトリアージ（webhook連携） ====================
+
+/**
+ * LINEの受信メッセージをAIトリアージに掛ける。
+ * 送信は必ず人間承認に回す（allowAutoSend=false）。webhook側のLINE自動返信
+ * （LINE_AI_AUTOREPLY_ENABLED）と二重返信しないための設計。
+ */
+export async function runLineTriage(
+  env: Env['Bindings'],
+  params: { chatId: string; friendId: string; messageId: string; text: string; customerName?: string | null },
+): Promise<void> {
+  await runTriageForMessage(
+    env,
+    params.chatId,
+    params.messageId,
+    params.text,
+    null,
+    null,
+    'line',
+    { lineFriendId: params.friendId, allowAutoSend: false, customerName: params.customerName ?? null },
+  );
+}

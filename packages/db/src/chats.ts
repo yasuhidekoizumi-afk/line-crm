@@ -20,6 +20,10 @@ export interface ChatRow {
   last_message_at: string | null;
   created_at: string;
   updated_at: string;
+  // migration 072
+  last_read_at?: string | null;
+  assigned_staff_id?: string | null;
+  assigned_at?: string | null;
 }
 
 // --- オペレーター ---
@@ -110,7 +114,14 @@ export async function createChat(
 export async function updateChat(
   db: D1Database,
   id: string,
-  updates: Partial<{ operatorId: string | null; status: string; notes: string; lastMessageAt: string }>,
+  updates: Partial<{
+    operatorId: string | null;
+    status: string;
+    notes: string;
+    lastMessageAt: string;
+    lastReadAt: string | null;
+    assignedStaffId: string | null;
+  }>,
 ): Promise<void> {
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -118,11 +129,29 @@ export async function updateChat(
   if (updates.status !== undefined) { sets.push('status = ?'); values.push(updates.status); }
   if (updates.notes !== undefined) { sets.push('notes = ?'); values.push(updates.notes); }
   if (updates.lastMessageAt !== undefined) { sets.push('last_message_at = ?'); values.push(updates.lastMessageAt); }
+  if (updates.lastReadAt !== undefined) { sets.push('last_read_at = ?'); values.push(updates.lastReadAt); }
+  if (updates.assignedStaffId !== undefined) {
+    sets.push('assigned_staff_id = ?'); values.push(updates.assignedStaffId);
+    // 解除時は assigned_at も落とす（誰がいつ担当したかの履歴を濁らせない）
+    sets.push('assigned_at = ?'); values.push(updates.assignedStaffId ? jstNow() : null);
+  }
   if (sets.length === 0) return;
   sets.push('updated_at = ?');
   values.push(jstNow());
   values.push(id);
   await db.prepare(`UPDATE chats SET ${sets.join(', ')} WHERE id = ?`).bind(...values).run();
+}
+
+/** 複数チャットを一括既読にする（D1のバインド上限に収めるため呼び出し側で500件以下に絞る） */
+export async function markChatsRead(db: D1Database, ids: string[], readAt?: string): Promise<number> {
+  if (ids.length === 0) return 0;
+  const now = readAt ?? jstNow();
+  const placeholders = ids.map(() => '?').join(',');
+  await db
+    .prepare(`UPDATE chats SET last_read_at = ?, updated_at = ? WHERE id IN (${placeholders})`)
+    .bind(now, now, ...ids)
+    .run();
+  return ids.length;
 }
 
 /** 友だちからメッセージ受信時にチャットを作成/更新 */

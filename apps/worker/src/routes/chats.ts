@@ -4,7 +4,7 @@ import { toDisplayContent } from '../utils/message-preview.js';
 import { sendCsEmailReply } from '../services/cs-email-reply.js';
 import {
   getOperators, getOperatorById, createOperator, updateOperator, deleteOperator,
-  getChats, getChatById, createChat, updateChat, jstNow,
+  getChats, getChatById, createChat, updateChat, markChatsRead, jstNow,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
 
@@ -44,25 +44,55 @@ chats.delete('/api/operators/:id', async (c) => {
   catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });
 
-// ========== チャット一覧（パフォーマンス改善: LIMIT追加） ==========
+// ========== チャット一覧 ==========
 
 /**
- * 一覧用の付加情報（最終メッセージのプレビュー・未読数・タグ）をまとめて取得する。
+ * 未読数の定義（単一の情報源）。
+ * 「スタッフの最終返信時刻」と「会話の既読位置(last_read_at)」のうち新しい方より後に届いた
+ * 受信メッセージ数。一覧のバッジ・「未読」フィルタ・未読順ソートはすべてこの式を通す。
+ * 対応済み(resolved)は未読として数えない（新着が来れば status は unread に戻る）。
+ */
+const UNREAD_EXPR = `(CASE WHEN c.status = 'resolved' THEN 0 ELSE (
+  SELECT COUNT(*) FROM messages_log i
+  WHERE i.friend_id = c.friend_id
+    AND i.direction = 'incoming'
+    AND i.created_at > MAX(COALESCE(staff_reply.last_reply_at, ''), COALESCE(c.last_read_at, ''))
+) END)`;
+
+/** 一覧1件分の共通SELECT（外側でフィルタ・ページングを掛ける） */
+const CHAT_LIST_SELECT = `SELECT
+  c.id, c.friend_id, c.operator_id, c.status, c.notes, c.last_message_at, c.created_at, c.updated_at,
+  c.channel, c.customer_email, c.ai_status, c.ai_category, c.ai_money_flag,
+  c.assigned_staff_id, c.assigned_at, c.last_read_at,
+  f.display_name, f.picture_url, f.line_user_id, f.line_account_id,
+  sm.name AS assigned_staff_name,
+  ${UNREAD_EXPR} AS unread_count
+FROM chats c
+LEFT JOIN friends f ON c.friend_id = f.id
+LEFT JOIN staff_members sm ON sm.id = c.assigned_staff_id
+LEFT JOIN (
+  SELECT friend_id, MAX(created_at) AS last_reply_at
+  FROM messages_log
+  WHERE direction = 'outgoing' AND broadcast_id IS NULL AND scenario_step_id IS NULL
+  GROUP BY friend_id
+) staff_reply ON staff_reply.friend_id = c.friend_id`;
+
+/**
+ * 一覧用の付加情報（最終メッセージのプレビュー・タグ）をまとめて取得する。
  * D1のバインド上限（100）に収めるため friend_id を90件ずつ区切る。
  */
 async function enrichChatList(
   db: D1Database,
   friendIds: string[],
-): Promise<{ preview: Map<string, string>; unread: Map<string, number>; tags: Map<string, string[]> }> {
+): Promise<{ preview: Map<string, string>; tags: Map<string, string[]> }> {
   const preview = new Map<string, string>();
-  const unread = new Map<string, number>();
   const tags = new Map<string, string[]>();
   const CHUNK = 90;
 
   for (let i = 0; i < friendIds.length; i += CHUNK) {
     const chunk = friendIds.slice(i, i + CHUNK);
     const placeholders = chunk.map(() => '?').join(',');
-    const [previewRes, unreadRes, tagRes] = await Promise.all([
+    const [previewRes, tagRes] = await Promise.all([
       // 最終メッセージのプレビュー（配信行は本文を持たないので配信タイトルを使う）
       db
         .prepare(
@@ -72,6 +102,7 @@ async function enrichChatList(
                WHEN ml.message_type = 'text' THEN substr(ml.content, 1, 120)
                WHEN ml.message_type = 'multi' THEN '📢 配信メッセージ'
                WHEN ml.message_type = 'image' THEN '[画像]'
+               WHEN ml.message_type = 'sticker' THEN '[スタンプ]'
                WHEN ml.message_type = 'flex' THEN '[カード]'
                WHEN ml.message_type = 'imagemap' THEN '[リッチメッセージ]'
                ELSE substr(COALESCE(ml.content, ''), 1, 120)
@@ -83,24 +114,6 @@ async function enrichChatList(
         )
         .bind(...chunk)
         .all<{ friend_id: string; preview: string }>(),
-      // 未読 = スタッフの最後の返信より後に届いた受信メッセージ（配信・シナリオは返信扱いにしない）
-      db
-        .prepare(
-          `SELECT i.friend_id, COUNT(*) AS n
-           FROM messages_log i
-           LEFT JOIN (
-             SELECT friend_id, MAX(created_at) AS last_reply
-             FROM messages_log
-             WHERE direction = 'outgoing' AND broadcast_id IS NULL AND scenario_step_id IS NULL
-               AND friend_id IN (${placeholders})
-             GROUP BY friend_id
-           ) o ON o.friend_id = i.friend_id
-           WHERE i.direction = 'incoming' AND i.friend_id IN (${placeholders})
-             AND (o.last_reply IS NULL OR i.created_at > o.last_reply)
-           GROUP BY i.friend_id`,
-        )
-        .bind(...chunk, ...chunk)
-        .all<{ friend_id: string; n: number }>(),
       db
         .prepare(
           `SELECT ft.friend_id, GROUP_CONCAT(t.name, '|') AS names
@@ -114,13 +127,12 @@ async function enrichChatList(
     for (const row of previewRes.results ?? []) {
       if (!preview.has(row.friend_id)) preview.set(row.friend_id, row.preview ?? '');
     }
-    for (const row of unreadRes.results ?? []) unread.set(row.friend_id, Number(row.n) || 0);
     for (const row of tagRes.results ?? []) {
       tags.set(row.friend_id, String(row.names ?? '').split('|').filter(Boolean));
     }
   }
 
-  return { preview, unread, tags };
+  return { preview, tags };
 }
 
 chats.get('/api/chats', async (c) => {
@@ -129,36 +141,62 @@ chats.get('/api/chats', async (c) => {
     const operatorId = c.req.query('operatorId') ?? undefined;
     const lineAccountId = c.req.query('lineAccountId') ?? undefined;
     const channel = c.req.query('channel') ?? undefined;
+    const assignedStaffId = c.req.query('assignedStaffId') ?? undefined;
+    const q = (c.req.query('q') ?? '').trim();
+    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? '100') || 100, 1), 500);
+    const offset = Math.max(Number(c.req.query('offset') ?? '0') || 0, 0);
+    const sort = c.req.query('sort') === 'unread' ? 'unread' : 'recent';
 
-    let sql = `SELECT c.id, c.friend_id, c.operator_id, c.status, c.notes, c.last_message_at, c.created_at, c.updated_at, c.channel, c.customer_email, c.ai_status, c.ai_category, c.ai_money_flag,
-               f.display_name, f.picture_url, f.line_user_id
-               FROM chats c LEFT JOIN friends f ON c.friend_id = f.id`;
     const conditions: string[] = [];
     const bindings: unknown[] = [];
 
-    if (status) { conditions.push('c.status = ?'); bindings.push(status); }
-    if (operatorId) { conditions.push('c.operator_id = ?'); bindings.push(operatorId); }
+    // 「未読」はメッセージベース。chats.status とは別軸（status は対応状況）。
+    if (status === 'unread') {
+      conditions.push('x.unread_count > 0');
+    } else if (status) {
+      conditions.push('x.status = ?'); bindings.push(status);
+    }
+    if (operatorId) { conditions.push('x.operator_id = ?'); bindings.push(operatorId); }
     // 選択中の公式LINEだけを表示する。メール問い合わせはアカウントに紐付かないため、
     // ここで混ぜるとギフティング担当者が別窓口の会話を見られてしまう。
-    if (lineAccountId) { conditions.push('f.line_account_id = ?'); bindings.push(lineAccountId); }
-    if (channel === 'email') { conditions.push("c.channel LIKE 'email_%'"); } else if (channel) { conditions.push('c.channel = ?'); bindings.push(channel); }
+    if (lineAccountId) { conditions.push('x.line_account_id = ?'); bindings.push(lineAccountId); }
+    if (channel === 'email') { conditions.push("x.channel LIKE 'email_%'"); } else if (channel) { conditions.push('x.channel = ?'); bindings.push(channel); }
+    if (assignedStaffId === 'me') {
+      const staff = c.get('staff') as { id: string } | undefined;
+      if (staff?.id) { conditions.push('x.assigned_staff_id = ?'); bindings.push(staff.id); }
+    } else if (assignedStaffId) {
+      conditions.push('x.assigned_staff_id = ?'); bindings.push(assignedStaffId);
+    }
+    if (q) {
+      // 名前・メール・タグをサーバー側で検索する（読み込み済み分だけの検索をやめる）
+      const like = `%${q}%`;
+      conditions.push(`(COALESCE(x.display_name, '') LIKE ? OR COALESCE(x.customer_email, '') LIKE ?
+        OR EXISTS (SELECT 1 FROM friend_tags ft JOIN tags t ON t.id = ft.tag_id
+                   WHERE ft.friend_id = x.friend_id AND t.name LIKE ?))`);
+      bindings.push(like, like, like);
+    }
 
-    if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
-    // 一覧は最新順。LIMIT 100 だと101件目以降の会話が画面から消えるため、
-    // 現実的な件数（500）まで返す。それ以上は検索・絞り込みで対応する。
-    sql += ' ORDER BY c.last_message_at DESC LIMIT 500';
+    const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+    const order = sort === 'unread'
+      ? ' ORDER BY x.unread_count DESC, x.last_message_at DESC'
+      : ' ORDER BY x.last_message_at DESC';
 
-    const stmt = bindings.length > 0 ? c.env.DB.prepare(sql).bind(...bindings) : c.env.DB.prepare(sql);
-    const result = await stmt.all();
-    const rows = (result.results ?? []) as Record<string, unknown>[];
+    const [listRes, countRes] = await Promise.all([
+      c.env.DB.prepare(`SELECT * FROM (${CHAT_LIST_SELECT}) x${where}${order} LIMIT ? OFFSET ?`)
+        .bind(...bindings, limit, offset)
+        .all(),
+      c.env.DB.prepare(`SELECT COUNT(*) AS n FROM (${CHAT_LIST_SELECT}) x${where}`)
+        .bind(...bindings)
+        .first<{ n: number }>(),
+    ]);
+
+    const rows = (listRes.results ?? []) as Record<string, unknown>[];
     const friendIds = Array.from(new Set(rows.map((row) => String(row.friend_id ?? '')).filter(Boolean)));
     const enriched = friendIds.length > 0
-      ? await enrichChatList(c.env.DB, friendIds).catch(() => ({
-          preview: new Map<string, string>(),
-          unread: new Map<string, number>(),
-          tags: new Map<string, string[]>(),
-        }))
-      : { preview: new Map<string, string>(), unread: new Map<string, number>(), tags: new Map<string, string[]>() };
+      ? await enrichChatList(c.env.DB, friendIds).catch(() => ({ preview: new Map<string, string>(), tags: new Map<string, string[]>() }))
+      : { preview: new Map<string, string>(), tags: new Map<string, string[]>() };
+
+    const total = Number(countRes?.n ?? 0);
 
     return c.json({
       success: true,
@@ -166,9 +204,65 @@ chats.get('/api/chats', async (c) => {
         const isEmail = typeof ch.channel === 'string' && (ch.channel as string).startsWith('email_');
         const name = isEmail ? (ch.customer_email as string | null) || (ch.display_name as string | null) || '不明' : (ch.display_name as string | null) || '名前なし';
         const friendId = String(ch.friend_id ?? '');
-        return { id: ch.id, friendId: ch.friend_id, friendName: name, friendPictureUrl: isEmail ? null : (ch.picture_url || null), operatorId: ch.operator_id, status: ch.status, notes: ch.notes, lastMessageAt: ch.last_message_at, createdAt: ch.created_at, updatedAt: ch.updated_at, channel: ch.channel ?? 'line', customerEmail: ch.customer_email ?? null, aiStatus: ch.ai_status ?? null, aiCategory: ch.ai_category ?? null, aiMoneyFlag: !!ch.ai_money_flag, preview: enriched.preview.get(friendId) ?? '', unreadCount: ch.status === 'resolved' ? 0 : (enriched.unread.get(friendId) ?? 0), tags: enriched.tags.get(friendId) ?? [] };
+        return {
+          id: ch.id, friendId: ch.friend_id, friendName: name, friendPictureUrl: isEmail ? null : (ch.picture_url || null),
+          operatorId: ch.operator_id, status: ch.status, notes: ch.notes, lastMessageAt: ch.last_message_at,
+          createdAt: ch.created_at, updatedAt: ch.updated_at, channel: ch.channel ?? 'line', customerEmail: ch.customer_email ?? null,
+          aiStatus: ch.ai_status ?? null, aiCategory: ch.ai_category ?? null, aiMoneyFlag: !!ch.ai_money_flag,
+          assignedStaffId: ch.assigned_staff_id ?? null, assignedStaffName: ch.assigned_staff_name ?? null,
+          lastReadAt: ch.last_read_at ?? null,
+          preview: enriched.preview.get(friendId) ?? '',
+          unreadCount: Number(ch.unread_count ?? 0),
+          tags: enriched.tags.get(friendId) ?? [],
+        };
       }),
+      meta: { total, limit, offset, hasMore: offset + rows.length < total },
     });
+  } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
+});
+
+// ========== 既読・担当 ==========
+
+chats.post('/api/chats/read-all', async (c) => {
+  try {
+    const body = await c.req.json<{ ids?: string[] }>().catch(() => ({ ids: [] as string[] }));
+    const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === 'string').slice(0, 500) : [];
+    if (ids.length === 0) return c.json({ success: false, error: 'ids is required' }, 400);
+    const updated = await markChatsRead(c.env.DB, ids, jstNow());
+    return c.json({ success: true, data: { updated } });
+  } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
+});
+
+chats.post('/api/chats/:id/read', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const chat = await getChatById(c.env.DB, id);
+    if (!chat) return c.json({ success: false, error: 'Chat not found' }, 404);
+    const readAt = jstNow();
+    await updateChat(c.env.DB, id, { lastReadAt: readAt });
+    return c.json({ success: true, data: { id, lastReadAt: readAt } });
+  } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
+});
+
+/**
+ * 自分を担当にする。既に別の人が担当している場合は上書きせず現状を返す
+ * （同時対応の取り合いを避ける。交代したいときは PUT で明示的に指定する）。
+ */
+chats.post('/api/chats/:id/claim', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const staff = c.get('staff') as { id: string; name: string } | undefined;
+    if (!staff?.id) return c.json({ success: false, error: 'Unauthorized' }, 401);
+    const chat = await c.env.DB.prepare(
+      `SELECT c.assigned_staff_id, sm.name AS assigned_staff_name FROM chats c
+       LEFT JOIN staff_members sm ON sm.id = c.assigned_staff_id WHERE c.id = ?`,
+    ).bind(id).first<{ assigned_staff_id: string | null; assigned_staff_name: string | null }>();
+    if (!chat) return c.json({ success: false, error: 'Chat not found' }, 404);
+    if (chat.assigned_staff_id && chat.assigned_staff_id !== staff.id) {
+      return c.json({ success: false, error: `${chat.assigned_staff_name ?? '他のスタッフ'}が対応中です` }, 409);
+    }
+    await updateChat(c.env.DB, id, { assignedStaffId: staff.id });
+    return c.json({ success: true, data: { id, assignedStaffId: staff.id, assignedStaffName: staff.name } });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });
 
@@ -198,7 +292,11 @@ chats.get('/api/chats/:id', async (c) => {
       // 直近N件を取る（ASC+LIMITだと「古いN件」になり、最新の返信が見えなくなる）。
       lineStmt.all(),
       emailStmt.all(),
-      c.env.DB.prepare(`SELECT channel, customer_email, ai_status, ai_category, ai_confidence, ai_money_flag FROM chats WHERE id = ?`).bind(item.id).first(),
+      c.env.DB.prepare(
+        `SELECT c.channel, c.customer_email, c.ai_status, c.ai_category, c.ai_confidence, c.ai_money_flag,
+                c.assigned_staff_id, c.assigned_at, c.last_read_at, sm.name AS assigned_staff_name
+         FROM chats c LEFT JOIN staff_members sm ON sm.id = c.assigned_staff_id WHERE c.id = ?`,
+      ).bind(item.id).first(),
     ]);
 
     interface UnifiedMessage { id: string; direction: string; messageType: string; content: string; createdAt: string; meta?: { subject?: string | null; from?: string | null; to?: string | null } }
@@ -230,7 +328,15 @@ chats.get('/api/chats/:id', async (c) => {
 
     return c.json({
       success: true,
-      data: { id: item.id, friendId: item.friend_id, friendName: displayName, friendPictureUrl: isEmail ? null : (friend as any)?.picture_url ?? null, operatorId: item.operator_id, status: item.status, notes: item.notes, lastMessageAt: item.last_message_at, createdAt: item.created_at, channel: chatExt?.channel ?? 'line', customerEmail: chatExt?.customer_email ?? null, aiStatus: chatExt?.ai_status ?? null, aiCategory: chatExt?.ai_category ?? null, aiConfidence: (chatExt as any)?.ai_confidence ?? null, aiMoneyFlag: !!(chatExt as any)?.ai_money_flag, messages: unified, hasMore },
+      data: {
+        id: item.id, friendId: item.friend_id, friendName: displayName, friendPictureUrl: isEmail ? null : (friend as any)?.picture_url ?? null,
+        operatorId: item.operator_id, status: item.status, notes: item.notes, lastMessageAt: item.last_message_at, createdAt: item.created_at,
+        channel: chatExt?.channel ?? 'line', customerEmail: chatExt?.customer_email ?? null,
+        aiStatus: chatExt?.ai_status ?? null, aiCategory: chatExt?.ai_category ?? null, aiConfidence: (chatExt as any)?.ai_confidence ?? null, aiMoneyFlag: !!(chatExt as any)?.ai_money_flag,
+        assignedStaffId: (chatExt as any)?.assigned_staff_id ?? null, assignedStaffName: (chatExt as any)?.assigned_staff_name ?? null,
+        assignedAt: (chatExt as any)?.assigned_at ?? null, lastReadAt: (chatExt as any)?.last_read_at ?? null,
+        messages: unified, hasMore,
+      },
     });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });
@@ -248,11 +354,11 @@ chats.post('/api/chats', async (c) => {
 chats.put('/api/chats/:id', async (c) => {
   try {
     const id = c.req.param('id');
-    const body = await c.req.json<{ operatorId?: string | null; status?: string; notes?: string }>();
+    const body = await c.req.json<{ operatorId?: string | null; status?: string; notes?: string; assignedStaffId?: string | null }>();
     await updateChat(c.env.DB, id, body);
     const updated = await getChatById(c.env.DB, id);
     if (!updated) return c.json({ success: false, error: 'Not found' }, 404);
-    return c.json({ success: true, data: { id: updated.id, friendId: updated.friend_id, operatorId: updated.operator_id, status: updated.status, notes: updated.notes } });
+    return c.json({ success: true, data: { id: updated.id, friendId: updated.friend_id, operatorId: updated.operator_id, status: updated.status, notes: updated.notes, assignedStaffId: updated.assigned_staff_id ?? null } });
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });
 
@@ -325,6 +431,16 @@ chats.post('/api/chats/:id/send', async (c) => {
           originalContentUrl: parsed.originalContentUrl,
           previewImageUrl: parsed.previewImageUrl || parsed.originalContentUrl,
         }]);
+      }
+      else if (messageType === 'sticker') {
+        const parsed = JSON.parse(body.content) as { packageId?: string; stickerId?: string };
+        if (!parsed.packageId || !parsed.stickerId) return c.json({ success: false, error: 'スタンプIDが不正です' }, 400);
+        // line-sdk の Message 型に sticker が無いため、送信時のみ形を合わせる
+        await lineClient.pushMessage((friend as any).line_user_id, [{
+          type: 'sticker',
+          packageId: parsed.packageId,
+          stickerId: parsed.stickerId,
+        }] as unknown as Parameters<typeof lineClient.pushMessage>[1]);
       }
       else { return c.json({ success: false, error: `未対応のメッセージ種別です: ${messageType}` }, 400); }
     } catch (sendErr) {

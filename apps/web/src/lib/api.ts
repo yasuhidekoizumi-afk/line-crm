@@ -550,16 +550,48 @@ export const api = {
       ),
   },
   chats: {
-    list: (params?: { status?: string; operatorId?: string; accountId?: string; channel?: string }) => {
+    list: (params?: {
+      status?: string
+      operatorId?: string
+      accountId?: string
+      channel?: string
+      assignedStaffId?: string
+      q?: string
+      limit?: number
+      offset?: number
+      sort?: 'recent' | 'unread'
+    }) => {
       const query: Record<string, string> = {}
       if (params?.status) query.status = params.status
       if (params?.operatorId) query.operatorId = params.operatorId
       if (params?.accountId) query.lineAccountId = params.accountId
       if (params?.channel) query.channel = params.channel
-      return fetchApi<ApiResponse<Chat[]>>(
-        '/api/chats?' + new URLSearchParams(query),
-      )
+      if (params?.assignedStaffId) query.assignedStaffId = params.assignedStaffId
+      if (params?.q) query.q = params.q
+      if (params?.limit) query.limit = String(params.limit)
+      if (params?.offset) query.offset = String(params.offset)
+      if (params?.sort) query.sort = params.sort
+      return fetchApi<
+        ApiResponse<Chat[]> & { meta?: { total: number; limit: number; offset: number; hasMore: boolean } }
+      >('/api/chats?' + new URLSearchParams(query))
     },
+    /** 会話単位の既読（未読バッジだけを消す。status は変えない） */
+    read: (id: string) =>
+      fetchApi<ApiResponse<{ id: string; lastReadAt: string }>>(`/api/chats/${id}/read`, {
+        method: 'POST',
+      }),
+    /** 表示中の会話をまとめて既読にする */
+    readAll: (ids: string[]) =>
+      fetchApi<ApiResponse<{ updated: number }>>('/api/chats/read-all', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      }),
+    /** 自分を担当にする（他者が対応中なら409で返る） */
+    claim: (id: string) =>
+      fetchApi<ApiResponse<{ id: string; assignedStaffId: string; assignedStaffName: string }>>(
+        `/api/chats/${id}/claim`,
+        { method: 'POST' },
+      ),
     get: (id: string, params?: { before?: string; limit?: number }) => {
       const query: Record<string, string> = {}
       if (params?.before) query.before = params.before
@@ -574,7 +606,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: { operatorId?: string | null; status?: Chat['status']; notes?: string | null }) =>
+    update: (id: string, data: { operatorId?: string | null; status?: Chat['status']; notes?: string | null; assignedStaffId?: string | null }) =>
       fetchApi<ApiResponse<Chat>>(`/api/chats/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data),
@@ -583,6 +615,29 @@ export const api = {
       fetchApi<ApiResponse<unknown>>(`/api/chats/${id}/send`, {
         method: 'POST',
         body: JSON.stringify(data),
+      }),
+  },
+  cs: {
+    /** 会話に紐づく承認待ちのAI下書き（無ければ null） */
+    draft: (chatId: string) =>
+      fetchApi<
+        ApiResponse<{
+          id: string
+          draftText: string
+          metadata: Record<string, unknown> | null
+          createdAt: string
+        } | null>
+      >(`/api/cs/chats/${chatId}/draft`),
+    /** 承認＝そのまま送信。finalText を渡すと編集して送信。送信成功後に承認が確定する */
+    approveDraft: (draftId: string, finalText?: string) =>
+      fetchApi<ApiResponse<{ id: string; sent: boolean }>>(`/api/cs/drafts/${draftId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify(finalText !== undefined ? { finalText } : {}),
+      }),
+    rejectDraft: (draftId: string, reason: string) =>
+      fetchApi<ApiResponse<null>>(`/api/cs/drafts/${draftId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
       }),
   },
   reminders: {
