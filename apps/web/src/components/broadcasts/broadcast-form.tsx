@@ -250,6 +250,41 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
       return
     }
 
+    // 送信前チェック（宛先0名・文字数・リンク切れ・薬機/景表の表現）。下書き保存では走らせない。
+    if (form.sendMode !== 'draft') {
+      const checkPayload = blocksToPayload(form.blocks)
+      try {
+        const check = await api.broadcasts.validate({
+          messageType: checkPayload.messageType as ApiBroadcast['messageType'],
+          messageContent: checkPayload.messageContent,
+          altText: checkPayload.altText ?? null,
+          targetType: form.targetType,
+          targetTagId: form.targetType === 'tag' ? form.targetTagId : null,
+          targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId : null,
+          targetFriendIds: form.targetType === 'individual' ? form.targetFriendIds : null,
+          lineAccountId: selectedAccountId || null,
+        })
+        if (check.success) {
+          if (check.data.blocks.length > 0) {
+            setError(check.data.blocks.map((b) => b.message).join(' / '))
+            return
+          }
+          if (check.data.warnings.length > 0) {
+            const proceed = await confirmDialog({
+              title: '送信前の確認',
+              message: `${form.sendMode === 'now' ? '送信' : '予約'}前に確認してください。`,
+              detail: check.data.warnings.map((w) => `・${w.message}`).join('\n'),
+              variant: 'warning',
+              confirmLabel: '確認して進む',
+            })
+            if (!proceed) return
+          }
+        }
+      } catch {
+        // チェックAPIに届かない場合でも送信は止めない（既存の送信フローを壊さない）
+      }
+    }
+
     if (
       form.sendMode !== 'draft'
       && form.blocks.length > 1

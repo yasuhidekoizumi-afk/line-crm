@@ -11,6 +11,7 @@ import {
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
 import { processBroadcastSend, resolveBroadcastLineClient, buildMessages, isSendableLineUserId } from '../services/broadcast.js';
 import { getBroadcastBlockStats } from '../services/broadcast-block-metrics.js';
+import { detectClaimWarnings, extractTextForValidation, extractUrls, findTooLongText } from '../utils/broadcast-preflight.js';
 import { getSegmentLineUserIds, getSegmentAudienceBreakdown } from '@line-crm/db';
 import type { Env } from '../index.js';
 import { accessibleLineAccountIds, requireLineAccountAccess } from '../middleware/account-access.js';
@@ -814,6 +815,135 @@ broadcasts.post('/api/broadcasts', async (c) => {
     return c.json({ success: true, data: serializeBroadcast(broadcast) }, 201);
   } catch (err) {
     console.error('POST /api/broadcasts error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/broadcasts/validate - 送信前チェック（宛先0名・文字数・リンク切れ・薬機/景表の表現）
+// blocks=送信を止める / warnings=確認すれば送信できる、の2種類を返す。
+async function checkUrlReachable(url: string): Promise<{ status: 'ok' | 'missing' | 'unknown' }> {
+  // 内部アドレスへのfetch（SSRF）を避ける。http/https以外とプライベートホストは疎通確認しない。
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { status: 'missing' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { status: 'unknown' };
+  const host = parsed.hostname.toLowerCase();
+  if (
+    host === 'localhost'
+    || host === '::1'
+    || host.startsWith('127.')
+    || host.startsWith('10.')
+    || host.startsWith('192.168.')
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    || host.startsWith('169.254.')
+  ) {
+    return { status: 'unknown' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal });
+    if (res.status === 404 || res.status === 410) return { status: 'missing' };
+    return { status: 'ok' };
+  } catch {
+    return { status: 'unknown' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+broadcasts.post('/api/broadcasts/validate', async (c) => {
+  try {
+    const body = await c.req.json<{
+      messageType?: string;
+      messageContent?: string;
+      altText?: string | null;
+      targetType?: BroadcastTargetType;
+      targetTagId?: string | null;
+      targetSegmentId?: string | null;
+      targetFriendIds?: string[] | null;
+      lineAccountId?: string | null;
+    }>();
+
+    const blocks: Array<{ code: string; message: string }> = [];
+    const warnings: Array<{ code: string; message: string }> = [];
+
+    // 1. 宛先0名は送信させない
+    if (body.targetType === 'individual') {
+      if (!body.targetFriendIds || body.targetFriendIds.length === 0) {
+        blocks.push({ code: 'no_target', message: '送信先の友だちが0人です' });
+      }
+    } else if (body.targetType) {
+      const count = await countBroadcastTargets(
+        c.env.DB,
+        body.targetType,
+        body.targetTagId ?? null,
+        body.targetSegmentId ?? null,
+        body.lineAccountId ?? null,
+      );
+      if (count.count === 0) {
+        blocks.push({ code: 'no_target', message: '配信対象が0人です。タグ・セグメントを確認してください' });
+      }
+    }
+
+    if (!body.messageType || !body.messageContent?.trim()) {
+      blocks.push({ code: 'empty_message', message: '本文が空です' });
+    } else {
+      // 2. 文字数（LINEのテキスト上限5,000字・altText上限400字）
+      let texts: string[] = [];
+      if (body.messageType === 'multi') {
+        try {
+          const arr = JSON.parse(body.messageContent) as Array<{ type?: string; content?: string }>;
+          texts = Array.isArray(arr) ? arr.filter((m) => m?.type === 'text').map((m) => m?.content ?? '') : [];
+        } catch {
+          blocks.push({ code: 'invalid_multi', message: '複数メッセージの形式が壊れています' });
+        }
+      } else if (body.messageType === 'text') {
+        texts = [body.messageContent];
+      }
+      findTooLongText(texts).forEach(({ index, length }) => {
+        blocks.push({ code: 'text_too_long', message: `#${index + 1} が${length}字です（LINEの上限は5,000字）` });
+      });
+      if ((body.altText ?? '').length > 400) {
+        blocks.push({ code: 'alt_too_long', message: '通知文言（altText）が400字を超えています' });
+      }
+
+      // 3. リンク切れ（404/410は止める・疎通不明は警告）
+      const urls = extractUrls(extractTextForValidation(body.messageType, body.messageContent));
+      const results = await Promise.all(urls.map(async (url) => ({ url, ...(await checkUrlReachable(url)) })));
+      for (const r of results) {
+        if (r.status === 'missing') {
+          blocks.push({ code: 'url_missing', message: `リンク先が見つかりません（404）: ${r.url}` });
+        } else if (r.status === 'unknown') {
+          warnings.push({ code: 'url_unknown', message: `リンク先の疎通を確認できませんでした: ${r.url}` });
+        }
+      }
+
+      // 4. 薬機法・景表法の表現（止めずに確認を促す）
+      const target = extractTextForValidation(body.messageType, body.messageContent);
+      const drugHits = detectClaimWarnings(target, 'drug');
+      if (drugHits.length > 0) {
+        warnings.push({
+          code: 'drug_claim',
+          message: `医薬品的な効能表現にあたる可能性: ${drugHits.join('、')}`,
+        });
+      }
+      const adHits = detectClaimWarnings(target, 'ad');
+      if (adHits.length > 0) {
+        warnings.push({
+          code: 'ad_claim',
+          message: `景表法上の優良誤認になりうる表現: ${adHits.join('、')}`,
+        });
+      }
+    }
+
+    return c.json({ success: true, data: { blocks, warnings } });
+  } catch (err) {
+    console.error('POST /api/broadcasts/validate error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
