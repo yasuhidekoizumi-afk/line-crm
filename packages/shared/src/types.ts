@@ -218,6 +218,9 @@ export interface BroadcastDetail extends Broadcast {
     clickOrders: number;
     clickRevenue: number;
     clickAov: number | null;
+    /** うち landing_site のUTMで一致した注文 */
+    utmOrders: number;
+    utmRevenue: number;
     recipientOrders: number | null;
     recipientRevenue: number | null;
     recipientCount: number;
