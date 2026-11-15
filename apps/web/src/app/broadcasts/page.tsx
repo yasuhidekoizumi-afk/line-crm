@@ -895,6 +895,56 @@ function BroadcastsPageInner() {
             <span className="text-gray-400">送信時刻から24時間の解除数 ÷ 配信成功数</span>
           </div>
 
+          {selectedDetail.attribution && (
+            <div className="border-b border-gray-100 px-5 py-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="text-sm font-semibold text-gray-900">
+                  この配信からの売上（{selectedDetail.attribution.windowDays}日）
+                </h3>
+                <span className="text-[11px] text-gray-400">クリックは識別できた分のみ（下限）／対象者の購入はオーガニック込み（上限）</span>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-md bg-gray-50 p-4">
+                  <div className="text-xs text-gray-500">クリック経由（下限）</div>
+                  <div className="mt-1 text-xl font-semibold text-gray-900">
+                    ¥{Math.round(selectedDetail.attribution.clickRevenue).toLocaleString('ja-JP')}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {selectedDetail.attribution.clickOrders}件
+                    {selectedDetail.attribution.clickAov != null
+                      && ` / 平均 ¥${Math.round(selectedDetail.attribution.clickAov).toLocaleString('ja-JP')}`}
+                  </div>
+                </div>
+                <div className="rounded-md bg-gray-50 p-4">
+                  <div className="text-xs text-gray-500">配信対象者の購入（上限）</div>
+                  <div className="mt-1 text-xl font-semibold text-gray-900">
+                    {selectedDetail.attribution.hasRecipientList
+                      ? `¥${Math.round(selectedDetail.attribution.recipientRevenue ?? 0).toLocaleString('ja-JP')}`
+                      : '—'}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {selectedDetail.attribution.hasRecipientList
+                      ? `${selectedDetail.attribution.recipientOrders ?? 0}件 / 対象 ${selectedDetail.attribution.recipientCount.toLocaleString('ja-JP')}人`
+                      : '全員配信は対象者リストを保存していないため算出しません'}
+                  </div>
+                </div>
+                <div className="rounded-md bg-gray-50 p-4">
+                  <div className="text-xs text-gray-500">対象者1人あたりの購入額</div>
+                  <div className="mt-1 text-xl font-semibold text-gray-900">
+                    {selectedDetail.attribution.revenuePerRecipient != null
+                      ? `¥${Math.round(selectedDetail.attribution.revenuePerRecipient).toLocaleString('ja-JP')}`
+                      : '—'}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">オーガニックを含むため、配信効果そのものではありません</div>
+                </div>
+              </div>
+              <p className="mt-3 text-[11px] leading-5 text-gray-500">
+                クリックのうち友だちを識別できたのは全体の約15%（2026-11-15時点）。クリック経由の金額は「少なくともこれだけ」、
+                配信対象者の購入は「多くてもこれだけ」として読んでください。商品原価が未投入のため貢献利益は算出していません。
+              </p>
+            </div>
+          )}
+
           {selectedDetail.errorSummary && (
             <div className={`border-b px-5 py-3 text-sm ${isDuplicateSkipped(selectedDetail) ? 'border-amber-100 bg-amber-50 text-amber-800' : 'border-red-100 bg-red-50 text-red-700'}`}>
               {isDuplicateSkipped(selectedDetail) ? '送信しなかった理由: ' : '失敗理由: '}{selectedDetail.errorSummary}

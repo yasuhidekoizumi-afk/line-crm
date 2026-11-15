@@ -212,6 +212,18 @@ export interface BroadcastDetail extends Broadcast {
     officialClickRate: number | null;
     officialStatsStatus: 'available' | 'pending' | 'not_configured' | 'unavailable';
   };
+  /** 配信→売上（クリック経由の下限と、配信対象者の購入による上限） */
+  attribution: {
+    windowDays: number;
+    clickOrders: number;
+    clickRevenue: number;
+    clickAov: number | null;
+    recipientOrders: number | null;
+    recipientRevenue: number | null;
+    recipientCount: number;
+    revenuePerRecipient: number | null;
+    hasRecipientList: boolean;
+  } | null;
   trackedLinks: Array<{
     id: string;
     name: string;

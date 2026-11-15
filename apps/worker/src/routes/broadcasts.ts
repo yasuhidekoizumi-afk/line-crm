@@ -11,6 +11,7 @@ import {
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
 import { processBroadcastSend, resolveBroadcastLineClient, buildMessages, isSendableLineUserId } from '../services/broadcast.js';
 import { getBroadcastBlockStats } from '../services/broadcast-block-metrics.js';
+import { getBroadcastAttribution } from '../services/broadcast-attribution.js';
 import { detectClaimWarnings, extractTextForValidation, extractUrls, findTooLongText } from '../utils/broadcast-preflight.js';
 import { getSegmentLineUserIds, getSegmentAudienceBreakdown } from '@line-crm/db';
 import type { Env } from '../index.js';
@@ -550,6 +551,8 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
   const blockStats = (row.is_test || row.target_type === 'individual')
     ? { unfollowCount: null, rate: null }
     : await getBroadcastBlockStats(db, row);
+  // 配信→売上（クリック経由の下限と、配信対象者の購入による上限）
+  const attribution = await getBroadcastAttribution(db, row);
 
   return {
     ...serializeBroadcast(row),
@@ -574,6 +577,7 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
           ? 'pending' as const
           : 'not_configured' as const,
     },
+    attribution,
     trackedLinks: linkStats,
   };
 }
