@@ -44,6 +44,9 @@ const FIELDS: FieldDef[] = [
   { value: 'order_count',      label: '注文回数',            type: 'number', unit: '回' },
   { value: 'last_order_at',    label: '最終注文日',          type: 'date' },
   { value: 'loyalty_rank',     label: 'ロイヤルティランク',  type: 'string' },
+  { value: 'limited_balance',  label: '期間限定ポイント残高（失効前のみ）', type: 'number', unit: 'pt' },
+  { value: 'limited_balance_all', label: '期間限定ポイント残高（失効済みを含む）', type: 'number', unit: 'pt' },
+  { value: 'limited_expires_in_days', label: '期間限定ポイントの失効まで（マイナス=失効済み）', type: 'number', unit: '日' },
 ]
 
 const FIELD_MAP = Object.fromEntries(FIELDS.map((f) => [f.value, f]))

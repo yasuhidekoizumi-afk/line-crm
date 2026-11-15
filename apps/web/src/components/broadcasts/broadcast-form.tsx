@@ -189,6 +189,7 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
           targetTagId: form.targetType === 'tag' ? form.targetTagId : null,
           targetSegmentId: form.targetType === 'segment' ? form.targetSegmentId : null,
           lineAccountId: selectedAccountId || null,
+          targetFriendIds: form.targetType === 'individual' ? form.targetFriendIds : null,
         })
         if (cancelled) return
         if (res.success) {
@@ -584,7 +585,11 @@ export default function BroadcastForm({ tags, onSuccess, onCancel, initialDraft,
                 <div className="rounded-md bg-white px-2 py-1.5">
                   <div className="text-gray-500">LINE連携済み・配信可能</div>
                   <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
-                    {selectedSegment.audience_breakdown.sendableLineUsers.toLocaleString('ja-JP')} 人
+                    {selectedSegment.audience_breakdown.sendableLineUsers === null ? (
+                      <span className="text-gray-400">—</span>
+                    ) : (
+                      <>{selectedSegment.audience_breakdown.sendableLineUsers.toLocaleString('ja-JP')} 人</>
+                    )}
                   </div>
                 </div>
               </div>

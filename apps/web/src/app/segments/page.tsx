@@ -277,7 +277,11 @@ export default function SegmentsPage() {
                         <div>
                           <div className="text-gray-500">LINE連携済み・配信可能</div>
                           <div className="mt-0.5 font-semibold text-gray-900 tabular-nums">
-                            {s.audience_breakdown.sendableLineUsers.toLocaleString('ja-JP')} 人
+                            {s.audience_breakdown.sendableLineUsers === null ? (
+                              <span className="text-gray-400">—</span>
+                            ) : (
+                              <>{s.audience_breakdown.sendableLineUsers.toLocaleString('ja-JP')} 人</>
+                            )}
                           </div>
                         </div>
                       </div>

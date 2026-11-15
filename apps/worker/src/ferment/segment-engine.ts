@@ -74,6 +74,10 @@ const ALLOWED_FIELDS = new Set([
   // ロイヤルティ連携
   'loyalty_rank',
   'loyalty_balance',
+  // 期間限定ポイント（失効するポイント）
+  'limited_balance',
+  'limited_balance_all',
+  'limited_expires_in_days',
 ]);
 
 // ============================================================
@@ -181,6 +185,54 @@ function leafToSql(cond: SegmentLeafCondition): QueryPart {
       case 'is_not_null': return { sql: `${subquery} IS NOT NULL`, bindings: [] };
       default:
         throw new Error(`loyalty_balance で未対応の演算子: ${op}`);
+    }
+  }
+
+  // 期間限定ポイント: 残高・失効までの残り日数。
+  // ⚠️ 本番データでは失効済み（limited_expires_at が過去）でも limited_balance が
+  // 0 に戻っていない行が大量にある（実測 2,846行 / 346,976pt）。そのため
+  //   limited_balance            = いま使える残高（失効前のものだけ）
+  //   limited_balance_all        = 失効済みを含む残高（データそのまま）
+  //   limited_expires_in_days    = 失効までの日数（マイナスは失効済み）
+  // と分けている。配信対象を絞る用途では limited_balance を使うこと。
+  if (
+    field === 'limited_balance' ||
+    field === 'limited_balance_all' ||
+    field === 'limited_expires_in_days'
+  ) {
+    const valueExpr =
+      field === 'limited_expires_in_days'
+        ? "CAST(julianday(lp.limited_expires_at) - julianday('now') AS INTEGER)"
+        : 'lp.limited_balance';
+    const futureOnly =
+      field === 'limited_balance' ? "AND lp.limited_expires_at >= datetime('now')" : '';
+    const baseSubquery =
+      `SELECT ${valueExpr}
+       FROM loyalty_points lp
+       JOIN friends f ON f.id = lp.friend_id
+       WHERE f.line_user_id = c.line_user_id
+         AND lp.limited_balance > 0
+         AND lp.limited_expires_at IS NOT NULL
+         ${futureOnly}`;
+    const subquery = `(${baseSubquery})`;
+    const numValue = Number(value);
+    switch (op) {
+      case '=':  return { sql: `${subquery} = ?`, bindings: [numValue] };
+      case '!=': return { sql: `${subquery} != ?`, bindings: [numValue] };
+      case '>':  return { sql: `${subquery} > ?`, bindings: [numValue] };
+      case '>=': return { sql: `${subquery} >= ?`, bindings: [numValue] };
+      case '<':  return { sql: `${subquery} < ?`, bindings: [numValue] };
+      case '<=': return { sql: `${subquery} <= ?`, bindings: [numValue] };
+      // 「N日以内」は失効前（0〜N日）に限定する。失効済みを混ぜない。
+      case 'within_days':
+        return {
+          sql: `${subquery} >= 0 AND ${subquery} <= ?`,
+          bindings: [numValue, numValue],
+        };
+      case 'is_null':     return { sql: `${subquery} IS NULL`, bindings: [] };
+      case 'is_not_null': return { sql: `${subquery} IS NOT NULL`, bindings: [] };
+      default:
+        throw new Error(`${field} で未対応の演算子: ${op}`);
     }
   }
 
