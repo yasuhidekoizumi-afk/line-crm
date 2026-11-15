@@ -1,3 +1,5 @@
+import { broadcastUtmCampaign } from '../utils/tracked-link-utm.js';
+
 /**
  * 配信→売上の帰属（2026-11-15 実装）。
  *
@@ -11,10 +13,13 @@
  */
 export interface BroadcastAttribution {
   windowDays: number;
-  /** クリック経由（下限） */
+  /** 配信経由（下限）: friend_idのlast-click + landing_siteのUTM の統合 */
   clickOrders: number;
   clickRevenue: number;
   clickAov: number | null;
+  /** うち landing_site のUTMで一致した注文（2026-11-15以降の配信で増える） */
+  utmOrders: number;
+  utmRevenue: number;
   /** 配信対象者の購入（上限・オーガニック込み） */
   recipientOrders: number | null;
   recipientRevenue: number | null;
@@ -41,33 +46,53 @@ export async function getBroadcastAttribution(
   if (!broadcast.sent_at) return null;
 
   const windowEnd = `datetime(?, '+${windowDays} days')`;
+  const campaign = broadcastUtmCampaign(broadcast.id);
 
-  // 1. クリック経由（last-click・配信内の注文のみ）
+  // 1. 配信経由（friend_idのlast-click と landing_site のUTMを統合・注文IDで重複排除）
   const clickRow = await db
     .prepare(
-      `WITH order_attr AS (
-         SELECT o.shopify_order_id, o.total_price,
-                (SELECT t.broadcast_id
-                 FROM link_clicks c
-                 JOIN tracked_links t ON t.id = c.tracked_link_id
-                 WHERE c.friend_id = o.friend_id
-                   AND datetime(c.clicked_at) <= datetime(o.created_at_shopify)
-                   AND datetime(c.clicked_at) >= datetime(o.created_at_shopify, '-${windowDays} days')
-                 ORDER BY datetime(c.clicked_at) DESC
-                 LIMIT 1) AS attributed_broadcast
+      `WITH click_orders AS (
+         SELECT o.shopify_order_id AS id, o.total_price AS price
          FROM shopify_orders o
          WHERE o.friend_id IS NOT NULL
            AND o.cancelled_at IS NULL
            AND o.financial_status IN ${PAID_STATUSES}
            AND datetime(o.created_at_shopify) >= datetime(?)
            AND datetime(o.created_at_shopify) < ${windowEnd}
+           AND (SELECT t.broadcast_id
+                FROM link_clicks c
+                JOIN tracked_links t ON t.id = c.tracked_link_id
+                WHERE c.friend_id = o.friend_id
+                  AND datetime(c.clicked_at) <= datetime(o.created_at_shopify)
+                  AND datetime(c.clicked_at) >= datetime(o.created_at_shopify, '-${windowDays} days')
+                ORDER BY datetime(c.clicked_at) DESC
+                LIMIT 1) = ?
+       ),
+       utm_orders AS (
+         SELECT o.shopify_order_id AS id, o.total_price AS price
+         FROM shopify_orders o
+         WHERE o.cancelled_at IS NULL
+           AND o.financial_status IN ${PAID_STATUSES}
+           AND datetime(o.created_at_shopify) >= datetime(?)
+           AND datetime(o.created_at_shopify) < ${windowEnd}
+           AND o.landing_site LIKE ?
+       ),
+       merged AS (
+         SELECT id, price FROM click_orders
+         UNION
+         SELECT id, price FROM utm_orders
        )
-       SELECT COUNT(*) AS orders, COALESCE(SUM(total_price), 0) AS revenue
-       FROM order_attr
-       WHERE attributed_broadcast = ?`,
+       SELECT COUNT(*) AS orders,
+              COALESCE(SUM(price), 0) AS revenue,
+              COALESCE(SUM(CASE WHEN id IN (SELECT id FROM utm_orders) THEN 1 ELSE 0 END), 0) AS utm_orders,
+              COALESCE(SUM(CASE WHEN id IN (SELECT id FROM utm_orders) THEN price ELSE 0 END), 0) AS utm_revenue
+       FROM merged`,
     )
-    .bind(broadcast.sent_at, broadcast.sent_at, broadcast.id)
-    .first<{ orders: number; revenue: number }>();
+    .bind(
+      broadcast.sent_at, broadcast.sent_at, broadcast.id,
+      broadcast.sent_at, broadcast.sent_at, `%utm_campaign=${campaign}%`,
+    )
+    .first<{ orders: number; revenue: number; utm_orders: number; utm_revenue: number }>();
 
   // 2. 配信対象者の購入（受信者リストがある配信のみ）
   const recipientRow = await db
@@ -107,11 +132,16 @@ export async function getBroadcastAttribution(
   const clickOrders = clickRow?.orders ?? 0;
   const clickRevenue = clickRow?.revenue ?? 0;
 
+  const utmOrders = clickRow?.utm_orders ?? 0;
+  const utmRevenue = clickRow?.utm_revenue ?? 0;
+
   return {
     windowDays,
     clickOrders,
     clickRevenue,
     clickAov: clickOrders > 0 ? clickRevenue / clickOrders : null,
+    utmOrders,
+    utmRevenue,
     recipientOrders,
     recipientRevenue,
     recipientCount,

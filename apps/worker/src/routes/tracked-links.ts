@@ -13,6 +13,7 @@ import {
 import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { TrackedLink } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { buildTrackedDestination } from '../utils/tracked-link-utm.js';
 
 const trackedLinks = new Hono<Env>();
 
@@ -319,6 +320,13 @@ trackedLinks.get('/t/:linkId', async (c) => {
   }
 
   const useAppRedirect = isAppLinkDomain(link.original_url);
+  // 配信リンクは Shopify の landing_site からも配信を特定できるよう、配信IDをUTMで付ける
+  // （friend_id が取れないクリックの売上も拾うため）
+  const destinationUrl = buildTrackedDestination(link.original_url, {
+    linkId: link.id,
+    broadcastId: link.broadcast_id ?? null,
+    isAppLink: useAppRedirect,
+  });
 
   // If no user ID yet, check if this is LINE's in-app browser → redirect to LIFF for identification
   // Skip LIFF redirect for app-link domains (they'll come from Safari via externalBrowser)
@@ -370,10 +378,10 @@ trackedLinks.get('/t/:linkId', async (c) => {
 
   // App-link domains: return HTML with JS redirect for Universal Link support
   if (useAppRedirect) {
-    return c.html(buildAppRedirectHtml(link.original_url));
+    return c.html(buildAppRedirectHtml(destinationUrl));
   }
 
-  return c.redirect(link.original_url, 302);
+  return c.redirect(destinationUrl, 302);
 });
 
 export { trackedLinks };

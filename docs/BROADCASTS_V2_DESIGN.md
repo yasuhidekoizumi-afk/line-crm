@@ -116,6 +116,12 @@
 - 実測例（11/11 米麹グラノーラバー再入荷・276人）: クリック経由 4件 / ¥27,163、対象者の購入 7件 / ¥46,043（¥167/人）。
 - 結合は `apps/worker/src/services/broadcast-attribution.ts`。除外条件は `cancelled_at IS NULL` かつ
   `financial_status IN ('paid','partially_paid','partially_refunded')`。
+- **帰属率の改善（2026-11-15）**: 計測リンクのリダイレクト先に
+  `utm_source=line&utm_medium=broadcast&utm_campaign=linebc_<配信ID先頭8文字>&utm_content=lk_<リンクID先頭8文字>` を付与
+  （`apps/worker/src/utils/tracked-link-utm.ts`）。Shopifyはセッション最初のURLを `landing_site` に残すため、
+  `friend_id` が取れなかったクリックも注文側から配信を特定できる。既存utmは上書きせず、appリンク（X/Instagram等）には付けない。
+  クリック経由の集計は「friend_idのlast-click」と「UTM一致」の**注文ID和集合**で重複排除し、`utmOrders` で内訳を出す。
+  UTM付与は2026-11-15以降のクリックが対象なので、効果は次の配信から出る。
 
 ## 5. D: 運用（Phase 1と並行）
 

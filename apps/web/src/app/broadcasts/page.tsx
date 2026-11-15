@@ -913,6 +913,11 @@ function BroadcastsPageInner() {
                     {selectedDetail.attribution.clickOrders}件
                     {selectedDetail.attribution.clickAov != null
                       && ` / 平均 ¥${Math.round(selectedDetail.attribution.clickAov).toLocaleString('ja-JP')}`}
+                    {selectedDetail.attribution.utmOrders > 0 && (
+                      <span className="block text-[11px] text-gray-400">
+                        うちURL計測（UTM）{selectedDetail.attribution.utmOrders}件
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="rounded-md bg-gray-50 p-4">
@@ -939,8 +944,9 @@ function BroadcastsPageInner() {
                 </div>
               </div>
               <p className="mt-3 text-[11px] leading-5 text-gray-500">
-                クリックのうち友だちを識別できたのは全体の約15%（2026-11-15時点）。クリック経由の金額は「少なくともこれだけ」、
-                配信対象者の購入は「多くてもこれだけ」として読んでください。商品原価が未投入のため貢献利益は算出していません。
+                配信経由の金額は「少なくともこれだけ」、配信対象者の購入は「多くてもこれだけ」として読んでください。
+                2026-11-15以降の配信はリンク先URLに配信ID（UTM）が付くため、注文側からも紐付きます（それ以前はクリック時の識別分のみ）。
+                商品原価が未投入のため貢献利益は算出していません。
               </p>
             </div>
           )}
