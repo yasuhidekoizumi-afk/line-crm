@@ -10,6 +10,7 @@ import {
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
 import { processBroadcastSend, resolveBroadcastLineClient } from '../services/broadcast.js';
+import { getBroadcastBlockStats } from '../services/broadcast-block-metrics.js';
 import { getSegmentLineUserIds, getSegmentAudienceBreakdown } from '@line-crm/db';
 import type { Env } from '../index.js';
 import { accessibleLineAccountIds, requireLineAccountAccess } from '../middleware/account-access.js';
@@ -504,11 +505,20 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
     if (!String(e).includes('crm_manual_broadcasts')) throw e;
   }
 
-  const deliveredCount = row.success_count || (sentLog?.count ?? 0);
+  // 全員配信は success_count を持たない（LINE全員配信APIが宛先数を返さない）ため、
+  // 送信時に記録した total_count を分母に使う。tag/segment の失敗配信は0のままにする。
+  const deliveredCount = row.success_count
+    || (sentLog?.count ?? 0)
+    || (row.target_type === 'all' ? (row.total_count ?? 0) : 0);
   const effectiveUniqueClickCount = uniqueClickCount || manualMetrics?.click_count || 0;
   const clickRate = manualMetrics?.click_rate ?? (
     deliveredCount > 0 ? (effectiveUniqueClickCount / deliveredCount) * 100 : null
   );
+  // ブロック率は保存値ではなく読み取り時に計算する（旧式の破綻値を表示しない）。
+  // テスト配信・個別指定は運用判断に使わないため率を出さない。
+  const blockStats = (row.is_test || row.target_type === 'individual')
+    ? { unfollowCount: null, rate: null }
+    : await getBroadcastBlockStats(db, row);
 
   return {
     ...serializeBroadcast(row),
@@ -523,6 +533,8 @@ async function getBroadcastDetail(db: D1Database, row: DbBroadcast) {
       unidentifiedClickEvents,
       clickRate,
       trackedLinkCount: linkGroups.length,
+      blockUnfollowCount: blockStats.unfollowCount,
+      blockRate24h: blockStats.rate,
       officialClickCount: null as number | null,
       officialClickRate: null as number | null,
       officialStatsStatus: manualMetrics?.open_count != null || manualMetrics?.open_rate != null
@@ -979,7 +991,7 @@ broadcasts.post('/api/broadcasts/_debug/drop-stale-triggers', async (c) => {
   }
 });
 
-// POST /api/broadcasts/:id/reset - 「送信中」で固まった配信をドラフトに強制リセット
+// POST /api/broadcasts/:id/reset - 「送信中」で固まった配信・全滅した配信をドラフトに戻す
 broadcasts.post('/api/broadcasts/:id/reset', async (c) => {
   try {
     const id = c.req.param('id');
@@ -987,7 +999,13 @@ broadcasts.post('/api/broadcasts/:id/reset', async (c) => {
     if (!existing) {
       return c.json({ success: false, error: 'Broadcast not found' }, 404);
     }
-    if (existing.status === 'sent') {
+    // 送信完了済みは原則リセット不可（二重送信の危険）。
+    // ただし「1件も届かず、失敗が記録されている」配信は復旧させる（429等の全滅ケース）。
+    // 同日重複除外で0件だった配信（failed_count=0）は意図的な未送信なので対象外。
+    const allFailed = existing.status === 'sent'
+      && (existing.success_count ?? 0) === 0
+      && (existing.failed_count ?? 0) > 0;
+    if (existing.status === 'sent' && !allFailed) {
       return c.json({ success: false, error: '送信完了済みの配信はリセットできません' }, 400);
     }
     await updateBroadcastStatus(c.env.DB, id, 'draft');

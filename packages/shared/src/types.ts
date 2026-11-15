@@ -204,6 +204,10 @@ export interface BroadcastDetail extends Broadcast {
     unidentifiedClickEvents: number;
     clickRate: number | null;
     trackedLinkCount: number;
+    /** 配信後24時間のブロック（解除）数。24時間未満の配信は null */
+    blockUnfollowCount: number | null;
+    /** 配信後24時間のブロック率（%）。24時間未満・分母0は null */
+    blockRate24h: number | null;
     officialClickCount: number | null;
     officialClickRate: number | null;
     officialStatsStatus: 'available' | 'pending' | 'not_configured' | 'unavailable';

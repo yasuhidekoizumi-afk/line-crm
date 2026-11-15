@@ -55,6 +55,24 @@ function uniqueBySendableLineUserId<T extends { line_user_id: string }>(
   return uniqueItems;
 }
 
+/**
+ * 全員配信の宛先数（送信時点のフォロー中friend数）。
+ * LINE全員配信APIは件数を返さないため、記録用の推定値として使う。
+ */
+async function countFollowingFriendsForBroadcast(
+  db: D1Database,
+  lineAccountId: string | null,
+): Promise<number> {
+  const base = `SELECT COUNT(*) AS count FROM friends
+     WHERE is_following = 1
+       AND line_user_id LIKE 'U%'
+       AND length(line_user_id) = 33`;
+  const stmt = db.prepare(lineAccountId ? `${base} AND line_account_id = ?` : base);
+  const row = await (lineAccountId ? stmt.bind(lineAccountId) : stmt)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
 function uniqueSendableLineUserIds(lineUserIds: string[], dedupeContext?: BroadcastDedupeContext): string[] {
   const seen = new Set<string>();
   const uniqueIds: string[] = [];
@@ -334,6 +352,10 @@ export async function processBroadcastSend(
 
   try {
     if (broadcast.target_type === 'all') {
+      // LINEの全員配信APIは宛先数を返さない。送信直前の友だち数で件数を埋めないと
+      // 画面が「成功0 / 0件」になり、実際には届いている配信を未達と誤読する。
+      // 値はあくまで推定（LINE側の実配信数はブロック・退会の反映分だけ少ない）。
+      totalCount = await countFollowingFriendsForBroadcast(db, broadcast.line_account_id);
       // Use LINE broadcast API (sends to all followers)
       const requestId = await lineClient.broadcast(messages);
       if (requestId) {
@@ -342,8 +364,8 @@ export async function processBroadcastSend(
           .bind(requestId, broadcast.id)
           .run();
       }
-      // We don't have exact count for broadcast API, set as 0 (unknown)
-      totalCount = 0;
+      // 全員配信はLINE側の一括配信なので、個別の送信控え（messages_log）は作らない。
+      // success_count は「届いた数」を証明できないため0のままにし、画面は total_count を推定値として使う。
       successCount = 0;
     } else if (broadcast.target_type === 'tag') {
       if (!broadcast.target_tag_id) {

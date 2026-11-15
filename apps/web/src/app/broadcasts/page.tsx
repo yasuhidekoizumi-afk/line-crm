@@ -821,12 +821,16 @@ function BroadcastsPageInner() {
 
           <div className="grid gap-3 border-b border-gray-100 p-5 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-md bg-gray-50 p-4">
-              <div className="text-xs text-gray-500">配信成功</div>
+              <div className="text-xs text-gray-500">
+                {selectedDetail.targetType === 'all' ? '配信対象（推定）' : '配信成功'}
+              </div>
               <div className="mt-1 text-2xl font-semibold text-gray-900">
                 {selectedDetail.metrics.deliveredCount.toLocaleString('ja-JP')}
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                対象 {selectedDetail.totalCount.toLocaleString('ja-JP')} / 失敗 {selectedDetail.metrics.failedCount.toLocaleString('ja-JP')}
+                {selectedDetail.targetType === 'all'
+                  ? 'LINE全員配信 / 実配信数はLINE側の集計'
+                  : `対象 ${selectedDetail.totalCount.toLocaleString('ja-JP')} / 失敗 ${selectedDetail.metrics.failedCount.toLocaleString('ja-JP')}`}
               </div>
             </div>
             <div className="rounded-md bg-gray-50 p-4">
@@ -852,7 +856,9 @@ function BroadcastsPageInner() {
                 {formatPercent(selectedDetail.metrics.clickRate)}
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                クリックした人 {selectedDetail.metrics.uniqueClickCount.toLocaleString('ja-JP')} / 配信成功 {selectedDetail.metrics.deliveredCount.toLocaleString('ja-JP')}
+                クリックした人 {selectedDetail.metrics.uniqueClickCount.toLocaleString('ja-JP')} /{' '}
+                {selectedDetail.targetType === 'all' ? '配信対象（推定）' : '配信成功'}{' '}
+                {selectedDetail.metrics.deliveredCount.toLocaleString('ja-JP')}
               </div>
               <div className="mt-1 text-xs text-gray-500">
                 総タップ {selectedDetail.metrics.clickEvents.toLocaleString('ja-JP')}回（再タップを含む）
@@ -864,12 +870,29 @@ function BroadcastsPageInner() {
             <div className="rounded-md bg-gray-50 p-4">
               <div className="text-xs text-gray-500">配信ログ</div>
               <div className="mt-1 text-2xl font-semibold text-gray-900">
-                {selectedDetail.metrics.sentLogCount.toLocaleString('ja-JP')}
+                {selectedDetail.targetType === 'all'
+                  ? '—'
+                  : selectedDetail.metrics.sentLogCount.toLocaleString('ja-JP')}
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                計測リンク {selectedDetail.metrics.trackedLinkCount.toLocaleString('ja-JP')} 件
+                {selectedDetail.targetType === 'all'
+                  ? '全員配信は個別の送信控えを作りません'
+                  : `計測リンク ${selectedDetail.metrics.trackedLinkCount.toLocaleString('ja-JP')} 件`}
               </div>
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-gray-100 px-5 py-3 text-xs text-gray-600">
+            <span className="font-medium text-gray-700">
+              24時間ブロック率:{' '}
+              {selectedDetail.metrics.blockRate24h == null
+                ? (selectedDetail.sentAt ? '集計中（24時間未満または20人未満）' : '未送信')
+                : `${selectedDetail.metrics.blockRate24h.toFixed(2)}%`}
+            </span>
+            {selectedDetail.metrics.blockUnfollowCount != null && (
+              <span>解除 {selectedDetail.metrics.blockUnfollowCount.toLocaleString('ja-JP')}人</span>
+            )}
+            <span className="text-gray-400">送信時刻から24時間の解除数 ÷ 配信成功数</span>
           </div>
 
           {selectedDetail.errorSummary && (
@@ -1088,7 +1111,11 @@ function BroadcastsPageInner() {
                           <span>
                             {isDuplicateSkipped(broadcast)
                               ? broadcast.errorSummary
-                              : `成功 ${broadcast.successCount.toLocaleString('ja-JP')} / ${broadcast.totalCount.toLocaleString('ja-JP')} 件`}
+                              : broadcast.targetType === 'all' && broadcast.successCount === 0
+                                ? (broadcast.totalCount > 0
+                                    ? `全員配信（約${broadcast.totalCount.toLocaleString('ja-JP')}人・推定）`
+                                    : '全員配信（件数はLINE側集計）')
+                                : `成功 ${broadcast.successCount.toLocaleString('ja-JP')} / ${broadcast.totalCount.toLocaleString('ja-JP')} 件`}
                           </span>
                           {(broadcast.failedCount ?? 0) > 0 && (
                             <>
@@ -1146,6 +1173,16 @@ function BroadcastsPageInner() {
                             {isSending ? '送信中...' : '今すぐ送信'}
                           </button>
                         )}
+                        {broadcast.status === 'sent'
+                          && broadcast.successCount === 0
+                          && (broadcast.failedCount ?? 0) > 0 && (
+                          <button
+                            onClick={() => handleReset(broadcast.id)}
+                            className="px-3 py-1 min-h-[44px] text-xs font-medium text-orange-600 hover:text-orange-800 bg-orange-50 hover:bg-orange-100 rounded-md transition-colors"
+                          >
+                            下書きに戻す
+                          </button>
+                        )}
                         {broadcast.status === 'sending' && (
                           <button
                             onClick={() => handleReset(broadcast.id)}
@@ -1196,12 +1233,12 @@ function BroadcastsPageInner() {
         open={pendingAction !== null}
         title={
           pendingAction?.kind === 'delete' ? 'この配信を削除しますか？'
-          : pendingAction?.kind === 'reset' ? '「送信中」を下書きに戻しますか？'
+          : pendingAction?.kind === 'reset' ? 'この配信を下書きに戻しますか？'
           : 'この配信を送信しますか？'
         }
         message={
           pendingAction?.kind === 'delete' ? '削除した配信は元に戻せません。'
-          : pendingAction?.kind === 'reset' ? '再送信や削除ができるようになります。すでに送信された分は取り消されません。'
+          : pendingAction?.kind === 'reset' ? '再送信・編集ができるようになります。すでに送信された分は取り消されません。'
           : '送信すると取り消せません。対象者と本文を確認してください。'
         }
         confirmLabel={
