@@ -28,6 +28,14 @@ const aiStatusConfig: Record<string, { label: string; className: string }> = {
   human_handled: { label: '有人対応', className: 'bg-gray-100 text-gray-600' },
 }
 const aiCategoryLabels: Record<string, string> = { faq: 'FAQ', order_status: '注文状況', refund: '返金', complaint: 'クレーム', product_question: '商品質問', other: 'その他' }
+
+// 顧客の最終メッセージの意図（AI判定）。LINE公式アカウント管理画面からの返信は
+// ハーネスに記録されないため、「未読」ではなくこの判定で要確認候補を出す。
+const aiIntentConfig: Record<string, { label: string; className: string }> = {
+  needs_reply: { label: '要返信(AI)', className: 'bg-red-100 text-red-700' },
+  unclear: { label: '要確認(AI)', className: 'bg-yellow-100 text-yellow-800' },
+  closing: { label: '応答不要(AI)', className: 'bg-gray-100 text-gray-500' },
+}
 const PAGE_SIZE = 100
 function formatDatetime(iso: string | null): string { if (!iso) return '-'; return new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 function formatListTime(iso: string | null): string { if (!iso) return ''; return new Date(iso).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
@@ -52,8 +60,10 @@ export default function ChatsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortMode, setSortMode] = useState<'recent' | 'unread' | 'stale'>('recent')
   const [mineOnly, setMineOnly] = useState(false)
-  // 要返信候補（退会・解約・返金・未着など）だけに絞る。データは変えず、見る順番を決めるためのフィルタ。
-  const [attentionOnly, setAttentionOnly] = useState(false)
+  // AIが判定した「顧客がまだ何かを求めているか」で絞る（返信記録はハーネスに残らないため未読とは別物）
+  const [intentFilter, setIntentFilter] = useState<'all' | 'needs_reply' | 'unchecked'>('all')
+  const [classifying, setClassifying] = useState(false)
+  const [classifyProgress, setClassifyProgress] = useState('')
   const [total, setTotal] = useState(0)
   const [hasMoreChats, setHasMoreChats] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -74,6 +84,7 @@ export default function ChatsPage() {
       const params: {
         status?: string; accountId?: string; channel?: string; q?: string
         limit: number; offset: number; sort: 'recent' | 'unread' | 'stale'; assignedStaffId?: string; attention?: boolean
+        intent?: 'needs_reply' | 'closing' | 'unclear' | 'unchecked'
       } = {
         limit: opts?.silent ? Math.max(PAGE_SIZE, chatsRef.current.length) : PAGE_SIZE,
         offset: opts?.append ? chatsRef.current.length : 0,
@@ -84,7 +95,7 @@ export default function ChatsPage() {
       if (channelFilter !== 'all') params.channel = channelFilter
       if (searchQuery) params.q = searchQuery
       if (mineOnly) params.assignedStaffId = 'me'
-      if (attentionOnly) params.attention = true
+      if (intentFilter !== 'all') params.intent = intentFilter
       const chatRes = await api.chats.list(params)
       if (chatRes.success) {
         const list = chatRes.data as any[]
@@ -95,7 +106,7 @@ export default function ChatsPage() {
       }
     } catch { if (!opts?.silent) setError('チャットの読み込みに失敗しました') } finally { if (!opts?.silent) { setLoading(false); setLoadingMore(false) } }
     return null
-  }, [statusFilter, channelFilter, selectedAccountId, searchQuery, sortMode, mineOnly, attentionOnly])
+  }, [statusFilter, channelFilter, selectedAccountId, searchQuery, sortMode, mineOnly, intentFilter])
 
   const loadChatDetail = useCallback(async (chatId: string, opts?: { silent?: boolean }) => {
     if (!opts?.silent) setDetailLoading(true)
@@ -320,6 +331,27 @@ export default function ChatsPage() {
       void loadChats({ silent: true })
     } catch { setError('一括既読に失敗しました') } finally { setBulkReading(false) }
   }
+  // 未判定の会話をAIで判定する（残件が0になるまで10件ずつ）
+  const handleClassifyIntents = async () => {
+    if (classifying) return
+    setClassifying(true)
+    setError('')
+    let total = 0
+    let needs = 0
+    try {
+      for (let i = 0; i < 40; i += 1) {
+        const res = await api.chats.classifyIntents(10)
+        if (!res.success) break
+        const d = res.data as any
+        total += Number(d.processed ?? 0)
+        needs += Number(d.needs_reply ?? 0)
+        setClassifyProgress(`${total}件を判定・要返信 ${needs}件・残り ${d.remaining ?? 0}件`)
+        if (!d.remaining || !d.processed) break
+      }
+      await loadChats()
+    } catch { setError('AI判定に失敗しました（時間をおいて再実行してください）') }
+    finally { setClassifying(false); setTimeout(() => setClassifyProgress(''), 5000) }
+  }
   // 画像はアップロードしてからLINEに送る（R2の公開URLを使用）
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -355,7 +387,7 @@ export default function ChatsPage() {
           <select value={sortMode} onChange={(e) => setSortMode(e.target.value as 'recent' | 'unread' | 'stale')} className="text-xs border border-gray-300 rounded-md px-1.5 py-1.5 bg-white text-gray-600" title="並び替え">
             <option value="recent">最新順</option>
             <option value="unread">未読優先</option>
-            <option value="stale">放置順</option>
+            <option value="stale">古い順</option>
           </select>
         </div>
         <div className="flex border-b border-gray-200 bg-gray-50">{visibleChannelFilters.map((f) => (<button key={f.key} onClick={() => { setChannelFilter(f.key); setSelectedChatId(null) }} className={`flex-1 px-3 py-2 min-h-[40px] text-xs font-medium transition-colors ${channelFilter === f.key ? 'bg-white text-gray-900 border-b-2 border-purple-600' : 'text-gray-500 hover:bg-white'}`}>{f.label}</button>))}</div>
@@ -364,11 +396,14 @@ export default function ChatsPage() {
         <div className="px-3 py-1.5 border-b border-gray-100 bg-white flex items-center justify-between gap-2">
           <span className="text-[11px] text-gray-500">全{total}件{unreadChatCount > 0 ? `・未読${unreadChatCount}件` : ''}</span>
           <div className="flex items-center gap-2">
-            <button onClick={() => setAttentionOnly((v) => !v)} className={`px-1.5 py-0.5 text-[11px] rounded ${attentionOnly ? 'bg-amber-100 text-amber-800' : 'text-gray-400 hover:text-gray-600'}`} title="退会・解約・返金・未着などの語を含む会話だけ表示（判断はしません）">要返信</button>
+            <button onClick={() => setIntentFilter(intentFilter === 'needs_reply' ? 'all' : 'needs_reply')} className={`px-1.5 py-0.5 text-[11px] rounded ${intentFilter === 'needs_reply' ? 'bg-red-100 text-red-700' : 'text-gray-400 hover:text-gray-600'}`} title="AIが「顧客はまだ何かを求めている」と判定した会話だけ表示">要返信(AI)</button>
+            <button onClick={() => setIntentFilter(intentFilter === 'unchecked' ? 'all' : 'unchecked')} className={`px-1.5 py-0.5 text-[11px] rounded ${intentFilter === 'unchecked' ? 'bg-gray-200 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`} title="まだAI判定していない会話">未判定</button>
+            <button onClick={handleClassifyIntents} disabled={classifying} className="px-1.5 py-0.5 text-[11px] rounded text-purple-600 hover:bg-purple-50 disabled:opacity-50" title="未判定の会話をAIで判定します">{classifying ? '判定中...' : 'AI判定'}</button>
             <button onClick={() => setMineOnly((v) => !v)} className={`px-1.5 py-0.5 text-[11px] rounded ${mineOnly ? 'bg-green-100 text-green-700' : 'text-gray-400 hover:text-gray-600'}`}>自分の担当</button>
             <button onClick={handleReadAll} disabled={bulkReading || unreadChatCount === 0} className="px-1.5 py-0.5 text-[11px] rounded text-gray-500 hover:text-gray-700 disabled:opacity-40">一括既読</button>
           </div>
         </div>
+        {classifyProgress && (<div className="px-3 py-1 text-[11px] text-purple-700 bg-purple-50 border-b border-purple-100">{classifyProgress}</div>)}
         <div className="flex-1 overflow-y-auto">
           {loading ? (<div>{[...Array(5)].map((_, i) => (<div key={i} className="px-4 py-3 border-b border-gray-100 animate-pulse"><div className="h-3 bg-gray-200 rounded w-32" /><div className="h-2 bg-gray-100 rounded w-20 mt-2" /></div>))}</div>)
           : chats.length === 0 ? (<div className="py-10 text-center text-xs text-gray-400">該当するチャットがありません</div>)
@@ -387,9 +422,7 @@ export default function ChatsPage() {
                       </div>
                       <p className="text-xs text-gray-500 truncate mt-0.5">{chat.preview || 'メッセージはありません'}</p>
                       <div className="flex items-center gap-1 mt-1 flex-wrap">
-                        {Number(chat.waitingDays ?? -1) >= 7 && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-red-100 text-red-700 font-medium">{chat.waitingDays}日放置</span>)}
-                        {Number(chat.waitingDays ?? -1) >= 3 && Number(chat.waitingDays) < 7 && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-orange-100 text-orange-700">{chat.waitingDays}日未返信</span>)}
-                        {chat.needsAttention && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-800">要返信候補</span>)}
+                        {aiIntentConfig[chat.aiIntent] && (<span className={`px-1.5 py-0.5 text-[10px] rounded ${aiIntentConfig[chat.aiIntent].className}`} title={chat.aiIntentReason ?? ''}>{aiIntentConfig[chat.aiIntent].label}</span>)}
                         {aiStatusConfig[chat.aiStatus] && (<span className={`px-1.5 py-0.5 text-[10px] rounded ${aiStatusConfig[chat.aiStatus].className}`}>{aiStatusConfig[chat.aiStatus].label}</span>)}
                         {chat.aiMoneyFlag && <span className="px-1.5 py-0.5 text-[10px] rounded bg-orange-100 text-orange-700">💰 金銭</span>}
                         {chat.assignedStaffName && (<span className="px-1.5 py-0.5 text-[10px] rounded bg-indigo-50 text-indigo-600">👤 {chat.assignedStaffName}</span>)}
@@ -424,6 +457,7 @@ export default function ChatsPage() {
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <Badge tone={statusTone[chatDetail.status] ?? 'neutral'}>{(statusConfig[chatDetail.status] || {}).label || chatDetail.status}</Badge>
                     {aiStatusConfig[chatDetail.aiStatus] && (<span className={`px-1.5 py-0.5 text-[10px] rounded ${aiStatusConfig[chatDetail.aiStatus].className}`}>{aiStatusConfig[chatDetail.aiStatus].label}</span>)}
+                    {aiIntentConfig[chatDetail.aiIntent] && (<span className={`px-1.5 py-0.5 text-[10px] rounded ${aiIntentConfig[chatDetail.aiIntent].className}`} title={chatDetail.aiIntentReason ?? ''}>{aiIntentConfig[chatDetail.aiIntent].label}</span>)}
                     {chatDetail.aiCategory && (<span className="text-[10px] text-gray-500">{aiCategoryLabels[chatDetail.aiCategory] ?? chatDetail.aiCategory}</span>)}
                     {chatDetail.aiMoneyFlag && <span className="px-1.5 py-0.5 text-[10px] rounded bg-orange-100 text-orange-700">💰 金銭</span>}
                     {chatDetail.assignedStaffName

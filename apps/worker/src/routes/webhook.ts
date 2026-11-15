@@ -549,6 +549,21 @@ ORYZAEは宇都宮大学発の米麹発酵フードテック企業です。お�
       }
     }
 
+    // 顧客の最終メッセージの意図を判定する（要確認候補の抽出用）。
+    // 返信記録は LINE公式アカウント管理画面からの送信を取得できないため、
+    // 「未読かどうか」ではなく「顧客がまだ何かを求めているか」で候補を出す。
+    if (chatForTriage && env?.GEMINI_API_KEY) {
+      try {
+        const { classifyAndSaveChatIntent } = await import('../services/chat-intent.js');
+        await classifyAndSaveChatIntent(
+          env as unknown as Parameters<typeof classifyAndSaveChatIntent>[0],
+          chatForTriage.id,
+        );
+      } catch (err) {
+        console.error('[chats] intent classify failed', err);
+      }
+    }
+
     // イベントバス発火: message_received
     // Pass replyToken only when auto_reply didn't actually consume it
     await fireEvent(db, 'message_received', {

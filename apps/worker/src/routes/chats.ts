@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { extractFlexAltText } from '../utils/flex-alt-text.js';
 import { toDisplayContent } from '../utils/message-preview.js';
 import { sendCsEmailReply } from '../services/cs-email-reply.js';
+import { classifyAndSaveChatIntent } from '../services/chat-intent.js';
 import {
   getOperators, getOperatorById, createOperator, updateOperator, deleteOperator,
   getChats, getChatById, createChat, updateChat, markChatsRead, jstNow,
@@ -63,6 +64,7 @@ const UNREAD_EXPR = `(CASE WHEN c.status = 'resolved' THEN 0 ELSE (
 const CHAT_LIST_SELECT = `SELECT
   c.id, c.friend_id, c.operator_id, c.status, c.notes, c.last_message_at, c.created_at, c.updated_at,
   c.channel, c.customer_email, c.ai_status, c.ai_category, c.ai_money_flag,
+  c.ai_intent, c.ai_intent_reason, c.ai_intent_at,
   c.assigned_staff_id, c.assigned_at, c.last_read_at,
   f.display_name, f.picture_url, f.line_user_id, f.line_account_id,
   sm.name AS assigned_staff_name,
@@ -169,6 +171,7 @@ chats.get('/api/chats', async (c) => {
     const lineAccountId = c.req.query('lineAccountId') ?? undefined;
     const channel = c.req.query('channel') ?? undefined;
     const assignedStaffId = c.req.query('assignedStaffId') ?? undefined;
+    const intent = c.req.query('intent') ?? undefined;
     const q = (c.req.query('q') ?? '').trim();
     const attention = c.req.query('attention') === '1';
     const limit = Math.min(Math.max(Number(c.req.query('limit') ?? '100') || 100, 1), 500);
@@ -201,6 +204,11 @@ chats.get('/api/chats', async (c) => {
       if (staff?.id) { conditions.push('x.assigned_staff_id = ?'); bindings.push(staff.id); }
     } else if (assignedStaffId) {
       conditions.push('x.assigned_staff_id = ?'); bindings.push(assignedStaffId);
+    }
+    // 顧客の最終メッセージの意図（AI判定済みのものだけ）
+    if (intent === 'needs_reply' || intent === 'closing' || intent === 'unclear' || intent === 'unchecked') {
+      if (intent === 'unchecked') conditions.push('x.ai_intent IS NULL');
+      else { conditions.push('x.ai_intent = ?'); bindings.push(intent); }
     }
     if (q) {
       // 名前・メール・タグをサーバー側で検索する（読み込み済み分だけの検索をやめる）
@@ -252,6 +260,7 @@ chats.get('/api/chats', async (c) => {
           operatorId: ch.operator_id, status: ch.status, notes: ch.notes, lastMessageAt: ch.last_message_at,
           createdAt: ch.created_at, updatedAt: ch.updated_at, channel: ch.channel ?? 'line', customerEmail: ch.customer_email ?? null,
           aiStatus: ch.ai_status ?? null, aiCategory: ch.ai_category ?? null, aiMoneyFlag: !!ch.ai_money_flag,
+          aiIntent: ch.ai_intent ?? null, aiIntentReason: ch.ai_intent_reason ?? null, aiIntentAt: ch.ai_intent_at ?? null,
           assignedStaffId: ch.assigned_staff_id ?? null, assignedStaffName: ch.assigned_staff_name ?? null,
           lastReadAt: ch.last_read_at ?? null,
           lastIncomingAt: (ch.last_incoming_at as string | null) ?? null,
@@ -312,6 +321,52 @@ chats.post('/api/chats/:id/claim', async (c) => {
   } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
 });
 
+// ========== 意図判定（要確認候補の抽出） ==========
+
+/**
+ * 顧客の最終メッセージの意図をAIで判定する。1回の最大は20件。
+ * 残件数を返すので、画面から繰り返し呼べばバックフィルになる。
+ *
+ * 未読数・経過日数は「ハーネス上に返信記録があるか」しか表さないため、
+ * 候補抽出は顧客側の意図（needs_reply / closing / unclear）で行う。
+ */
+chats.post('/api/chats/intent-classify', async (c) => {
+  try {
+    if (!c.env.GEMINI_API_KEY) return c.json({ success: false, error: 'GEMINI_API_KEY が未設定です' }, 400);
+    const body = await c.req
+      .json<{ limit?: number; chatIds?: string[] }>()
+      .catch(() => ({} as { limit?: number; chatIds?: string[] }));
+    const limit = Math.min(Math.max(Number(body.limit ?? 10) || 10, 1), 20);
+    const ids = Array.isArray(body.chatIds)
+      ? body.chatIds.filter((v): v is string => typeof v === 'string').slice(0, limit)
+      : [];
+
+    const pendingWhere = `(SELECT MAX(i.created_at) FROM messages_log i WHERE i.friend_id = c.friend_id AND i.direction = 'incoming') IS NOT NULL
+      AND (c.ai_intent IS NULL OR c.ai_intent_at IS NULL
+           OR c.ai_intent_at < (SELECT MAX(i2.created_at) FROM messages_log i2 WHERE i2.friend_id = c.friend_id AND i2.direction = 'incoming'))`;
+
+    const targets = ids.length > 0
+      ? ids
+      : (((await c.env.DB.prepare(
+          `SELECT c.id FROM chats c WHERE ${pendingWhere} ORDER BY c.last_message_at DESC LIMIT ?`,
+        ).bind(limit).all<{ id: string }>()).results) ?? []).map((r) => r.id);
+
+    const counts = { needs_reply: 0, closing: 0, unclear: 0, skipped: 0 };
+    for (const id of targets) {
+      const intent = await classifyAndSaveChatIntent(c.env, id);
+      if (intent) counts[intent] += 1;
+      else counts.skipped += 1;
+    }
+
+    const remaining = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM chats c WHERE ${pendingWhere}`).first<{ n: number }>();
+
+    return c.json({
+      success: true,
+      data: { processed: targets.length, ...counts, remaining: Number(remaining?.n ?? 0) },
+    });
+  } catch { return c.json({ success: false, error: 'Internal server error' }, 500); }
+});
+
 // ========== チャット詳細（パフォーマンス改善: LIMIT 200→30、contentは件数分だけ後で取得） ==========
 
 chats.get('/api/chats/:id', async (c) => {
@@ -340,6 +395,7 @@ chats.get('/api/chats/:id', async (c) => {
       emailStmt.all(),
       c.env.DB.prepare(
         `SELECT c.channel, c.customer_email, c.ai_status, c.ai_category, c.ai_confidence, c.ai_money_flag,
+                c.ai_intent, c.ai_intent_reason, c.ai_intent_at,
                 c.assigned_staff_id, c.assigned_at, c.last_read_at, sm.name AS assigned_staff_name
          FROM chats c LEFT JOIN staff_members sm ON sm.id = c.assigned_staff_id WHERE c.id = ?`,
       ).bind(item.id).first(),
@@ -379,6 +435,7 @@ chats.get('/api/chats/:id', async (c) => {
         operatorId: item.operator_id, status: item.status, notes: item.notes, lastMessageAt: item.last_message_at, createdAt: item.created_at,
         channel: chatExt?.channel ?? 'line', customerEmail: chatExt?.customer_email ?? null,
         aiStatus: chatExt?.ai_status ?? null, aiCategory: chatExt?.ai_category ?? null, aiConfidence: (chatExt as any)?.ai_confidence ?? null, aiMoneyFlag: !!(chatExt as any)?.ai_money_flag,
+        aiIntent: (chatExt as any)?.ai_intent ?? null, aiIntentReason: (chatExt as any)?.ai_intent_reason ?? null, aiIntentAt: (chatExt as any)?.ai_intent_at ?? null,
         assignedStaffId: (chatExt as any)?.assigned_staff_id ?? null, assignedStaffName: (chatExt as any)?.assigned_staff_name ?? null,
         assignedAt: (chatExt as any)?.assigned_at ?? null, lastReadAt: (chatExt as any)?.last_read_at ?? null,
         messages: unified, hasMore,
