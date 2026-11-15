@@ -88,7 +88,7 @@ export interface Segment {
     segmentMembers: number
     lineIdHeld: number
     realLineUsers: number
-    sendableLineUsers: number
+    sendableLineUsers: number | null
     shopifyPlaceholderLineIds: number
   } | null
 }

@@ -46,6 +46,7 @@ async function countBroadcastTargets(
   targetTagId?: string | null,
   targetSegmentId?: string | null,
   lineAccountId?: string | null,
+  targetFriendIds?: string[] | null,
 ): Promise<{ count: number; audienceBreakdown?: Awaited<ReturnType<typeof getSegmentAudienceBreakdown>> }> {
   if (targetType === 'all') {
     const sql = lineAccountId
@@ -90,7 +91,36 @@ async function countBroadcastTargets(
   if (targetType === 'segment') {
     if (!targetSegmentId) return { count: 0 };
     const audienceBreakdown = await getSegmentAudienceBreakdown(db, targetSegmentId, lineAccountId);
-    return { count: audienceBreakdown.sendableLineUsers, audienceBreakdown };
+    return { count: audienceBreakdown.sendableLineUsers ?? 0, audienceBreakdown };
+  }
+
+  if (targetType === 'individual') {
+    // 個別指定: 送信側と同じ条件（フォロー中・本物のLINE UID・アカウント一致）で数える。
+    // ID はチャンク分割して IN 句にバインドする（1,680人規模で上限に当たるため）。
+    const ids = Array.isArray(targetFriendIds) ? targetFriendIds.filter((id) => typeof id === 'string' && id) : [];
+    if (ids.length === 0) return { count: 0 };
+    const CHUNK = 90; // D1のバインド変数上限（約100件）対策
+    let count = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const sql = lineAccountId
+        ? `SELECT COUNT(DISTINCT id) AS count FROM friends
+           WHERE id IN (${chunk.map(() => '?').join(',')})
+             AND is_following = 1
+             AND line_user_id LIKE 'U%'
+             AND length(line_user_id) = 33
+             AND line_account_id = ?`
+        : `SELECT COUNT(DISTINCT id) AS count FROM friends
+           WHERE id IN (${chunk.map(() => '?').join(',')})
+             AND is_following = 1
+             AND line_user_id LIKE 'U%'
+             AND length(line_user_id) = 33`;
+      const stmt = db.prepare(sql);
+      const row = await (lineAccountId ? stmt.bind(...chunk, lineAccountId) : stmt.bind(...chunk))
+        .first<{ count: number }>();
+      count += row?.count ?? 0;
+    }
+    return { count };
   }
 
   return { count: 0 };
@@ -690,6 +720,43 @@ broadcasts.get('/api/broadcasts/target-count', async (c) => {
     return c.json({ success: true, data: count });
   } catch (err) {
     console.error('GET /api/broadcasts/target-count error:', err);
+    return c.json({ success: false, error: 'Internal server error' }, 500);
+  }
+});
+
+// POST /api/broadcasts/target-count - 個別指定（friendIds配列）の対象人数
+// GETでは ID を1,680件並べられないため、配列はボディで受ける。
+broadcasts.post('/api/broadcasts/target-count', async (c) => {
+  try {
+    const body = await c.req
+      .json<{
+        targetType?: BroadcastTargetType;
+        targetTagId?: string | null;
+        targetSegmentId?: string | null;
+        lineAccountId?: string | null;
+        targetFriendIds?: string[] | null;
+      }>()
+      .catch(() => ({} as Record<string, never>));
+    const targetType = body?.targetType;
+    const lineAccountId = body?.lineAccountId ?? null;
+    const denied = await requireLineAccountAccess(c, lineAccountId);
+    if (denied) return denied;
+
+    if (!targetType || !['all', 'tag', 'segment', 'individual'].includes(targetType)) {
+      return c.json({ success: false, error: 'targetType is required' }, 400);
+    }
+
+    const count = await countBroadcastTargets(
+      c.env.DB,
+      targetType,
+      body?.targetTagId ?? null,
+      body?.targetSegmentId ?? null,
+      lineAccountId,
+      Array.isArray(body?.targetFriendIds) ? body.targetFriendIds : null,
+    );
+    return c.json({ success: true, data: count });
+  } catch (err) {
+    console.error('POST /api/broadcasts/target-count error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

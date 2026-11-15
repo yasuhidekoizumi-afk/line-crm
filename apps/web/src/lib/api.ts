@@ -196,6 +196,34 @@ export type FriendListParams = {
 
 export type FriendWithTags = Friend & { tags: Tag[] }
 
+/** 配信対象人数の見積り（GET/POST /api/broadcasts/target-count） */
+export interface BroadcastTargetCount {
+  count: number
+  audienceBreakdown?: {
+    segmentMembers: number
+    lineIdHeld: number
+    realLineUsers: number
+    sendableLineUsers: number | null
+    shopifyPlaceholderLineIds: number
+  } | null
+}
+
+/** 一括タグ付与の結果（POST /api/tags/:id/friends） */
+export interface BulkTagResult {
+  tagId: string
+  tagName: string
+  requested: number
+  unique: number
+  found: number
+  added: number
+  alreadyTagged: number
+  notFoundCount: number
+  notFound: string[]
+  failedChunks: number
+  errors: string[]
+  dryRun: boolean
+}
+
 export interface LineOfficialFriendInsightSummary {
   date: string | null
   followers: number | null
@@ -282,6 +310,18 @@ export const api = {
       }),
     delete: (id: string) =>
       fetchApi<ApiResponse<null>>(`/api/tags/${id}`, { method: 'DELETE' }),
+    /** 一括付与（CSV/ID貼り付けから）。シナリオ・Webhook・自動化は発火しない。 */
+    addFriends: (id: string, friendIds: string[], dryRun = false) =>
+      fetchApi<ApiResponse<BulkTagResult>>(`/api/tags/${id}/friends`, {
+        method: 'POST',
+        body: JSON.stringify({ friendIds, dryRun }),
+      }),
+    /** 一括付与の取り消し */
+    removeFriends: (id: string, friendIds: string[]) =>
+      fetchApi<ApiResponse<{ tagId: string; tagName: string; unique: number; removed: number; failedChunks: number; errors: string[] }>>(
+        `/api/tags/${id}/friends`,
+        { method: 'DELETE', body: JSON.stringify({ friendIds }) },
+      ),
   },
   scenarios: {
     list: (params?: { accountId?: string }) => {
@@ -413,21 +453,27 @@ export const api = {
       targetTagId?: string | null
       targetSegmentId?: string | null
       lineAccountId?: string | null
+      /** 個別指定のときに人数を数える friend id 配列（GETでは並べられないためPOSTで送る） */
+      targetFriendIds?: string[] | null
     }) => {
+      // 個別指定はIDが数百〜数千件になるのでボディで送る
+      if (params.targetType === 'individual' || (params.targetFriendIds && params.targetFriendIds.length > 0)) {
+        return fetchApi<ApiResponse<BroadcastTargetCount>>('/api/broadcasts/target-count', {
+          method: 'POST',
+          body: JSON.stringify({
+            targetType: params.targetType,
+            targetTagId: params.targetTagId ?? null,
+            targetSegmentId: params.targetSegmentId ?? null,
+            lineAccountId: params.lineAccountId ?? null,
+            targetFriendIds: params.targetFriendIds ?? [],
+          }),
+        })
+      }
       const query = new URLSearchParams({ targetType: params.targetType })
       if (params.targetTagId) query.set('targetTagId', params.targetTagId)
       if (params.targetSegmentId) query.set('targetSegmentId', params.targetSegmentId)
       if (params.lineAccountId) query.set('lineAccountId', params.lineAccountId)
-      return fetchApi<ApiResponse<{
-        count: number
-        audienceBreakdown?: {
-          segmentMembers: number
-          lineIdHeld: number
-          realLineUsers: number
-          sendableLineUsers: number
-          shopifyPlaceholderLineIds: number
-        } | null
-      }>>(`/api/broadcasts/target-count?${query}`)
+      return fetchApi<ApiResponse<BroadcastTargetCount>>(`/api/broadcasts/target-count?${query}`)
     },
   },
 

@@ -124,6 +124,148 @@ export async function removeTagFromFriend(
     .run();
 }
 
+/**
+ * 友だちIDをまとめてタグ付けする（一括付与）。
+ *
+ * - friendIds はチャンク分割してから SELECT / INSERT する（D1 のバインド変数上限対策）
+ * - 付与は INSERT OR IGNORE（既に付いている友だちは数えない）
+ * - 1行ずつ addTagToFriend を叩くと 1,680 人で 1,680 リクエストになるため、
+ *   サーバー側で D1 内完結（INSERT ... SELECT）にしている
+ * - シナリオ・Webhook・自動化はここでは発火させない（大量付与で
+ *   tag_added トリガーが意図せず動くのを防ぐ。呼び出し側の責任で明示的に扱う）
+ */
+/**
+ * D1 は1ステートメントあたりのバインド変数が約100件で `too many SQL variables` になる。
+ * INSERT ではタグID・日時の2件も使うため、IDは90件ずつに切る（実測: 200件で失敗）。
+ */
+export const BULK_TAG_CHUNK_SIZE = 90;
+export const BULK_TAG_MAX_IDS = 5000;
+
+export interface BulkTagResult {
+  requested: number;
+  unique: number;
+  found: number;
+  added: number;
+  alreadyTagged: number;
+  notFoundCount: number;
+  notFound: string[];
+  failedChunks: number;
+  errors: string[];
+  dryRun: boolean;
+}
+
+function dedupeIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of ids) {
+    const v = String(id ?? '').trim();
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
+export async function addTagToFriendsBulk(
+  db: D1Database,
+  tagId: string,
+  friendIds: string[],
+  opts: { dryRun?: boolean; chunkSize?: number } = {},
+): Promise<BulkTagResult> {
+  const ids = dedupeIds(friendIds);
+  const chunkSize = opts.chunkSize ?? BULK_TAG_CHUNK_SIZE;
+  const dryRun = opts.dryRun === true;
+  const now = jstNow();
+
+  let found = 0;
+  let added = 0;
+  let failedChunks = 0;
+  const notFound: string[] = [];
+  const errors: string[] = [];
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    try {
+      const existing = await db
+        .prepare(`SELECT id FROM friends WHERE id IN (${placeholders})`)
+        .bind(...chunk)
+        .all<{ id: string }>();
+      const foundIds = new Set(existing.results.map((r) => r.id));
+      found += foundIds.size;
+      for (const id of chunk) {
+        if (!foundIds.has(id)) notFound.push(id);
+      }
+
+      if (!dryRun && foundIds.size > 0) {
+        const foundList = [...foundIds];
+        const foundPlaceholders = foundList.map(() => '?').join(',');
+        const res = await db
+          .prepare(
+            `INSERT OR IGNORE INTO friend_tags (friend_id, tag_id, assigned_at)
+             SELECT id, ?, ? FROM friends WHERE id IN (${foundPlaceholders})`,
+          )
+          .bind(tagId, now, ...foundList)
+          .run();
+        added += res.meta?.changes ?? 0;
+      }
+    } catch (err) {
+      failedChunks += 1;
+      errors.push(
+        `chunk ${i / chunkSize}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  return {
+    requested: friendIds.length,
+    unique: ids.length,
+    found,
+    added,
+    alreadyTagged: dryRun ? 0 : Math.max(0, found - added),
+    notFoundCount: notFound.length,
+    notFound: notFound.slice(0, 200),
+    failedChunks,
+    errors: errors.slice(0, 10),
+    dryRun,
+  };
+}
+
+/** 一括付与の取り消し（間違えて付けたときの戻し用） */
+export async function removeTagFromFriendsBulk(
+  db: D1Database,
+  tagId: string,
+  friendIds: string[],
+  opts: { chunkSize?: number } = {},
+): Promise<{ unique: number; removed: number; failedChunks: number; errors: string[] }> {
+  const ids = dedupeIds(friendIds);
+  const chunkSize = opts.chunkSize ?? BULK_TAG_CHUNK_SIZE;
+  let removed = 0;
+  let failedChunks = 0;
+  const errors: string[] = [];
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    try {
+      const res = await db
+        .prepare(
+          `DELETE FROM friend_tags WHERE tag_id = ? AND friend_id IN (${placeholders})`,
+        )
+        .bind(tagId, ...chunk)
+        .run();
+      removed += res.meta?.changes ?? 0;
+    } catch (err) {
+      failedChunks += 1;
+      errors.push(
+        `chunk ${i / chunkSize}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  return { unique: ids.length, removed, failedChunks, errors: errors.slice(0, 10) };
+}
+
 export async function getFriendTags(
   db: D1Database,
   friendId: string,

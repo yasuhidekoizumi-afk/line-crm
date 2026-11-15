@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { api } from '@/lib/api'
+import { api, type BulkTagResult } from '@/lib/api'
 import Header from '@/components/layout/header'
 import { confirmDialog } from '@/components/ui/confirm-provider'
 
@@ -34,6 +34,23 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { name: '', color: '#3B82F6' }
 
+// UUID形式の行だけを拾う（CSVヘッダー・余計な列が混ざっても壊れないように）
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** 貼り付けテキスト / CSV から friend id を抽出（line_crm_friend_id 列でも、IDだけの列でも可） */
+function parseFriendIds(text: string): string[] {
+  const ids = new Set<string>()
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const cells = line.split(/[,\t;]/).map((c) => c.trim().replace(/^"|"$/g, ''))
+    const hit = cells.find((c) => UUID_RE.test(c))
+    if (hit) ids.add(hit)
+    else if (UUID_RE.test(line)) ids.add(line)
+  }
+  return [...ids]
+}
+
 export default function TagsPage() {
   const [tags, setTags] = useState<TagRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,6 +61,12 @@ export default function TagsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  // 一括付与
+  const [bulkTag, setBulkTag] = useState<TagRow | null>(null)
+  const [bulkInput, setBulkInput] = useState('')
+  const [bulkResult, setBulkResult] = useState<BulkTagResult | null>(null)
+  const [bulkError, setBulkError] = useState('')
+  const [bulkLoading, setBulkLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -117,6 +140,68 @@ export default function TagsPage() {
       else setError(`削除に失敗: ${res.error}`)
     } catch {
       setError('削除に失敗しました')
+    }
+  }
+
+  const openBulk = (t: TagRow) => {
+    setShowForm(false)
+    setBulkTag(t)
+    setBulkInput('')
+    setBulkResult(null)
+    setBulkError('')
+  }
+
+  const closeBulk = () => {
+    setBulkTag(null)
+    setBulkInput('')
+    setBulkResult(null)
+    setBulkError('')
+  }
+
+  const handleCsvFile = async (file: File | null) => {
+    if (!file) return
+    try {
+      const text = await file.text()
+      setBulkInput((prev) => (prev.trim() ? `${prev}\n${text}` : text))
+      setBulkResult(null)
+      setBulkError('')
+    } catch {
+      setBulkError('CSVの読み込みに失敗しました')
+    }
+  }
+
+  const runBulk = async (dryRun: boolean) => {
+    if (!bulkTag) return
+    const ids = parseFriendIds(bulkInput)
+    if (ids.length === 0) {
+      setBulkError('friend id（UUID形式）が見つかりませんでした。CSVの列に line_crm_friend_id が含まれているか確認してください。')
+      return
+    }
+    if (ids.length > 5000) {
+      setBulkError(`1回に付与できるのは5,000件までです（現在 ${ids.length.toLocaleString()}件）。ファイルを分割してください。`)
+      return
+    }
+    if (!dryRun) {
+      const ok = await confirmDialog({
+        message: `タグ「${bulkTag.name}」を ${ids.length.toLocaleString()}人に一括付与します。\nシナリオ・Webhook・自動化は発火しません。よろしいですか？`,
+        confirmLabel: '付与する',
+      })
+      if (!ok) return
+    }
+    setBulkLoading(true)
+    setBulkError('')
+    try {
+      const res = await api.tags.addFriends(bulkTag.id, ids, dryRun)
+      if (res.success) {
+        setBulkResult(res.data)
+        if (!dryRun) load()
+      } else {
+        setBulkError(res.error || '一括付与に失敗しました')
+      }
+    } catch {
+      setBulkError('一括付与に失敗しました')
+    } finally {
+      setBulkLoading(false)
     }
   }
 
@@ -232,6 +317,123 @@ export default function TagsPage() {
         </div>
       )}
 
+      {/* 一括付与 */}
+      {bulkTag && (
+        <div className="mb-6 bg-surface rounded-card shadow-card border border-line p-6">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">
+                タグ「{bulkTag.name}」に一括付与
+              </h2>
+              <p className="mt-1 text-xs text-gray-500">
+                CSV（<span className="font-mono">line_crm_friend_id</span> 列があればOK）を取り込むか、friend id を貼り付けてください。
+                1回5,000件まで。<span className="font-medium">シナリオ・Webhook・自動化は発火しません</span>（大量付与で意図しない配信が始まらないようにするため）。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeBulk}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              閉じる
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">CSVファイル</label>
+              <input
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                onChange={(e) => handleCsvFile(e.target.files?.[0] ?? null)}
+                className="block w-full text-xs text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                friend id（1行1件・カンマ区切りCSV可）
+              </label>
+              <textarea
+                value={bulkInput}
+                onChange={(e) => { setBulkInput(e.target.value); setBulkResult(null) }}
+                rows={6}
+                placeholder={'8f3c1d2e-...（UUID）\n4b7a9c10-...'}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+              <p className="mt-1 text-[11px] text-gray-500">
+                認識したID: {parseFriendIds(bulkInput).length.toLocaleString()}件
+              </p>
+            </div>
+
+            {bulkError && <p className="text-xs text-red-600">{bulkError}</p>}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => runBulk(true)}
+                disabled={bulkLoading}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 transition-colors"
+              >
+                {bulkLoading ? '確認中...' : '事前チェック（付与しない）'}
+              </button>
+              <button
+                type="button"
+                onClick={() => runBulk(false)}
+                disabled={bulkLoading}
+                className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-opacity"
+                style={{ backgroundColor: 'var(--color-brand-500)' }}
+              >
+                {bulkLoading ? '処理中...' : '一括付与する'}
+              </button>
+            </div>
+
+            {bulkResult && (
+              <div className={`rounded-lg border p-4 text-xs ${bulkResult.dryRun ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'}`}>
+                <p className="font-medium text-gray-800 mb-2">
+                  {bulkResult.dryRun ? '事前チェック結果（まだ付与していません）' : '一括付与の結果'}
+                </p>
+                <ul className="space-y-1 text-gray-700">
+                  <li>指定: {bulkResult.requested.toLocaleString()}件（重複除去後 {bulkResult.unique.toLocaleString()}件）</li>
+                  <li>見つかった友だち: {bulkResult.found.toLocaleString()}人</li>
+                  {!bulkResult.dryRun && (
+                    <>
+                      <li className="font-medium">付与した: {bulkResult.added.toLocaleString()}人</li>
+                      <li>既に付いていた: {bulkResult.alreadyTagged.toLocaleString()}人</li>
+                    </>
+                  )}
+                  <li className={bulkResult.notFoundCount > 0 ? 'text-red-700 font-medium' : ''}>
+                    見つからなかったID: {bulkResult.notFoundCount.toLocaleString()}件
+                  </li>
+                  {bulkResult.failedChunks > 0 && (
+                    <li className="text-red-700 font-medium">失敗したチャンク: {bulkResult.failedChunks}件</li>
+                  )}
+                </ul>
+                {bulkResult.notFound.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-gray-600">
+                      見つからなかったIDを表示（先頭{bulkResult.notFound.length}件）
+                    </summary>
+                    <pre className="mt-2 max-h-40 overflow-auto rounded bg-white/70 p-2 text-[10px] leading-relaxed">
+{bulkResult.notFound.join('\n')}
+                    </pre>
+                  </details>
+                )}
+                {bulkResult.errors.length > 0 && (
+                  <ul className="mt-2 list-disc pl-4 text-red-700">
+                    {bulkResult.errors.map((e) => <li key={e}>{e}</li>)}
+                  </ul>
+                )}
+                {!bulkResult.dryRun && bulkResult.added > 0 && (
+                  <p className="mt-2 text-gray-600">
+                    このタグは配信のターゲット（対象=タグ）にそのまま使えます。
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* タグ一覧 */}
       {loading ? (
         <div className="text-center py-8 text-sm text-gray-500">読み込み中...</div>
@@ -266,6 +468,12 @@ export default function TagsPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(t.createdAt)}</td>
                   <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => openBulk(t)}
+                      className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors mr-2"
+                    >
+                      一括付与
+                    </button>
                     <button
                       onClick={() => openEdit(t)}
                       className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors mr-2"

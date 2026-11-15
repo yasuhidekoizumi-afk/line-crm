@@ -177,7 +177,8 @@ export interface SegmentAudienceBreakdown {
   segmentMembers: number;
   lineIdHeld: number;
   realLineUsers: number;
-  sendableLineUsers: number;
+  /** 配信可能人数。一覧取得では数えないため null（単体取得・配信前カウントでは実数） */
+  sendableLineUsers: number | null;
   shopifyPlaceholderLineIds: number;
 }
 
@@ -960,10 +961,23 @@ export async function getSegments(db: D1Database): Promise<Segment[]> {
     .prepare('SELECT * FROM segments ORDER BY created_at DESC')
     .all<Segment>();
   const items = result.results;
-  const breakdowns = await Promise.all(items.map((segment) => getSegmentAudienceBreakdown(db, segment.segment_id)));
-  return items.map((segment, index) => ({
+  // 一覧では全セグメント分の内訳を GROUP BY で一括取得する（旧: セグメント数ぶん重いクエリ）。
+  // 内訳の取得に失敗しても一覧自体は返す（500を避ける）。
+  let breakdowns: Record<string, SegmentAudienceBreakdown> = {};
+  try {
+    breakdowns = await getSegmentAudienceBreakdowns(db);
+  } catch (err) {
+    console.error('[segments] audience breakdown bulk query failed:', err);
+  }
+  return items.map((segment) => ({
     ...segment,
-    audience_breakdown: breakdowns[index],
+    audience_breakdown: breakdowns[segment.segment_id] ?? {
+      segmentMembers: 0,
+      lineIdHeld: 0,
+      realLineUsers: 0,
+      sendableLineUsers: 0,
+      shopifyPlaceholderLineIds: 0,
+    },
   })) as SegmentWithAudienceBreakdown[];
 }
 
@@ -1012,6 +1026,56 @@ export async function getSegmentAudienceBreakdown(
     sendableLineUsers,
     shopifyPlaceholderLineIds: base?.shopify_placeholder_line_ids ?? 0,
   };
+}
+
+/**
+ * セグメント一覧用: 全セグメントの会員数内訳をまとめて取る。
+ *
+ * 旧実装はセグメント数ぶん `getSegmentAudienceBreakdown` を呼んでいた（=セグメントごとに
+ * 会員数クエリ + 大きな UNION クエリ）。セグメントが増えると一覧取得が D1 タイムアウトで
+ * 500 になるため、一覧は GROUP BY 1本に集約し、配信可能人数は一覧では数えない
+ * （sendableLineUsers は null を返す）。
+ */
+export async function getSegmentAudienceBreakdowns(
+  db: D1Database,
+  lineAccountId?: string | null,
+): Promise<Record<string, SegmentAudienceBreakdown>> {
+  const baseResult = await db
+    .prepare(
+      `SELECT
+         sm.segment_id AS segment_id,
+         COUNT(*) AS segment_members,
+         COUNT(CASE WHEN c.line_user_id IS NOT NULL AND c.line_user_id != '' THEN 1 END) AS line_id_held,
+         COUNT(CASE WHEN c.line_user_id LIKE 'U%' AND length(c.line_user_id) = 33 THEN 1 END) AS real_line_users,
+         COUNT(CASE WHEN c.line_user_id LIKE 'shopify:%' THEN 1 END) AS shopify_placeholder_line_ids
+       FROM customers c
+       INNER JOIN segment_members sm ON sm.customer_id = c.customer_id
+       GROUP BY sm.segment_id`,
+    )
+    .all<{
+      segment_id: string;
+      segment_members: number;
+      line_id_held: number;
+      real_line_users: number;
+      shopify_placeholder_line_ids: number;
+    }>();
+
+  // ⚠️ 配信可能人数（sendableLineUsers）は一覧では数えない。
+  // 全セグメント分を1本にまとめても190万行読み・約2.8秒かかり、D1の制限で落ちると
+  // 一覧全体が使えなくなるため、一覧は「会員数」だけを返す（sendable は null）。
+  // 配信可能人数は単体取得（getSegmentAudienceBreakdown）／配信前カウントで求める。
+  
+  const out: Record<string, SegmentAudienceBreakdown> = {};
+  for (const row of baseResult.results) {
+    out[row.segment_id] = {
+      segmentMembers: row.segment_members ?? 0,
+      lineIdHeld: row.line_id_held ?? 0,
+      realLineUsers: row.real_line_users ?? 0,
+      sendableLineUsers: null,
+      shopifyPlaceholderLineIds: row.shopify_placeholder_line_ids ?? 0,
+    };
+  }
+  return out;
 }
 
 export async function createSegment(

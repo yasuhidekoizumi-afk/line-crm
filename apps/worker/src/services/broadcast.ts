@@ -17,6 +17,13 @@ import { assertLineBroadcastAllowed } from './delivery-safety.js';
 import { insertMessageLogsChunked, type MessageLogRow } from './message-log.js';
 
 const MULTICAST_BATCH_SIZE = 500;
+/**
+ * 個別指定配信で friend id を引くときの IN 句チャンク。
+ * 1,680人規模の targetFriendIds を1本の IN (...) にバインドすると
+ * D1 のバインド変数上限（約100件）でクエリごと落ちるため、必ず分割して引く。
+ * 実測: 200件バインドで `D1_ERROR: too many SQL variables` になる。
+ */
+const INDIVIDUAL_LOOKUP_CHUNK = 90;
 
 /** LINEの制約（半角英数/アンダースコア、30文字以内）に収めた配信固有ユニット名。 */
 export function buildBroadcastAggregationUnit(broadcastId: string): string {
@@ -446,18 +453,23 @@ export async function processBroadcastSend(
       }
       const friendIds: string[] = JSON.parse(raw);
 
-      // Fetch line_user_id for each friend
-      const result = await db
-        .prepare(
-          `SELECT id, line_user_id FROM friends
-           WHERE id IN (${friendIds.map(() => '?').join(',')})
-             AND is_following = 1
-             AND line_user_id LIKE 'U%'
-             ${broadcast.line_account_id ? 'AND line_account_id = ?' : ''}`,
-        )
-        .bind(...friendIds, ...(broadcast.line_account_id ? [broadcast.line_account_id] : []))
-        .all<{ id: string; line_user_id: string }>();
-      const friends = result.results;
+      // Fetch line_user_id for each friend（IN 句はチャンク分割。1本にまとめると
+      // バインド変数上限で落ちるため、200件ずつ引いて結合する）
+      const friends: { id: string; line_user_id: string }[] = [];
+      for (let i = 0; i < friendIds.length; i += INDIVIDUAL_LOOKUP_CHUNK) {
+        const chunk = friendIds.slice(i, i + INDIVIDUAL_LOOKUP_CHUNK);
+        const result = await db
+          .prepare(
+            `SELECT id, line_user_id FROM friends
+             WHERE id IN (${chunk.map(() => '?').join(',')})
+               AND is_following = 1
+               AND line_user_id LIKE 'U%'
+               ${broadcast.line_account_id ? 'AND line_account_id = ?' : ''}`,
+          )
+          .bind(...chunk, ...(broadcast.line_account_id ? [broadcast.line_account_id] : []))
+          .all<{ id: string; line_user_id: string }>();
+        friends.push(...result.results);
+      }
       const rawValidFriends = friends.filter((f): f is { id: string; line_user_id: string } =>
         isSendableLineUserId(f.line_user_id),
       );
