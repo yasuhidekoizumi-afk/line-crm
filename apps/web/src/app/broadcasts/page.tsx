@@ -409,6 +409,12 @@ function BroadcastsPageInner() {
   const [sendingId, setSendingId] = useState<string | null>(null)
   const [archivingId, setArchivingId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<BroadcastListTab>('active')
+  // 一覧の絞り込み（サーバー側）。タイトル検索は300msデバウンス。
+  const [searchInput, setSearchInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [range, setRange] = useState('0')
+  const [targetFilter, setTargetFilter] = useState('')
+  const [listMeta, setListMeta] = useState<{ total: number; limit: number; offset: number; hasMore: boolean } | null>(null)
   const [aiDrafting, setAiDrafting] = useState(false)
   const [aiDraftError, setAiDraftError] = useState<string | null>(null)
   const [aiDraftElapsed, setAiDraftElapsed] = useState(0)
@@ -483,18 +489,35 @@ function BroadcastsPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiActionToken])
 
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(searchInput.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
+      // 期間はJST基準で日付に落とす（UTCだと1日ずれる）
+      const from = range === '0'
+        ? undefined
+        : new Date(Date.now() - Number(range) * 86_400_000 + 9 * 3_600_000).toISOString().slice(0, 10)
       const [broadcastsRes, tagsRes, segmentsRes, emergencyRes] = await Promise.all([
-        api.broadcasts.list({ accountId: selectedAccountId || undefined, archived: 'all' }),
+        api.broadcasts.list({
+          accountId: selectedAccountId || undefined,
+          archived: 'all',
+          q: searchQuery || undefined,
+          from,
+          targetType: (targetFilter || undefined) as ApiBroadcast['targetType'] | undefined,
+        }),
         api.tags.listWithCount(),
         fermentApi.segments.list(),
         api.emergency.status(),
       ])
-      if (broadcastsRes.success) setBroadcasts(broadcastsRes.data)
-      else setError(broadcastsRes.error)
+      if (broadcastsRes.success) {
+        setBroadcasts(broadcastsRes.data)
+        setListMeta(broadcastsRes.meta ?? null)
+      } else setError(broadcastsRes.error)
       if (tagsRes.success) setTags(tagsRes.data)
       if (segmentsRes.success && segmentsRes.data) setSegments(segmentsRes.data)
       if (emergencyRes.success) setEmergencyStatus(emergencyRes.data)
@@ -503,7 +526,7 @@ function BroadcastsPageInner() {
     } finally {
       setLoading(false)
     }
-  }, [selectedAccountId])
+  }, [selectedAccountId, searchQuery, range, targetFilter])
 
   useEffect(() => { load() }, [load])
 
@@ -698,6 +721,34 @@ function BroadcastsPageInner() {
       return true
     })
   }, [activeTab, broadcasts, isTestBroadcast])
+
+  // 表示中の行（タブで絞ったあと）をCSVにする。率は詳細APIが必要なため含めない。
+  const exportCsv = () => {
+    const header = ['タイトル', 'ステータス', '宛先種別', '配信対象', '予約日時', '送信完了日時', '対象数', '成功', '失敗', 'テスト', 'アーカイブ済み']
+    const rows = displayedBroadcasts.map((b) => [
+      b.title,
+      getStatusInfo(b).label,
+      b.targetType,
+      getTargetLabel(b),
+      formatDatetime(b.scheduledAt),
+      formatDatetime(b.sentAt),
+      String(b.totalCount),
+      String(b.successCount),
+      String(b.failedCount),
+      b.isTest ? 'はい' : 'いいえ',
+      b.archivedAt ? 'はい' : 'いいえ',
+    ])
+    const csv = [header, ...rows]
+      .map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\r\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `broadcasts_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div>
@@ -1024,6 +1075,51 @@ function BroadcastsPageInner() {
               )}
             </section>
           </div>
+        </div>
+      )}
+
+      {!showCreate && !editingBroadcast && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="タイトルで検索"
+            className="min-w-[200px] flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          />
+          <select
+            value={targetFilter}
+            onChange={(e) => setTargetFilter(e.target.value)}
+            className="min-h-[40px] rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-700"
+          >
+            <option value="">宛先: すべて</option>
+            <option value="all">全員</option>
+            <option value="tag">タグ</option>
+            <option value="segment">セグメント</option>
+            <option value="individual">個別指定</option>
+          </select>
+          <select
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+            className="min-h-[40px] rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-700"
+          >
+            <option value="0">期間: すべて</option>
+            <option value="30">直近30日</option>
+            <option value="90">直近90日</option>
+            <option value="365">直近1年</option>
+          </select>
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="min-h-[40px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            CSV出力
+          </button>
+          {listMeta && (
+            <span className="text-xs text-gray-500">
+              {listMeta.total.toLocaleString('ja-JP')}件中 {broadcasts.length.toLocaleString('ja-JP')}件を表示
+            </span>
+          )}
         </div>
       )}
 
