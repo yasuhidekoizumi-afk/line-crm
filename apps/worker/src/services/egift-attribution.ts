@@ -15,7 +15,7 @@
  * 例外は握りつぶす。注文取り込みを止める方が損失が大きいため。
  */
 
-import { recordEgiftEvent, recordRecipientPurchase } from '@line-crm/db';
+import { addEgiftTag, recordEgiftEvent, recordRecipientPurchase } from '@line-crm/db';
 
 export interface EgiftAttributionInput {
   shopifyOrderId: string;
@@ -139,6 +139,9 @@ export async function attributeEgiftPurchase(
         shopifyOrderId: input.shopifyOrderId,
         orderTotal: input.orderTotal,
       }));
+      if (gift.recipient_friend_id) {
+        await addEgiftTag(db, gift.recipient_friend_id, 'egift_first_purchase');
+      }
     }
 
     return { attributed: true, giftId: gift.id, status: attributionStatus };

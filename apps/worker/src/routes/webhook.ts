@@ -13,6 +13,7 @@ import {
   upsertChatOnMessage,
   getLineAccounts,
   jstNow,
+  recordEgiftBlockedForFriend,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { recordLineFollowEvent } from '../services/delivery-safety.js';
@@ -262,6 +263,10 @@ async function handleEvent(
       friendId: friend?.id ?? null,
       eventType: 'unfollow',
     });
+    // eGift受贈者だった場合、ブロック率KPI用に1回だけ記録する
+    if (friend?.id) {
+      await recordEgiftBlockedForFriend(db, friend.id).catch(() => {});
+    }
     return;
   }
 

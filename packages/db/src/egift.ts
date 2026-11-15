@@ -665,6 +665,57 @@ export async function completeExpiredCampaigns(db: D1Database): Promise<number> 
 }
 
 // =============================================================================
+// 受贈者タグ（設計書 §11.1）
+// =============================================================================
+
+/**
+ * 受贈者にタグを付与する。タグが無ければ作る。
+ * タグは分析・セグメント用なので、失敗しても本処理は止めない。
+ */
+export async function addEgiftTag(db: D1Database, friendId: string, tagName: string): Promise<void> {
+  try {
+    let row = await db.prepare('SELECT id FROM tags WHERE name = ?').bind(tagName).first<{ id: string }>();
+    if (!row) {
+      await db
+        .prepare('INSERT OR IGNORE INTO tags (id, name, color, created_at) VALUES (?, ?, ?, ?)')
+        .bind(crypto.randomUUID(), tagName, '#4A8252', jstNow())
+        .run();
+      row = await db.prepare('SELECT id FROM tags WHERE name = ?').bind(tagName).first<{ id: string }>();
+    }
+    if (!row) return;
+    await db
+      .prepare('INSERT OR IGNORE INTO friend_tags (friend_id, tag_id, assigned_at) VALUES (?, ?, ?)')
+      .bind(friendId, row.id, jstNow())
+      .run();
+  } catch (error) {
+    console.error('[egift] tag assign failed:', error);
+  }
+}
+
+/**
+ * LINEブロック（unfollow）を受贈者として記録する。
+ * ブロック率は「無理なゲート設計の副作用」を見るKPIなので、ギフト単位で1回だけ残す。
+ */
+export async function recordEgiftBlockedForFriend(db: D1Database, friendId: string): Promise<number> {
+  const gifts = await db
+    .prepare(
+      `SELECT g.id FROM egift_gifts g
+       WHERE g.recipient_friend_id = ?
+         AND g.status IN ('line_added', 'redeemed', 'fulfilled')
+         AND NOT EXISTS (
+           SELECT 1 FROM egift_events e WHERE e.gift_id = g.id AND e.event_type = 'blocked'
+         )`,
+    )
+    .bind(friendId)
+    .all<{ id: string }>();
+
+  for (const gift of gifts.results) {
+    await recordEgiftEvent(db, gift.id, 'blocked', friendId, null);
+  }
+  return gifts.results.length;
+}
+
+// =============================================================================
 // Recipient Purchases (初回購入計測)
 // =============================================================================
 

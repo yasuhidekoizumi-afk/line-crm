@@ -23,6 +23,7 @@ import {
   computeEgiftLotteryWeight,
   listShippableGifts,
   markGiftFulfilled,
+  addEgiftTag,
   type EgiftCampaign,
   type EgiftApplication,
   type EgiftGift,
@@ -1102,6 +1103,9 @@ egift.post('/api/egift/gifts/claim', async (c) => {
 
     await markGiftLineAdded(c.env.DB, gift.id, friend.id);
 
+    // 受贈者タグ（設計書 §11.1）
+    await addEgiftTag(c.env.DB, friend.id, 'egift_line_added');
+
     return c.json({
       success: true,
       data: {
@@ -1230,6 +1234,9 @@ egift.post('/api/egift/gifts/redeem', async (c) => {
       address: recipientAddress,
       shopifyCouponCode: couponCode,
     });
+
+    // 受贈者タグ（設計書 §11.1）
+    await addEgiftTag(c.env.DB, gift.recipient_friend_id!, 'egift_redeemed');
 
     return c.json({
       success: true,
