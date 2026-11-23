@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev --port 3001",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --experimental-strip-types --test tests/rich-menu-areas.test.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@line-crm/shared": "workspace:*",
