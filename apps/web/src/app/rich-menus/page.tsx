@@ -9,6 +9,14 @@ import {
 } from '@/lib/api'
 import Header from '@/components/layout/header'
 import { confirmDialog } from '@/components/ui/confirm-provider'
+import {
+  carryOverActions,
+  findPlaceholderUriIndexes,
+  findUnsetAreaIndexes,
+  isConfiguredAction,
+  planImageSwap,
+  scaleAreaBounds,
+} from '@/lib/rich-menu-areas'
 
 // ─── Size & layout presets ────────────────────────────────────────────────────
 
@@ -628,6 +636,13 @@ export default function RichMenusPage() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState<CreateForm>(initialForm)
+  // 画像の読み込みは非同期（FileReader / Image.onload）なので、
+  // その時点の最新フォームを参照するための ref を持つ。
+  // state を直接クロージャで掴むと、差し替え直前の編集内容が古い値になりうる。
+  const formRef = useRef(form)
+  useEffect(() => {
+    formRef.current = form
+  }, [form])
   const [selectedAreaIndex, setSelectedAreaIndex] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -790,13 +805,42 @@ export default function RichMenusPage() {
     load()
   }, [load])
 
-  const updateLayout = (layout: string) => {
+  /**
+   * レイアウトの選び直し。
+   * エリアを作り直すのは「ユーザーが明示的に別レイアウトを選んだとき」だけ。
+   * その場合も、捨てる前に確認を出し、設定済みの動作は同じ順番で引き継ぐ。
+   */
+  const handleLayoutChange = async (layout: string) => {
+    const current = formRef.current
+    if (layout === current.layout) return
+    const nextCount = LAYOUT_BY_KEY[layout]?.bounds.length ?? 0
+    if (current.areas.length > 0) {
+      const configuredCount = current.areas.filter((a) => isConfiguredAction(a.action)).length
+      const ok = await confirmDialog({
+        title: 'レイアウトを変更します',
+        message:
+          `エリアを ${current.areas.length} 個 → ${nextCount} 個に作り直します。\n` +
+          (configuredCount > 0
+            ? `設定済みの動作（${configuredCount}件）は、できる限り同じ順番（エリア1、2…）で引き継ぎます。\n`
+            : '') +
+          '引き継げない分の設定は失われます。',
+        detail: '画像はそのまま使います。エリアの枠線だけが新しいレイアウトに変わります。',
+        confirmLabel: '作り直す',
+        cancelLabel: 'やめる',
+        variant: 'warning',
+      })
+      if (!ok) {
+        // セレクトの表示だけ新しい値に動いているので、元の値へ戻す（state は変えない）
+        setForm((f) => ({ ...f }))
+        return
+      }
+    }
     setForm((f) => {
       const size =
         f.imageWidth && f.imageHeight
           ? { width: f.imageWidth, height: f.imageHeight }
           : SIZE_LARGE
-      return { ...f, layout, areas: buildAreas(layout, size) }
+      return { ...f, layout, areas: carryOverActions(buildAreas(layout, size), f.areas) }
     })
     setSelectedAreaIndex(null)
   }
@@ -805,6 +849,13 @@ export default function RichMenusPage() {
     setForm((f) => ({ ...f, areas: f.areas.map((a, i) => (i === index ? next : a)) }))
   }
 
+  /**
+   * 画像のアップロード／差し替え。
+   *
+   * 2026-11-23 の事故の再発防止のため、ここでは「画像を変えたらレイアウトを
+   * 選び直す」ことはしない。エリアとアクションは原則そのまま残す。
+   * 作り直すのは、新しい画像に既存のエリアが収まらないときだけ（確認つき）。
+   */
   const handleImageFile = (file: File) => {
     if (!['image/png', 'image/jpeg'].includes(file.type)) {
       setFormError('画像はPNGまたはJPEGのみ使用できます')
@@ -816,23 +867,89 @@ export default function RichMenusPage() {
       const result = reader.result as string
       const base64 = result.replace(/^data:image\/\w+;base64,/, '')
       const img = new Image()
-      img.onload = () => {
+      img.onload = async () => {
         const constraintError = checkImageConstraints(img.width, img.height)
         if (constraintError) {
           setFormError(constraintError)
           return
         }
-        const layout = suggestLayout(img.width, img.height)
         const size = { width: img.width, height: img.height }
-        setForm((f) => ({
-          ...f,
+        const contentType: 'image/png' | 'image/jpeg' =
+          file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+        const patch: Partial<CreateForm> = {
           imageBase64: base64,
-          imageContentType: file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png',
+          imageContentType: contentType,
           imageWidth: img.width,
           imageHeight: img.height,
           imageWarning: null,
+        }
+        const current = formRef.current
+        const prevSize =
+          current.imageWidth && current.imageHeight
+            ? { width: current.imageWidth, height: current.imageHeight }
+            : null
+        const before = prevSize ?? size
+        const plan = planImageSwap(prevSize, size, current.areas)
+
+        // (1) 初回アップロード（まだエリアが無い）→ サイズから既定レイアウトを作る
+        if (plan.kind === 'initial') {
+          const layout = suggestLayout(img.width, img.height)
+          setForm((f) => ({ ...f, ...patch, layout, areas: buildAreas(layout, size) }))
+          setSelectedAreaIndex(null)
+          return
+        }
+
+        // (2) 同じサイズ → エリアもアクションもそのまま使う
+        if (plan.kind === 'keep') {
+          setForm((f) => ({ ...f, ...patch }))
+          return
+        }
+
+        // (3) 縦横比が同じでサイズだけ違う → 枠の座標だけ比例変換し、アクションは保持
+        if (plan.kind === 'scale') {
+          setForm((f) => ({ ...f, ...patch, areas: scaleAreaBounds(f.areas, before, size) }))
+          return
+        }
+
+        // (4) 既存のエリアがそのまま収まる → そのまま使う（位置が多少ずれる旨だけ注意表示）
+        if (plan.kind === 'keep-as-is') {
+          setForm((f) => ({
+            ...f,
+            ...patch,
+            imageWarning:
+              `画像サイズが変わりました（${before.width}×${before.height} → ${size.width}×${size.height}）。` +
+              'エリアの位置と動作はそのまま残しています。',
+          }))
+          return
+        }
+
+        // (5) 収まらない → 作り直してよいか確認し、動作は順番で引き継ぐ
+        const layout = suggestLayout(img.width, img.height)
+        const nextCount = LAYOUT_BY_KEY[layout]?.bounds.length ?? 0
+        const ok = await confirmDialog({
+          title: '画像サイズが変わりました',
+          message:
+            `いまのエリア（${current.areas.length}個）は、新しい画像（${size.width}×${size.height}）に収まりません。\n` +
+            `エリアを ${nextCount} 個に作り直しますか？`,
+          detail:
+            '設定済みの動作はできる限り同じ順番（エリア1、2…）で引き継ぎます。' +
+            '引き継げない分は未設定（https://example.com）になります。',
+          confirmLabel: '作り直して差し替える',
+          cancelLabel: '差し替えをやめる',
+          variant: 'warning',
+        })
+        if (!ok) {
+          setFormError(
+            `画像の差し替えを中止しました（${before.width}×${before.height} のエリアが新しい画像に収まらないため）。` +
+              '同じサイズ、または同じ縦横比の画像を使ってください。',
+          )
+          return
+        }
+        setForm((f) => ({
+          ...f,
+          ...patch,
           layout,
-          areas: buildAreas(layout, size),
+          areas: carryOverActions(buildAreas(layout, size), f.areas),
         }))
         setSelectedAreaIndex(null)
       }
@@ -842,11 +959,12 @@ export default function RichMenusPage() {
   }
 
   const removeImage = () => {
+    // 画像サイズ（imageWidth/imageHeight）はあえて残す。
+    // 次に選び直した画像とサイズを比較して「エリアを残せるか」を判定するため。
+    // ここで null にすると、選び直しのたびに初回扱いとなりエリアが作り直されてしまう。
     setForm((f) => ({
       ...f,
       imageBase64: null,
-      imageWidth: null,
-      imageHeight: null,
       imageWarning: null,
     }))
     setSelectedAreaIndex(null)
@@ -953,6 +1071,30 @@ export default function RichMenusPage() {
     if (!form.imageBase64) return setFormError('画像をアップロードしてください')
     const areaError = validateAreas(form.areas)
     if (areaError) return setFormError(areaError)
+
+    // 仮置きURL（example.com）が残ったまま公開されると、そのボタンを押した友だちが
+    // example.com に飛ぶ。2026-11-23 に起きた事故そのものなので、必ず確認を挟む。
+    const placeholderIndexes = findPlaceholderUriIndexes(form.areas)
+    if (placeholderIndexes.length > 0) {
+      const list = placeholderIndexes.map((i) => `エリア${i + 1}`).join('、')
+      const ok = await confirmDialog({
+        title: 'リンク先が未設定のエリアがあります',
+        message:
+          `${list} のリンク先が https://example.com（仮置き）のままです。\n` +
+          'このまま公開すると、そのボタンを押した友だちは example.com に飛びます。',
+        detail:
+          'リンク先を設定してから保存することをおすすめします。' +
+          '「このまま保存」を選ぶと、未設定のまま公開されます。',
+        confirmLabel: 'このまま保存',
+        cancelLabel: '設定に戻る',
+        variant: 'warning',
+      })
+      if (!ok) {
+        setFormError(`${list} のリンク先を設定してから保存してください`)
+        setSelectedAreaIndex(placeholderIndexes[0])
+        return
+      }
+    }
 
     setSaving(true)
     setFormError('')
@@ -1080,6 +1222,13 @@ export default function RichMenusPage() {
     form.imageWidth && form.imageHeight
       ? { width: form.imageWidth, height: form.imageHeight }
       : SIZE_LARGE
+
+  // 編集画面の下部に出す「未設定エリア」の注意表示用。
+  const unsetAreaIndexes = useMemo(() => findUnsetAreaIndexes(form.areas), [form.areas])
+  const placeholderAreaIndexes = useMemo(
+    () => findPlaceholderUriIndexes(form.areas),
+    [form.areas],
+  )
 
   // メニューを「使用中」「アーカイブ」に動的に分類する。
   // 使用中 = デフォルトメニュー OR aliasから参照されているメニュー。
@@ -1344,7 +1493,9 @@ export default function RichMenusPage() {
           {!form.imageBase64 ? (
             <div className="space-y-3">
               <p className="text-xs text-gray-500">
-                まずメニュー画像をアップロードしてください。画像のサイズに合わせて自動でレイアウトを提案します。
+                {form.imageWidth && form.imageHeight
+                  ? '差し替える画像をアップロードしてください。同じサイズなら、いま設定しているエリアと動作はそのまま残ります。'
+                  : 'まずメニュー画像をアップロードしてください。最初の1枚だけ、サイズに合わせてレイアウトを提案します。'}
               </p>
               <DropZone onFile={handleImageFile} />
               {formError && <p className="text-xs text-red-600">{formError}</p>}
@@ -1366,14 +1517,24 @@ export default function RichMenusPage() {
                     ⚠ {form.imageWarning}
                   </p>
                 )}
+                {unsetAreaIndexes.length > 0 && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed">
+                    ⚠ まだ動作が設定されていないエリア: {unsetAreaIndexes.map((i) => `エリア${i + 1}`).join('、')}
+                    {placeholderAreaIndexes.length > 0 && (
+                      <span className="block text-amber-700">
+                        このまま保存すると、仮置きの https://example.com が開きます。
+                      </span>
+                    )}
+                  </p>
+                )}
                 <p className="text-[11px] text-gray-400">
-                  画像のエリアをクリックすると右側でアクションを編集できます。
+                  画像のエリアをクリックすると右側でアクションを編集できます。画像を差し替えても、エリアと動作はそのまま残ります。
                 </p>
                 <button
                   onClick={removeImage}
                   className="text-xs text-gray-500 hover:text-red-500 transition-colors"
                 >
-                  画像を選び直す
+                  画像を削除して選び直す（エリア設定は残ります）
                 </button>
               </div>
 
@@ -1414,7 +1575,7 @@ export default function RichMenusPage() {
                   <select
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
                     value={form.layout}
-                    onChange={(e) => updateLayout(e.target.value)}
+                    onChange={(e) => void handleLayoutChange(e.target.value)}
                   >
                     {layoutGroups.map((g) => (
                       <optgroup key={g.group} label={g.label}>
