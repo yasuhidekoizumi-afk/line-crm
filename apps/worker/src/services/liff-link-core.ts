@@ -52,9 +52,17 @@ export async function linkShopifyAndReward(
   // 他の友だちが既にこのShopify顧客と紐付いていないかチェック
   const existing = await getLoyaltyPointByShopifyCustomerId(env.DB, shopifyCustomerId);
   if (existing && existing.friend_id !== friend.id) {
-    // sp_ プレフィックスは Shopify webhook が先行で作成したプレースホルダー友だち。
-    // 実 LINE 連携時は当該データを本 friend に合流させる。
-    if (existing.friend_id.startsWith('sp_')) {
+    // Pay Forward は UUID の friend_id と shopify:<customerId> を使う。
+    // ID のプレフィックスだけでは未連携の顧客を別 LINE と誤判定する。
+    const existingFriend = await env.DB
+      .prepare('SELECT line_user_id FROM friends WHERE id = ?')
+      .bind(existing.friend_id)
+      .first<{ line_user_id: string }>();
+    const isShopifyPlaceholder =
+      existingFriend?.line_user_id === `shopify:${shopifyCustomerId}` ||
+      (existing.friend_id.startsWith('sp_') &&
+        !!existingFriend && !/^U[0-9a-f]{32}$/i.test(existingFriend.line_user_id));
+    if (isShopifyPlaceholder) {
       const spFriendId = existing.friend_id;
       const realLoyalty = await getLoyaltyPoint(env.DB, friend.id);
 

@@ -50,6 +50,9 @@ jobs:
       - name: Notification text required regression tests
         run: node --test apps/worker/tests/broadcast-notification-required.test.mjs
 
+      - name: LINE linkage placeholder regression tests
+        run: node --experimental-strip-types --test apps/worker/tests/line-link-placeholder.test.mjs
+
       - name: Worker build
         run: pnpm --filter worker build
         env:
