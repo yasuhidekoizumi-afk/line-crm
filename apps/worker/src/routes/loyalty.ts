@@ -1055,8 +1055,10 @@ loyalty.get('/api/loyalty/shopify/:shopifyCustomerId', async (c) => {
     return c.json({
       success: true,
       data: {
-        linked: true,
-        friend_id: point.friend_id,
+        // ポイント台帳が存在しても、Shopify専用の仮顧客はLINE未連携。
+        // 旧マイページは friend_id も連携判定に使うため未連携時は返さない。
+        linked: benefits.line_linked,
+        friend_id: benefits.line_linked ? point.friend_id : null,
         balance: point.balance,
         paid_balance: 0,
         bonus_balance: point.balance,
@@ -1250,7 +1252,8 @@ loyalty.post('/api/loyalty/shopify/:shopifyCustomerId/profile-birthday', async (
     //    そのため保存より前にチェックし、未連携なら何も保存せず code:'not_linked' を返す
     //    （フロントはこれを見てLINE連携へ誘導。連携後に登録すれば100ptを受け取れる）。
     const point = await getLoyaltyPointByShopifyCustomerId(c.env.DB, shopifyCustomerId);
-    if (!point) {
+    const benefits = point ? await getLoyaltyBenefitStatus(c.env.DB, point.friend_id) : EMPTY_BENEFIT_STATUS;
+    if (!point || !benefits.line_linked) {
       return c.json(
         { success: false, code: 'not_linked', error: '先にLINE連携が必要です。LINE連携してから誕生日を登録すると100ptを受け取れます。' },
         400,
